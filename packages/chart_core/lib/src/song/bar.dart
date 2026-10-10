@@ -9,6 +9,7 @@
 //          equality compares every part including the chord list in order.
 // KEYWORDS: bar, measure, barline, repeat, volta, ending, segno, coda, staff-text, anchor-address
 import '../chord.dart';
+import 'note.dart';
 import 'time_signature.dart';
 
 /// How a bar is bounded on one side.
@@ -144,6 +145,8 @@ class Bar {
     this.noChord = false,
     this.marks = const <BarMark>{},
     this.staffText = const <String>[],
+    this.melody = const <BeatNote>[],
+    this.percussion = const <PercussionHit>[],
   });
 
   /// The meter in force for this bar.
@@ -151,6 +154,18 @@ class Bar {
 
   /// Chord placements, ordered by beat and then by step. Empty means the previous chord sustains.
   final List<BeatChord> chords;
+
+  /// Pitched notes on the melodic staff, at the same (beat, step) addresses as the chords.
+  ///
+  /// Empty when the song has no melodic staff, which is every imported chart. The two lists are
+  /// independent on purpose: owner decision D16 puts the pitched staff and the chord line in the
+  /// same document simultaneously, so a bar carries both rather than one replacing the other.
+  final List<BeatNote> melody;
+
+  /// Percussion hits on the drum staff, at the same addresses.
+  ///
+  /// Empty when the song has no drum part. A hit's instrument is a drum-map key, never transposed.
+  final List<PercussionHit> percussion;
 
   /// The barline drawn at the left edge.
   final Barline openingBarline;
@@ -202,12 +217,24 @@ class Bar {
         other.noChord != noChord ||
         other.staffText.length != staffText.length ||
         other.chords.length != chords.length ||
+        other.melody.length != melody.length ||
+        other.percussion.length != percussion.length ||
         !other.marks.containsAll(marks) ||
         !marks.containsAll(other.marks)) {
       return false;
     }
     for (int index = 0; index < chords.length; index++) {
       if (other.chords[index] != chords[index]) {
+        return false;
+      }
+    }
+    for (int index = 0; index < melody.length; index++) {
+      if (other.melody[index] != melody[index]) {
+        return false;
+      }
+    }
+    for (int index = 0; index < percussion.length; index++) {
+      if (other.percussion[index] != percussion[index]) {
         return false;
       }
     }
@@ -223,6 +250,8 @@ class Bar {
   int get hashCode => Object.hash(
     timeSignature,
     Object.hashAll(chords),
+    Object.hashAll(melody),
+    Object.hashAll(percussion),
     openingBarline,
     closingBarline,
     volta,
@@ -235,7 +264,9 @@ class Bar {
 
   @override
   String toString() =>
-      'Bar($openingBarline, ${chords.length} chord(s), $closingBarline'
+      'Bar($openingBarline, ${chords.length} chord(s)'
+      '${melody.isEmpty ? '' : ', ${melody.length} note(s)'}'
+      '${percussion.isEmpty ? '' : ', ${percussion.length} hit(s)'}, $closingBarline'
       '${volta == null ? '' : ', $volta'}'
       '${repeatPrevious == RepeatPrevious.none ? '' : ', $repeatPrevious'}'
       '${slashRepeat ? ', slash' : ''}${noChord ? ', N.C.' : ''})';

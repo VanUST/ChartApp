@@ -15,6 +15,7 @@
 import '../key.dart';
 import 'bar.dart';
 import 'section.dart';
+import 'staff.dart';
 
 /// A chart: the unit a musician saves, shares and transposes.
 class Song {
@@ -27,6 +28,7 @@ class Song {
     this.key = Key.cMajor,
     this.tempo = 0,
     this.sections = const <Section>[],
+    this.staffSet = StaffSet.chordsOnly,
   });
 
   /// The document identity used by the event log, or an empty string before the store assigns
@@ -56,6 +58,13 @@ class Song {
 
   /// The sections of the song, in written order.
   final List<Section> sections;
+
+  /// The staves this song carries beyond the implicit chord line.
+  ///
+  /// Chords only for every imported chart and for any song that never opened the melody editor, so
+  /// this defaults to [StaffSet.chordsOnly] rather than to null: "no melody staff" is an ordinary
+  /// state of a song, not a missing value.
+  final StaffSet staffSet;
 
   /// Every bar in reading order: sections in order, and each section's bars in order.
   ///
@@ -114,7 +123,8 @@ class Song {
         other.composer != composer ||
         other.style != style ||
         other.key != key ||
-        other.tempo != tempo) {
+        other.tempo != tempo ||
+        other.staffSet != staffSet) {
       return false;
     }
     if (other.sections.length != sections.length) {
@@ -136,11 +146,12 @@ class Song {
     style,
     key,
     tempo,
+    staffSet,
     Object.hashAll(sections),
   );
 
   @override
   String toString() =>
       'Song(${title.isEmpty ? 'untitled' : title}, $key, ${sections.length} section(s), '
-      '$writtenBarCount bar(s))';
+      '$writtenBarCount bar(s), $staffSet)';
 }
