@@ -20,7 +20,9 @@
 //
 // The song model stores the WRITTEN form only. The order a tune is played in — repeats,
 // alternative endings, navigation — is a pure function over this model, so there is no second
-// copy of the music to disagree with the first.
+// copy of the music to disagree with the first. `derivePlayOrder` is that function for repeats,
+// alternative endings and repeat-previous bars; it does not interpret navigation words, which
+// stay verbatim staff text, and it reports what it decided rather than leaving a reader to guess.
 //
 // What must never live here: flutter, storage_drift, ink_native or any platform channel. The
 // package's value rests on `dart test` running every one of its tests on a machine with no
@@ -59,6 +61,7 @@ export 'src/pitch.dart';
 export 'src/song/bar.dart';
 export 'src/song/note.dart';
 export 'src/song/note_value.dart';
+export 'src/song/play_order.dart';
 export 'src/song/section.dart';
 export 'src/song/song.dart';
 export 'src/song/staff.dart';
