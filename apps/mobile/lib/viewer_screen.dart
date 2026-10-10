@@ -63,13 +63,15 @@
 // that did not.
 //
 // WHICH TRANSPOSITION THIS IS. Owner decision D14 gives transposition two meanings, and this screen
-// implements the EDITOR meaning: the chart is shown in another key, its key badge changes, and every
-// chord is re-spelled, while the loaded library keeps the written form and a per-song interval
-// remembers how far the shown chart has been moved. The SCENE meaning — an offset on one setlist
-// position that leaves the song's written key alone — is NOT implemented here; it needs a setlist,
-// and the model already carries the interval for it as `SetlistItem.transposeSem`, which a scene
-// view would apply per chord while keeping `Song.key` as written. See
-// `packages/chart_core/lib/src/transposition.dart` for the same note beside the operation itself.
+// implements BOTH. The EDITOR meaning is the one the key grid edits on the chart itself: the chart
+// is shown in another key, its key badge changes, every chord is re-spelled, and a per-song interval
+// remembers how far the shown chart has been moved. The SCENE meaning is an offset on one setlist
+// position: the screen has a programme (`SetlistSession`, seeded from the imported playlist by
+// `setlist_import.dart`), an entry's `transposeSem` is applied through `setlistSceneFor` while the
+// chart's own document keeps its written key, and the key badge edits THAT entry's interval when the
+// chart is reached from the programme. Which of the two is in force is decided by `_playingItemFor`:
+// an entry that names the chart on screen makes the scene offset the one that is shown, and the
+// editor interval remembered for that song is not applied at the same time.
 
 import 'dart:async';
 import 'dart:convert';
@@ -90,6 +92,8 @@ import 'ireal_library.dart';
 import 'ireal_source.dart';
 import 'key_grid.dart';
 import 'scene_bar.dart';
+import 'setlist_import.dart';
+import 'setlist_sheet.dart';
 import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
 import 'text_cue_sheet.dart';
@@ -187,6 +191,24 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// Null rather than a stored default so the default can follow the surface: a tablet opens in
   /// FIT and a phone in PAGES, and once the musician picks a mode it stays picked.
   PageMode? _chosenPageMode;
+
+  /// The programme being played, or null before a library is loaded.
+  ///
+  /// It is a session rather than a [Setlist] because the programme is an op-log document in its own
+  /// right: the sheet edits it through its events and undoes them with its own history, exactly as
+  /// the chart's [EditSession] does for a chart. It is built from the loaded library by
+  /// `importedSetlist`, so the owner's playlist arrives as a setlist rather than as a list of names,
+  /// and it is replaced — not edited across — when a different library is loaded, because its
+  /// entries name the loaded songs by id.
+  SetlistSession? _setlist;
+
+  /// The programme entry currently being played, or null while the chart is read on its own.
+  ///
+  /// This is what makes the scene meaning of D14 apply: while an entry names the chart on screen, the
+  /// interval shown is that entry's `transposeSem` and the scene bar reports the programme's
+  /// position. Selecting another song from the list leaves the programme, which is why a manual
+  /// selection clears it.
+  int? _sceneIndex;
 
   /// The bar and cell the musician last touched, or null when nothing is selected.
   ///
@@ -497,6 +519,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             'canonical': stroke.toJson(),
           },
       ],
+      // --- THE PROGRAMME (the setlist being played) -------------------------------------------
+      // Reported beside the ink for the same reason: a headless driver cannot reach the session, and
+      // "the chart is shown two semitones up while its document still says the written key" is a
+      // claim only the two values together can settle. Null before a library is loaded.
+      'programme': _setlistState(),
     };
   }
 
@@ -539,10 +566,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
         ? _selectedSong
         : 0;
-    final Song displayed = _displayedSong(
-      library.songs[index],
-      _semitonesBySong[library.songs[index].index] ?? 0,
-    );
+    final Song displayed = _shownSong(library.songs[index]);
     final PageMode mode = _lastPageMode ?? PageMode.pages;
     // The cues belong in the calibration layout for the same reason they belong in the drawn one:
     // the rows they reserve change where the bars sit, and a geometry probe that measured a
@@ -638,6 +662,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         _library = library;
         _selectedSong = 0;
         _semitonesBySong.clear();
+        // The imported playlist BECOMES the programme: an iReal export is a list of songs under a
+        // playlist name, which is exactly what a setlist is. Seeding it here rather than on first
+        // use means the scene path always has a programme to resolve against, and replacing any old
+        // one wholesale is what keeps entries from naming charts the new library does not hold —
+        // they are keyed by the id the import gave each song.
+        _setlist = SetlistSession(setlist: importedSetlist(library));
+        _sceneIndex = null;
         // An index means a different song in a new library, so every session in the old one names
         // music that is no longer loaded. Dropping them is what keeps an edit from being applied to
         // whatever happens to sit at that index now. The ink layers go with them for the same
@@ -651,7 +682,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       });
       debugPrint(
         'viewer.load.ok songs=${library.songs.length} '
-        'playlist_chars=${library.playlistName.length}',
+        'playlist_chars=${library.playlistName.length} '
+        'setlist_entries=${_setlist?.items.length ?? 0}',
       );
     } catch (error) {
       if (!mounted) {
@@ -760,6 +792,249 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         : transposeSong(song, semitones, toKey: _keyFor(song.key, semitones));
   }
 
+  // PURPOSE: Return the programme entry being played for one song, or null when the song is being
+  //          read on its own. This is the one place that decides whether the SCENE meaning of D14 is
+  //          in force, so the display, the song list and the scene bar cannot disagree about it.
+  // INPUTS: entry — the loaded song whose pane is being drawn.
+  // OUTPUTS: The entry at [_sceneIndex] when it names [entry]'s chart; null otherwise. The document
+  //          id must match, because an index alone would let a library replacement point the scene
+  //          at whatever chart now sits at that position.
+  // KEYWORDS: scene-entry, document-id-match, single-decision, d14
+  SetlistItem? _playingItemFor(IRealSong entry) {
+    final SetlistSession? setlist = _setlist;
+    final int? index = _sceneIndex;
+    if (setlist == null || index == null) {
+      return null;
+    }
+    final SetlistItem? item = setlist.itemAt(index);
+    return item != null && item.documentId == entry.song.id ? item : null;
+  }
+
+  // PURPOSE: Report how far the chart on screen is shown from its written key, taking the scene
+  //          interval of the programme entry when the song was reached from the programme and the
+  //          editor interval remembered for the song otherwise.
+  // INPUTS: entry — the loaded song.
+  // OUTPUTS: The signed interval in semitones. In the programme it is the entry's stored interval
+  //          exactly, so a `+2` entry shows a chart two semitones up; otherwise it is the interval
+  //          the key grid stored for that song, or zero.
+  // KEYWORDS: shown-interval, scene-vs-editor, d14, single-source
+  int _shownSemitones(IRealSong entry) {
+    final SetlistItem? playing = _playingItemFor(entry);
+    if (playing != null) {
+      return playing.transposeSem;
+    }
+    return _semitonesBySong[entry.index] ?? 0;
+  }
+
+  // PURPOSE: Produce the chart to draw for one song, in whichever meaning of D14 is in force.
+  // INPUTS: entry — the loaded song.
+  // OUTPUTS: The displayed song. When the song is being played from the programme it is
+  //          `setlistSceneFor`'s result: the session's document moved by the entry's interval,
+  //          labelled with a practical key, and the document itself untouched. Otherwise it is the
+  //          edited chart moved by the editor interval, as before.
+  // KEYWORDS: shown-song, scene-resolution, editor-transposition, document-preserved
+  Song _shownSong(IRealSong entry) {
+    final SetlistItem? playing = _playingItemFor(entry);
+    if (playing != null) {
+      return setlistSceneFor(
+        entry: playing,
+        written: _sessionFor(entry).song,
+      ).shown;
+    }
+    return _displayedSong(entry, _semitonesBySong[entry.index] ?? 0);
+  }
+
+  // PURPOSE: Report the key the chart on screen is labelled with, so the song list can state the
+  //          move without building the whole transposed chart for every row.
+  // INPUTS: entry — the loaded song.
+  // OUTPUTS: The shown key. In the programme it is the scene resolution's practical spelling;
+  //          otherwise the editor interval's target from the twelve-key grid.
+  // KEYWORDS: shown-key, scene-vs-editor, cheap-read, list-subtitle
+  Key _shownKeyFor(IRealSong entry) {
+    final SetlistItem? playing = _playingItemFor(entry);
+    if (playing != null) {
+      return setlistSceneFor(
+        entry: playing,
+        written: _sessionFor(entry).song,
+      ).shownKey;
+    }
+    return _keyFor(
+      _sessionFor(entry).song.key,
+      _semitonesBySong[entry.index] ?? 0,
+    );
+  }
+
+  // PURPOSE: Describe the programme and the chart it is playing for the verification handoff, so a
+  //          browser-driving tool that cannot reach a Dart object can still check what the scene
+  //          meaning did: which entry is playing, what interval it carries, the key the CHART
+  //          DOCUMENT holds and the key the page is SHOWN in — the pair that makes "the chart keeps
+  //          its written key while the stage reads two semitones up" a measurement rather than a
+  //          claim.
+  // INPUTS: None; reads the programme, the selected song and the scene index.
+  // OUTPUTS: A map, or null before a library is loaded. `writtenKey` is read from the chart's own
+  //          session document and `shownKey` from the scene resolution over that document, so the
+  //          two are the same value only when the entry is not transposed. `log` is the setlist
+  //          event types in order, which is what makes an undo visible as an appended inverse rather
+  //          than as a removed row.
+  // KEYWORDS: verification-handoff, programme-state, written-vs-shown, scene-index, setlist-log
+  Map<String, Object?>? _setlistState() {
+    final SetlistSession? setlist = _setlist;
+    final IRealLibrary? library = _library;
+    if (setlist == null || library == null || library.songs.isEmpty) {
+      return null;
+    }
+    final int songIndex =
+        _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    final IRealSong entry = library.songs[songIndex];
+    final SetlistItem? playing = _playingItemFor(entry);
+    final Song written = _sessionFor(entry).song;
+    return <String, Object?>{
+      'id': setlist.setlist.id,
+      'title': setlist.setlist.title,
+      'depth_undo': setlist.undoDepth,
+      'depth_redo': setlist.redoDepth,
+      'seq': setlist.seq,
+      'log': <Object?>[
+        for (final SetlistEvent event in setlist.log) event.type,
+      ],
+      'scene': _sceneIndex,
+      'items': <Object?>[
+        for (final SetlistItem item in setlist.items)
+          <String, Object?>{
+            'documentId': item.documentId,
+            'transposeSem': item.transposeSem,
+            'notes': item.notes,
+          },
+      ],
+      'playingDocumentId': playing?.documentId,
+      'writtenSongId': written.id,
+      'writtenKey': written.key.toString(),
+      'shownSemitones': playing?.transposeSem,
+      'shownKey': playing == null
+          ? written.key.toString()
+          : setlistSceneFor(
+              entry: playing,
+              written: written,
+            ).shownKey.toString(),
+    };
+  }
+
+  // PURPOSE: Leave the programme and start playing one of its entries, which is the action that
+  //          gives the scene meaning of D14 a chart to apply itself to.
+  // INPUTS: index — the entry to play.
+  // OUTPUTS: Nothing. The chart the entry names becomes the selected song, the entry becomes the
+  //          playing one, the hit selection is dropped (a section id from another song names
+  //          different music) and the page mode is set to PAGES, which is D13's scene default. An
+  //          entry whose chart is not in the loaded library changes nothing and says so: an index
+  //          into the programme is not an index into the library, and pretending otherwise would
+  //          select whatever chart happens to sit at that position.
+  // KEYWORDS: play-entry, scene-mode, selection-reset, page-mode-default, library-lookup
+  void _playSetlistEntry(int index) {
+    final IRealLibrary? library = _library;
+    final SetlistSession? setlist = _setlist;
+    if (library == null || setlist == null) {
+      return;
+    }
+    final SetlistItem? item = setlist.itemAt(index);
+    if (item == null) {
+      return;
+    }
+    final int songIndex = library.songs.indexWhere(
+      (IRealSong entry) => entry.song.id == item.documentId,
+    );
+    if (songIndex < 0) {
+      debugPrint(
+        'viewer.setlist.play.skipped index=$index document="${item.documentId}" '
+        'reason=chart-not-loaded',
+      );
+      return;
+    }
+    setState(() {
+      _sceneIndex = index;
+      _selectedSong = songIndex;
+      _selection = null;
+      _chosenPageMode = PageMode.pages;
+    });
+    debugPrint(
+      'viewer.setlist.play index=$index document="${item.documentId}" '
+      'song=$songIndex transpose=${item.transposeSem} '
+      'entries=${setlist.items.length}',
+    );
+  }
+
+  // PURPOSE: Open the programme sheet, which is where the setlist is named and its entries are
+  //          ordered and edited.
+  // INPUTS: context — where to open the sheet.
+  // OUTPUTS: A future that completes when the sheet is dismissed. Does nothing before a library is
+  //          loaded, because there is no programme then. Every edit rebuilds this screen, so the
+  //          chart behind the sheet reflects a transposition the moment it is applied.
+  // KEYWORDS: programme-sheet, setlist-edit, no-library-guard, rebuild-on-apply
+  Future<void> _openSetlist(BuildContext context) async {
+    final IRealLibrary? library = _library;
+    final SetlistSession? setlist = _setlist;
+    if (library == null || setlist == null) {
+      debugPrint('viewer.setlist.open.skipped reason=no-library');
+      return;
+    }
+    debugPrint(
+      'viewer.setlist.open entries=${setlist.items.length} '
+      'title_chars=${setlist.setlist.title.length}',
+    );
+    await showSetlistSheet(
+      context,
+      session: setlist,
+      songs: library.songs,
+      titleFor: _titleForDocumentId,
+      onPlay: _playSetlistEntry,
+      onChanged: () => setState(() {}),
+    );
+  }
+
+  // PURPOSE: Give the key badge a second meaning in the programme: tapping it while a setlist entry
+  //          is playing edits THAT entry's interval through the setlist log, which is D14's scene
+  //          transposition at D9's two-tap budget.
+  // INPUTS: entry — the loaded song on screen, whose session holds the WRITTEN chart the grid must
+  //         spell from.
+  // OUTPUTS: A future that completes when the grid closes. A picked key is stored on the entry as
+  //          its interval, so the chart shows the new key while the document's own key is untouched;
+  //          a dismissed grid, an unavailable target or a closed screen changes nothing. The grid is
+  //          built from the chart's written key, not from the shown one, so the spelling is chosen
+  //          the same way the editor path chooses it.
+  // KEYWORDS: scene-transposition, key-grid, setlist-entry-edit, two-taps, written-key-source
+  Future<void> _chooseSceneKey(IRealSong entry) async {
+    final SetlistSession? setlist = _setlist;
+    final int? index = _sceneIndex;
+    if (setlist == null || index == null) {
+      return;
+    }
+    final SetlistItem? item = setlist.itemAt(index);
+    if (item == null || item.documentId != entry.song.id) {
+      return;
+    }
+    final Song written = _sessionFor(entry).song;
+    final Key shown = setlistSceneFor(entry: item, written: written).shownKey;
+    final TranspositionTarget? picked = await showKeyGrid(
+      context,
+      writtenKey: written.key,
+      currentPitchClass: shown.tonicPitchClass,
+    );
+    if (!mounted || picked == null || !picked.available) {
+      debugPrint(
+        'viewer.setlist.scene.transpose.cancelled index=$index '
+        'picked=${picked == null ? 'none' : picked.key}',
+      );
+      return;
+    }
+    setState(() => setlist.updateItem(index, transposeSem: picked.semitones));
+    debugPrint(
+      'viewer.setlist.scene.transpose index=$index '
+      'written=${written.key} shown=${picked.key} '
+      'semitones=${picked.semitones}',
+    );
+  }
+
   // PURPOSE: Give the title to SHOW for one loaded song, which is the edited one once the song has
   //          been opened — a rename has to reach every place the name is read, or one screen says
   //          the new name and the list beside it says the old one.
@@ -772,6 +1047,26 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   String _titleFor(IRealSong entry) {
     final String title = _sessions[entry.index]?.song.title ?? entry.song.title;
     return title.isEmpty ? 'Untitled' : title;
+  }
+
+  // PURPOSE: Name the chart a programme entry refers to, by the id the entry stores, so the
+  //          programme sheet shows the name the editor would show — including a rename — rather
+  //          than the imported one.
+  // INPUTS: documentId — the entry's `SetlistItem.documentId`.
+  // OUTPUTS: The loaded (or edited) title, or `(missing chart)` when no loaded song carries that id.
+  //          The missing case is stated rather than blank: an entry naming a chart that is not in
+  //          the library is a real state, and an empty row would look like a chart with no name.
+  // KEYWORDS: title-resolution, document-id, rename-aware, missing-chart, programme-sheet
+  String _titleForDocumentId(String documentId) {
+    final IRealLibrary? library = _library;
+    if (library != null) {
+      for (final IRealSong entry in library.songs) {
+        if (entry.song.id == documentId) {
+          return _titleFor(entry);
+        }
+      }
+    }
+    return '(missing chart)';
   }
 
   @override
@@ -874,6 +1169,26 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             onPressed: session == null || _selection == null
                 ? null
                 : () => _openTextCueSheet(context, session),
+          ),
+          // --- THE PROGRAMME (setlist, owner decision D14's scene meaning) -----------------------
+          // The programme is the setlist document the imported playlist becomes. It lives in the app
+          // bar beside the other document-level actions because it is a document, not a property of
+          // the bar under the cursor; the sheet it opens holds the running order. Its undo and redo
+          // live INSIDE the sheet rather than here, because the programme has its own log and its own
+          // history, and a second pair of arrows in this bar would make a musician guess which
+          // document they reverse. This button, `_openSetlist`, `_playSetlistEntry`,
+          // `_chooseSceneKey`, the `_playingItemFor` / `_shownSong` / `_shownSemitones` helpers and
+          // the scene branch of the scene bar in `_buildSongPane` are the whole of this feature's
+          // footprint in this file; the sheet itself is `setlist_sheet.dart` and the import bridge is
+          // `setlist_import.dart`.
+          IconButton(
+            key: const ValueKey<String>('viewer-setlist'),
+            icon: const Icon(Icons.queue_music),
+            tooltip:
+                'Programme (setlist): order, transpose and play the charts',
+            onPressed: _library == null
+                ? null
+                : () => unawaited(_openSetlist(context)),
           ),
           // The chart document itself can be named and moved, on every platform: where a path
           // exists the field holds it, and in a browser it holds the name offered to the browser's
@@ -993,13 +1308,22 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          restarted at 1 would produce two events claiming the same position.
   // KEYWORDS: open-chart, adopt-snapshot, restored-log, seq-continuation, state-reset
   void _adoptOpenedSong(OpenedChart opened) {
+    // One library value built once, so the session and the programme cannot be seeded from two
+    // different lists that happen to have identical contents today.
+    final IRealLibrary library = IRealLibrary(
+      playlistName: '',
+      songs: <IRealSong>[IRealSong(index: 0, song: opened.document.song)],
+    );
     setState(() {
-      _library = IRealLibrary(
-        playlistName: '',
-        songs: <IRealSong>[IRealSong(index: 0, song: opened.document.song)],
-      );
+      _library = library;
       _selectedSong = 0;
       _semitonesBySong.clear();
+      // A single opened chart is a programme of one, built the same way a loaded playlist is, so the
+      // scene path has no special case: its entry names the opened document by the id the file gave
+      // it. The previous programme is replaced rather than kept, because its entries named charts
+      // that are no longer loaded.
+      _setlist = SetlistSession(setlist: importedSetlist(library));
+      _sceneIndex = null;
       _sessions
         ..clear()
         ..[0] = EditSession(
@@ -1154,10 +1478,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       itemCount: library.songs.length,
       itemBuilder: (BuildContext context, int index) {
         final IRealSong entry = library.songs[index];
-        final int semitones = _semitonesBySong[entry.index] ?? 0;
+        final int semitones = _shownSemitones(entry);
         final String keyLabel = semitones == 0
             ? '${entry.song.key}'
-            : '${entry.song.key} → ${_keyFor(entry.song.key, semitones)}';
+            : '${entry.song.key} → ${_shownKeyFor(entry)}';
         final Song summarySong = _sessions[entry.index]?.song ?? entry.song;
         final String subtitle =
             '${summarySong.writtenBarCount} bar(s) · $keyLabel'
@@ -1177,6 +1501,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           ),
           onTap: () => setState(() {
             _selectedSong = index;
+            // Choosing a song by hand LEAVES the programme: the scene offset belongs to a position
+            // in the running order, and reading a chart on its own is not playing that position. The
+            // editor interval remembered for the song is what applies again.
+            _sceneIndex = null;
             // A selection belongs to the song it was made in; another song's bar at the same
             // address is a different bar.
             _selection = null;
@@ -1203,8 +1531,18 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     int songIndex,
   ) {
     final IRealSong entry = library.songs[songIndex];
-    final int semitones = _semitonesBySong[entry.index] ?? 0;
-    final Song displayed = _displayedSong(entry, semitones);
+    final SetlistItem? playing = _playingItemFor(entry);
+    final int semitones = _shownSemitones(entry);
+    final Song displayed = _shownSong(entry);
+    // In the programme the POS field reports the running order, not the library order: a setlist
+    // that dropped two tunes and moved a third makes those two numbers different, and the position a
+    // performer needs is the one in the programme they are playing from.
+    final int position = playing == null
+        ? songIndex + 1
+        : (_sceneIndex ?? 0) + 1;
+    final int songCount = playing == null
+        ? library.songs.length
+        : (_setlist?.items.length ?? library.songs.length);
     final EditSession session = _sessionFor(entry);
     // The strokes come from the document the SESSION holds, which is the written chart, and they are
     // placed by address against the page on screen. A transposition therefore moves the music and
@@ -1281,12 +1619,19 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               ),
             ),
             SceneBar(
-              position: songIndex + 1,
-              songCount: library.songs.length,
+              position: position,
+              songCount: songCount,
               song: displayed,
               semitones: semitones,
               pageMode: mode,
-              onOpenKeyGrid: () => unawaited(_chooseKey(entry)),
+              // The key badge keeps its two-tap meaning in BOTH senses of D14: on a chart read on
+              // its own it edits the editor interval, and while a programme entry is playing it
+              // edits that entry's scene interval through the setlist log. Which one is in force is
+              // the same `_playingItemFor` answer the display used, so the badge and the page can
+              // never disagree about which document is being changed.
+              onOpenKeyGrid: () => unawaited(
+                playing == null ? _chooseKey(entry) : _chooseSceneKey(entry),
+              ),
               onPageModeChanged: (PageMode picked) =>
                   setState(() => _chosenPageMode = picked),
               // The tempo and the style are edited where they are shown. The sheet is one surface
@@ -1625,7 +1970,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ? _selectedSong
         : 0;
     final IRealSong entry = library.songs[index];
-    final int semitones = _semitonesBySong[entry.index] ?? 0;
+    // The palette edits the WRITTEN chart — `applyChordToCell` writes the picked chord unchanged —
+    // and only its preview is moved, so it is handed the interval and the key the page is SHOWN in.
+    // In the programme that is the entry's scene interval, which is why a chord picked while playing
+    // an entry is written in the chart's own key and previewed in the key the stage reads.
+    final int semitones = _shownSemitones(entry);
+    final Key shownKey = _shownSong(entry).key;
     unawaited(
       showChordPalette(
         context,
@@ -1633,7 +1983,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         sectionId: hit.sectionId,
         barIndex: hit.barIndex,
         beat: hit.beat!,
-        shownKey: _displayedSong(entry, semitones).key,
+        shownKey: shownKey,
         semitoneShift: semitones,
         // The page is drawn from the session, so a rebuild after each applied chord is the whole of
         // what "show the edit" means here. The selection is deliberately NOT recomputed: the

@@ -44,6 +44,7 @@ part 'document_event.dart';
 part 'document_reducer.dart';
 part 'document_state.dart';
 part '../editing/edit_session.dart';
+part '../editing/setlist_session.dart';
 part 'event_codec.dart';
 part 'event_json.dart';
 part 'ink.dart';

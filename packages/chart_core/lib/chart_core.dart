@@ -61,6 +61,7 @@ export 'src/layout/staff_text_display.dart';
 export 'src/layout/text_metrics.dart';
 export 'src/oplog/oplog.dart';
 export 'src/pitch.dart';
+export 'src/setlist_scene.dart';
 export 'src/song/bar.dart';
 export 'src/song/note.dart';
 export 'src/song/note_value.dart';

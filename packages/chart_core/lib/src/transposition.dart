@@ -13,12 +13,11 @@
 // WHICH TRANSPOSITION THIS IS. Owner decision D14 gives transposition two meanings: in the EDITOR
 // it is the song's own key, and in the SCENE it is an offset applied to one position in a setlist.
 // This file implements the EDITOR meaning (the chart's key changes and every chord is re-spelled),
-// which is what the viewer shows. The SCENE meaning is NOT implemented here: it needs a setlist
-// position to hang the interval on, which the model already carries as
-// `SetlistItem.transposeSem`, and it must leave the song's written key alone so the same document
-// on stage and in the editor disagree about nothing but the shown key. Whoever builds the scene
-// passes that entry's interval to `Transposer.transposeChord` per chord and keeps `Song.key` as
-// written; a chart-level `transposeSong` is the wrong unit for it.
+// which is what the viewer shows. The SCENE meaning lives in `setlist_scene.dart`: `setlistSceneFor`
+// takes a `SetlistItem`, applies its `transposeSem` through [transposeSong] with the practical key
+// for the target pitch class, and returns the shown chart while the written one is returned
+// unchanged — which is why a chart-level transposition here is the right unit after all, once a
+// caller owns the entry that carries the interval.
 //
 // THE MELODY GAP, carried over rather than invented here. Only the chord line moves. A written
 // pitched note cannot be transposed and returned exactly — spelling runs through the key signature,
