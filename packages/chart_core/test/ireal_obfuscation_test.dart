@@ -217,6 +217,40 @@ void main() {
         // residual check, and this is what rules that out.
         expect(decoded, contains('|'));
         expect(RegExp(r'[*{}\[\]]').hasMatch(decoded), isTrue);
+
+        // And the decoded body must tokenise without leftovers. This is the end-to-end claim: a
+        // permutation that produced plausible garbage would survive the residual check above only
+        // if the garbage happened to be valid notation, and the tokenizer is what rules that out.
+        final List<IRealToken> tokens = tokenizeIReal(decoded);
+        expect(tokens, isNotEmpty);
+        final List<UnknownToken> unknown = tokens
+            .whereType<UnknownToken>()
+            .toList();
+        expect(
+          unknown,
+          isEmpty,
+          reason: unknown
+              .map(
+                (UnknownToken t) =>
+                    '`${t.character}` at ${t.offset}, in context: '
+                    '...${decoded.substring(t.offset < 12 ? 0 : t.offset - 12, (t.offset + 12).clamp(0, decoded.length))}...',
+              )
+              .join('\n'),
+        );
+
+        // Every chord must also parse, so a symbol the model cannot hold is reported rather than
+        // quietly becoming an empty bar.
+        final List<String> unparsable = <String>[];
+        for (final IRealToken token in tokens) {
+          if (token is ChordToken && parseIRealChord(token.text) == null) {
+            unparsable.add(token.text);
+          }
+        }
+        expect(
+          unparsable,
+          isEmpty,
+          reason: 'chords the model cannot hold: $unparsable',
+        );
       },
       skip: fixture == null
           ? 'set IREAL_FIXTURE to an iReal .html export'
