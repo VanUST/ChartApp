@@ -1,0 +1,201 @@
+{
+  "name": "ChartApp",
+  "languages": [
+    {
+      "id": "dart",
+      "roots": [
+        "apps/mobile/lib",
+        "apps/mobile/test",
+        "apps/mobile/tool",
+        "packages/chart_core",
+        "packages/chart_ui",
+        "packages/ink_native/ink_native",
+        "packages/ink_native/ink_native_platform_interface",
+        "packages/storage_drift",
+        "packages/telemetry",
+        "tools/logview",
+        "tools/spike_harness"
+      ],
+      "extensions": [".dart"]
+    },
+    {
+      "id": "kotlin",
+      "roots": ["apps/mobile/android", "packages/ink_native/ink_native_android"],
+      "extensions": [".kt"]
+    },
+    {
+      "id": "swift",
+      "roots": ["apps/mobile/ios", "packages/ink_native/ink_native_ios"],
+      "extensions": [".swift"]
+    },
+    {
+      "id": "javascript",
+      "roots": ["tools/web_pen_spike"],
+      "extensions": [".mjs", ".html"]
+    },
+    {
+      "id": "markdown",
+      "roots": ["docs"],
+      "extensions": [".md"]
+    }
+  ],
+  "verification": [
+    {
+      "id": "verify",
+      "command": "dart run melos run verify",
+      "purpose": "The acceptance gate. Runs lint, format-check, test-dart and test-flutter in one invocation and exits non-zero if any of them does, so this is the single command whose exit code decides whether a change is acceptable.",
+      "path": "pubspec.yaml"
+    },
+    {
+      "id": "lint",
+      "command": "dart run melos run lint",
+      "purpose": "One root-level `dart analyze` over the shared pub workspace. Exits non-zero on any analyzer error or warning, which is what makes the severity assignments in analysis_options.yaml binding rather than advisory.",
+      "path": "analysis_options.yaml"
+    },
+    {
+      "id": "format-check",
+      "command": "dart run melos run format-check",
+      "purpose": "`dart format --output=none --set-exit-if-changed .` over the whole workspace. Reports unformatted Dart files and exits non-zero instead of rewriting them, so a check never silently edits the tree.",
+      "path": "pubspec.yaml"
+    },
+    {
+      "id": "test-dart",
+      "command": "dart run melos run test-dart",
+      "purpose": "`dart test` in every workspace package melos classifies as `flutter: false` that has a test/ directory. Runs without a Flutter widget binding, so a package that reaches for the Flutter SDK fails here.",
+      "path": "pubspec.yaml"
+    },
+    {
+      "id": "test-flutter",
+      "command": "dart run melos run test-flutter",
+      "purpose": "`flutter test` in every workspace package melos classifies as `flutter: true` that has a test/ directory. Runs at concurrency 1 because Flutter test suites share an engine shim and interleave badly in parallel.",
+      "path": "pubspec.yaml"
+    },
+    {
+      "id": "generate",
+      "command": "dart run melos run generate",
+      "purpose": "`dart run build_runner build` in every package depending on drift_dev. Rewrites the committed table accessors from the hand-written schema and exits non-zero if the generator itself fails.",
+      "path": "pubspec.yaml"
+    },
+    {
+      "id": "generated-code-current",
+      "command": "dart run melos run generate && git diff --exit-code",
+      "purpose": "CI's staleness check for the committed drift accessors: regenerate, then fail if the working tree changed. The `git diff --exit-code` half requires a git checkout and is run by the verify job of .github/workflows/ci.yml, not by a local audit.",
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "spike-s3",
+      "command": "cd tools/spike_harness && dart run bin/spike.dart s3",
+      "purpose": "Answers whether a twelve-key round-trip returns the original spelling. Exits 0 when every claim holds, 1 when a claim fails, 2 for a usage error or an unimplemented spike.",
+      "path": "tools/spike_harness/bin/spike.dart"
+    },
+    {
+      "id": "spike-s4",
+      "command": "cd tools/spike_harness && dart run bin/spike.dart s4",
+      "purpose": "Answers whether a page is laid out in under 16 ms, at p95 over 300 measured samples after 50 warm-up samples. Same exit-code contract as spike-s3.",
+      "path": "tools/spike_harness/bin/spike.dart"
+    },
+    {
+      "id": "spike-s5",
+      "command": "cd tools/spike_harness && dart run bin/spike.dart s5",
+      "purpose": "Answers whether storage cold-open is under 1000 ms at p95, and whether the snapshot tail really is the tail only. Same exit-code contract as spike-s3.",
+      "path": "tools/spike_harness/bin/spike.dart"
+    }
+  ],
+  "rules": [
+    {
+      "id": "public-api-documented",
+      "statement": "Every public member of every workspace package carries a doc comment. A missing one is reported at warning severity, so it fails the gate instead of scrolling past.",
+      "statedIn": "docs/sdd.md A11; analysis_options.yaml",
+      "enforcedBy": { "command": "lint" }
+    },
+    {
+      "id": "acceptance-gate-green",
+      "statement": "A change is acceptable only when the acceptance gate passes: analysis, formatting, and both the pure-Dart and the Flutter test suites.",
+      "statedIn": "docs/sdd.md §7; pubspec.yaml",
+      "enforcedBy": { "command": "verify" }
+    },
+    {
+      "id": "dart-format-clean",
+      "statement": "Every Dart file is `dart format` clean. The check reports rather than rewrites, so an unformatted file fails a change instead of being silently corrected.",
+      "statedIn": "pubspec.yaml; lefthook.yml",
+      "enforcedBy": { "command": "format-check" }
+    },
+    {
+      "id": "pure-dart-packages-do-not-need-flutter",
+      "statement": "The packages melos classifies as `flutter: false` must not reach for the Flutter SDK, because their suites run under `dart test` with no widget binding and no dart:ui.",
+      "statedIn": "docs/sdd.md A19; pubspec.yaml (test-dart packageFilters)",
+      "enforcedBy": { "command": "test-dart" }
+    },
+    {
+      "id": "generated-code-committed-and-current",
+      "statement": "The drift table accessors are committed, and the committed copy must match the hand-written schema that generates it.",
+      "statedIn": "docs/sdd.md A21",
+      "enforcedBy": { "command": "generated-code-current" }
+    },
+    {
+      "id": "transposition-round-trip",
+      "statement": "Twelve one-semitone moves return the original chart with its original spelling, and spelling is total over the twelve keys: every pitch class has a practical written form in a major key.",
+      "statedIn": "docs/sdd.md A8, A30, §10 (S3)",
+      "enforcedBy": { "command": "spike-s3" }
+    },
+    {
+      "id": "layout-page-within-budget",
+      "statement": "A page is laid out in under 16 ms at p95, measured over 300 samples after 50 warm-up samples.",
+      "statedIn": "docs/sdd.md §6, A15, §10 (S4)",
+      "enforcedBy": { "command": "spike-s4" }
+    },
+    {
+      "id": "storage-cold-open-within-budget",
+      "statement": "Storage cold-open is under 1000 ms at p95, and a document opened from the store returns the snapshot's tail only, not the whole log.",
+      "statedIn": "docs/sdd.md §6, A22, §10 (S5)",
+      "enforcedBy": { "command": "spike-s5" }
+    },
+    {
+      "id": "cue-geometry-is-one-definition",
+      "statement": "The cue legibility floor and the cue plate insets are declared once and read by both the layout engine and the painter, so the row the layout reserves and the box the painter draws cannot drift apart.",
+      "statedIn": "docs/sdd.md A45; packages/chart_core/lib/src/layout/layout_style.dart",
+      "enforcedBy": null,
+      "pendingReason": "No enforcement point. textCueMinLegibleScale, textCuePlateInsetX and textCuePlateInsetY are each declared once and read by both LayoutEngine and TextCuePainter, but no check compares the painter's constants with the layout's, so replacing either read with a literal fails nothing. A45 records this gap against itself. The only guard is the render probe's printed numbers, which a human reads."
+    },
+    {
+      "id": "edit-session-seq-is-the-callers-duty",
+      "statement": "A caller restoring a .chart tail must pass a seq at least as high as the highest sequence number that tail carries.",
+      "statedIn": "packages/chart_core/lib/src/editing/edit_session.dart (EditSession constructor); docs/sdd.md A38",
+      "enforcedBy": null,
+      "pendingReason": "No enforcement point. The constructor documents the duty and deliberately neither clamps nor asserts it, so a caller counting from the wrong place reuses a (docId, seq) position and no command fails."
+    },
+    {
+      "id": "report-remote-state-only-if-read",
+      "statement": "A work report makes no claim about the state of a remote system unless that state was read from that system. A green local run proves what it checks and nothing about a runner.",
+      "statedIn": "docs/sdd.md A23",
+      "enforcedBy": null,
+      "pendingReason": "No enforcement point, and none is reachable: the rule constrains what a report says, not what code does, so no command can fail on it. A23 records the five consecutive CI runs that were red while the report described them as unverified-but-locally-green."
+    },
+    {
+      "id": "sketch-fixtures-are-hand-transcribed",
+      "statement": "The three sketch fixtures are transcribed by hand from the owner's drawings and are never synthesized from plausible-looking data.",
+      "statedIn": "docs/sdd.md §2; docs/fixtures/README.md",
+      "enforcedBy": null,
+      "pendingReason": "No enforcement point. docs/fixtures/ holds no fixture files yet, so no check can tell a transcription from an invention, and the README argues that a fabricated fixture would be worse than an absent one because a golden test would then pin invented geometry as the standard."
+    },
+    {
+      "id": "commit-runs-the-fast-checks",
+      "statement": "A commit that breaks analysis or formatting is rejected before it is made.",
+      "statedIn": "lefthook.yml",
+      "enforcedBy": null,
+      "pendingReason": "No enforcement point in this checkout. lefthook.yml declares a pre-commit hook, but lefthook is not on PATH and .git/hooks contains only the shipped .sample files, so no pre-commit hook is installed and nothing runs on commit. A core.hooksPath override could not be ruled out, because checking it needs git."
+    }
+  ],
+  "scopes": [
+    { "resolver": "chart_core", "root": "packages/chart_core" },
+    { "resolver": "chart_ui", "root": "packages/chart_ui" },
+    { "resolver": "ink_native", "root": "packages/ink_native" },
+    { "resolver": "storage_drift", "root": "packages/storage_drift" },
+    { "resolver": "telemetry", "root": "packages/telemetry" },
+    { "resolver": "mobile", "root": "apps/mobile" },
+    { "resolver": "logview", "root": "tools/logview" },
+    { "resolver": "spike_harness", "root": "tools/spike_harness" },
+    { "resolver": "web_pen_spike", "root": "tools/web_pen_spike" },
+    { "resolver": "docs", "root": "docs" }
+  ]
+}
