@@ -177,6 +177,46 @@ void main() {
       expect(notation[tokens[2].offset], 'C');
     });
 
+    test('the tokens reconstruct the input exactly', () {
+      // What this proves: no character is LOST. Slicing the input by the recorded offsets and
+      // reassembling it returns the input character for character, so a tokenizer that skipped a
+      // byte would fail here.
+      //
+      // What this does NOT prove, stated because it was checked rather than assumed: it would not
+      // have caught the two boundary bugs found in this tokenizer. `C7ppF7` collapsing into one
+      // chord token still reconstructs to `C7ppF7`, and `*AB-` splitting into the label `AB` plus
+      // a stray `-` still reconstructs to `*AB-`. Both are wrong BOUNDARIES, not lost characters.
+      // Those were caught by the exact token-kind assertions above and, for the section label,
+      // only by the real export. A property that holds for a wrong tokenisation is worth having
+      // and is not worth overstating.
+      //
+      // The corpus includes a form this tokenizer does not fully understand — a bass written after
+      // an alternate chord — because the property must hold there too: the characters are kept as
+      // an unrecognised token rather than dropped, which is what keeps every following offset
+      // pointing at a real position.
+      const List<String> corpus = <String>[
+        '*A|C7ppF7|',
+        '[*iB- |x |E- |x ]{*AB- |x |A |D,B/D# |E- |B- |C#,F# |B-,F#,  ||',
+        'T44{*AC ^7 |A-7 |D-9 |G7#5 Z',
+        'T44{C |A- |N1D- |G7 } |N2D- G7 |C6 Z',
+        'sEh,A7,lD- D-/C Bb7(A7b9) <Fine> <*72Solo> Q f S Y YY',
+        'Bb7(A7b9)/F',
+        'C@E',
+        '',
+      ];
+      for (final String notation in corpus) {
+        final List<IRealToken> tokens = tokenizeIReal(notation);
+        final StringBuffer rebuilt = StringBuffer();
+        for (int index = 0; index < tokens.length; index++) {
+          final int end = index + 1 < tokens.length
+              ? tokens[index + 1].offset
+              : notation.length;
+          rebuilt.write(notation.substring(tokens[index].offset, end));
+        }
+        expect(rebuilt.toString(), notation, reason: notation);
+      }
+    });
+
     test('an empty body is an empty token list', () {
       expect(tokenizeIReal(''), isEmpty);
     });

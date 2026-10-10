@@ -118,9 +118,11 @@ Chord? parseIRealChord(String text) {
 
 /// Returns the accidental at [index], or 0 when there is none.
 ///
-/// A double accidental is two characters, and the format's documented root list contains only
-/// single ones; two are accepted here anyway because rejecting an unusual but well-formed symbol
-/// costs more than carrying it.
+/// Exactly ONE accidental is consumed. The format's documented root list carries only single ones,
+/// so a second `b` or `#` is left where it is and ends up inside the quality suffix, preserved as
+/// written. The consequence is stated plainly rather than hidden: a double-flat root would sound a
+/// semitone above the way it is written. That is a recorded limitation, not a silent one, and the
+/// symbol still round-trips through an import and an export unchanged.
 int _consumeAccidental(String text, int index) {
   if (index >= text.length) {
     return 0;

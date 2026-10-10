@@ -101,20 +101,34 @@ class LayoutEngine {
   //          it agree on where a cell begins. Having one function decide both is what prevents the
   //          chord positions from drifting away from the width they were measured into.
   // INPUTS: bar — the bar. key — the key its chords are spelled in.
-  // OUTPUTS: One width per cell of the bar's meter. A cell holding no chord takes the minimum
-  //          cell width. A cell holding one or more chords takes their total width plus a
-  //          trailing gap, or the minimum if that is larger.
+  // OUTPUTS: One width per cell. A bar has at least its meter's cells, and MORE when a chord is
+  //          placed beyond the meter: the count widens to include the furthest chord. A cell
+  //          holding no chord takes the minimum cell width. A cell holding one or more chords
+  //          takes their total width plus a trailing gap, or the minimum if that is larger.
   //
-  //          A chord whose beat lies outside the meter is skipped rather than throwing: an import
-  //          that produced one is a data problem worth reporting elsewhere, and refusing to
-  //          engrave the rest of the chart over it would hide the other bars too.
-  // KEYWORDS: cell-extent, chord-width, meter-cells, defensive-skip
+  //          A chord at a NEGATIVE beat is still skipped, because there is no cell to the left of
+  //          the bar to widen into.
+  //
+  // KEYWORDS: cell-extent, chord-width, meter-cells, overfull-bar, widening
+  //
+  // WHY WIDEN INSTEAD OF SKIP. This function used to skip any chord whose beat lay outside the
+  // meter. That is defensible for a hand-built chart and wrong for an imported one: another
+  // format's cell model can legitimately place a chord past the last beat this project expected,
+  // and skipping it engraves a bar that is silently missing a chord the musician wrote, with
+  // nothing on the page to say so. Widening keeps the content and lets the bar overflow the page
+  // if it must, which is a visible symptom rather than an invisible loss.
   List<double> _cellWidths(Bar bar, Key key) {
     final int declared = bar.timeSignature.cellsPerBar;
-    final int cells = declared < 1 ? 1 : declared;
+    final int meterCells = declared < 1 ? 1 : declared;
+    int cells = meterCells;
+    for (final BeatChord placement in bar.chords) {
+      if (placement.beat >= cells) {
+        cells = placement.beat + 1;
+      }
+    }
     final List<double> totals = List<double>.filled(cells, 0);
     for (final BeatChord placement in bar.chords) {
-      if (placement.beat < 0 || placement.beat >= cells) {
+      if (placement.beat < 0) {
         continue;
       }
       final String text = placement.chord.render(key, spellingTable);

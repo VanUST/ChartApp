@@ -92,17 +92,41 @@ void main() {
       expect(engine.measureBar(bar, Key.cMajor), 56);
     });
 
-    test('a chord outside the meter is skipped rather than throwing', () {
-      // Beat 7 does not exist in 4/4. An importer that produced this is a data problem to report
-      // elsewhere; refusing to engrave the bar would hide the other bars too.
+    test(
+      'a chord beyond the meter widens the bar instead of being dropped',
+      () {
+        // Beat 7 does not exist in 4/4. This used to be skipped, which engraved a bar that was
+        // silently missing a chord the musician had written: the content vanished and nothing on
+        // the page said so. The bar now widens to include it, so a genuine overflow is visible.
+        final Bar inMeter = Bar(
+          chords: <BeatChord>[
+            BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+          ],
+        );
+        final Bar beyond = Bar(
+          chords: <BeatChord>[
+            BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+            BeatChord(chord: Chord(root: ChordRoot(7)), beat: 7),
+          ],
+        );
+        // In the meter: cell 0 holds an 8-wide chord plus a 10 gap, three empty cells at the 14
+        // minimum, and 16 of bar padding: 18 + 42 + 16 = 76.
+        expect(engine.measureBar(inMeter, Key.cMajor), 76);
+        // Widened to eight cells: cell 0 = 18, six empty cells at 14 = 84, cell 7 holds the second
+        // one-character chord = 18, plus 16 padding: 18 + 84 + 18 + 16 = 136.
+        expect(engine.measureBar(beyond, Key.cMajor), 136);
+      },
+    );
+
+    test('a chord at a negative beat is skipped, because there is no cell to widen into', () {
+      // The widening rule stops at the left edge of the bar: a beat before the printed cell 0
+      // cannot be reached by adding cells to the right.
       final Bar bar = Bar(
         chords: <BeatChord>[
-          BeatChord(chord: Chord(root: ChordRoot(0)), beat: 7),
-          BeatChord(chord: Chord(root: ChordRoot(7)), beat: 0),
+          BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+          BeatChord(chord: Chord(root: ChordRoot(7)), beat: -3),
         ],
       );
-      // Only beat 0 contributes, so the width is the same as a bar with a single one-character
-      // chord on beat 0.
       expect(engine.measureBar(bar, Key.cMajor), 76);
     });
   });
