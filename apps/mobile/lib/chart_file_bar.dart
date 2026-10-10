@@ -111,6 +111,38 @@ String chartFileNameFor(String title) {
   return '$cleaned$chartFileExtension';
 }
 
+// PURPOSE: Open the `.chart` save/open dialog for a document, so the ONE dialog is reachable from
+//          both places that offer it.
+// INPUTS: context — where the dialog is shown. document — the written document to save, or null when
+//         nothing is loaded. events — the operation tail that produced it. initialPath — the text the
+//         field starts with. onOpened — called with the document and tail a file decoded to. save and
+//         open default to the platform implementations, so only a test passes them.
+// OUTPUTS: A future completing when the dialog is dismissed. The dialog itself is unchanged and
+//          behaves identically whichever caller opened it, which is the point of the function: the
+//          tablet's app-bar button and the phone's overflow menu call this same function, so the two
+//          shells cannot come to mean different things by "Save or open a .chart file".
+// KEYWORDS: chart-file, dialog-entry, one-dialog-two-callers, phone-overflow, tablet-app-bar
+/// Shows the `.chart` save/open dialog described by the arguments.
+Future<void> showChartFileDialog(
+  BuildContext context, {
+  required DocumentState? document,
+  required ValueChanged<OpenedChart> onOpened,
+  List<ChartEvent> events = const <ChartEvent>[],
+  String initialPath = '',
+  ChartFileSaver save = saveChartFile,
+  ChartFileOpener open = loadChartFile,
+}) => showDialog<void>(
+  context: context,
+  builder: (BuildContext context) => _ChartFileDialog(
+    document: document,
+    events: events,
+    onOpened: onOpened,
+    initialPath: initialPath,
+    save: save,
+    open: open,
+  ),
+);
+
 /// The app-bar control that saves and opens a `.chart` document.
 class ChartFileAction extends StatelessWidget {
   /// Creates the control for [document], reporting an opened document through [onOpened].
@@ -163,16 +195,14 @@ class ChartFileAction extends StatelessWidget {
       icon: const Icon(Icons.description_outlined),
       tooltip: 'Save or open a .chart file',
       onPressed: () => unawaited(
-        showDialog<void>(
-          context: context,
-          builder: (BuildContext context) => _ChartFileDialog(
-            document: document,
-            events: events,
-            onOpened: onOpened,
-            initialPath: initialPath,
-            save: save,
-            open: open,
-          ),
+        showChartFileDialog(
+          context,
+          document: document,
+          events: events,
+          onOpened: onOpened,
+          initialPath: initialPath,
+          save: save,
+          open: open,
         ),
       ),
     );

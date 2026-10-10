@@ -27,10 +27,17 @@
 //          selects at all, whether it hit ink or missed it. An app-bar action opens the words sheet
 //          for the selected bar, where `To Coda`, `D.C. al Fine`, `Solo` and the like are written,
 //          changed, moved and removed — also through that same log.
+//          THE SHELL HAS TWO FORMS. On a surface at least [sceneBarTabletWidth] logical pixels wide
+//          it is the tablet form: the tools and the document actions stand in the app bar and the
+//          song list is a permanent column (the left rail) beside the chart. On a narrower surface
+//          it is the phone form (owner decision D11's "phone = bottom dock"): the song list is a
+//          drawer, the four tools a musician touches while playing stand in a bottom dock, and the
+//          document actions move into one app-bar overflow menu so that the title is not truncated
+//          by eight controls. See [_buildScreen], [_buildBody] and [_buildPhoneDock].
 // KEYWORDS: viewer, ireal, reader, editor, screen, page-view, transposition, scene-bar, page-modes,
 //           chord-palette, ink-mode, eraser-mode, ink-layer, op-log, undo, redo, chart-file, save,
 //           open, song-form, bars, sections, text-cue, words, widget-test-seam, platform-seam,
-//           verification
+//           verification, phone-shell, bottom-dock, song-drawer, app-bar-overflow, d11
 //
 // WHERE THE INK LIVES. A stroke reaches the document through the same door a chord does: the ink
 // layer assembles it and calls `EditSession.apply`, and nothing else writes to the document. What
@@ -61,6 +68,41 @@
 // deliberate: a bar above the chart takes height away from it, and D13's FIT mode refuses to shrink
 // a chart past a legible floor, so a body bar turned a 200-bar song that fitted on one page into one
 // that did not.
+//
+// WHAT IS THE SAME ON A PHONE AND WHAT IS NOT, AND WHY THE LINE IS WHERE IT IS.
+//
+// Owner decision D11 gives the palettes two landings: a tablet gets a top ribbon and a left rail, a
+// phone gets a bottom dock. The defect D11 was meant to prevent had been sitting in this file since
+// the list was written: the song list is a FIXED 260-pixel column at every width, so at 412 logical
+// pixels of window the chart was left about 150 and the scene bar — a `Wrap` — laid its fields out
+// in a column down the side of the screen. A musician could see one or two chords per system.
+//
+// The fix is the SHELL and not the page: nothing in `chart_core/lib/src/layout` changes, no sheet
+// changes, and the chart is not scaled down. Below [sceneBarTabletWidth] the window gives the chart
+// the whole width, the song list moves into a drawer, and the tools move to the bottom. At or above
+// it, every one of those choices is the one this file already made, which is what keeps the owner's
+// own tablet unchanged — the rail, the app bar and the scene bar there are byte for byte the widgets
+// they were, because the branch is not taken.
+//
+// WHY A DRAWER AND NOT A FULL-WIDTH LIST YOU RETURN FROM. Changing song on a phone costs two
+// gestures either way — one to open, one to pick — and the drawer has three things the swap-screen
+// list does not: the chart is never unmounted, so the page, its scroll position and the selection
+// are still there when the list closes; the list slides over the chart instead of replacing it, so
+// the musician keeps their bearings; and it is the platform's own idiom, which means a left-edge
+// swipe opens it without a control being found first. Two details make "not losing your place" true
+// rather than hopeful: the selected song is the selected row when the drawer reopens, and the list
+// keeps its own [ScrollController], so a musician twenty songs down a playlist comes back to the
+// same twenty.
+//
+// WHY THE TOOLS GO TO THE BOTTOM RATHER THAN INTO THE MENU. D11 says a phone gets a bottom dock, and
+// the four controls that answer that description are the ones a hand reaches for while reading:
+// the pen, the eraser, undo and redo. They are the ones whose STATE is visible from the bar, and a
+// menu cannot show state — an overflow row reading "Undo" is the same row whether there is anything
+// to undo or not. The four document actions (bars and sections, words, the programme, the chart
+// file) open a surface and change nothing on their own, so they live in the overflow menu, which is
+// also what returns the title to the app bar: eight actions in a 412-pixel bar left a title reading
+// "Cha…". The dock is drawn from the SAME widget list as the app bar's actions, so the two forms
+// cannot drift apart.
 //
 // WHICH TRANSPOSITION THIS IS. Owner decision D14 gives transposition two meanings, and this screen
 // implements BOTH. The EDITOR meaning is the one the key grid edits on the chart itself: the chart
@@ -173,7 +215,24 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// The spelling rule the twelve-key grid uses.
   static const TranspositionGrid _grid = TranspositionGrid();
 
+  /// The width of the song list when it stands as a permanent column.
+  ///
+  /// One number, read in one place, because the chart's width on a tablet is the window minus this:
+  /// a second literal somewhere else would silently change what the page is engraved for. It is
+  /// deliberately NOT read on a phone, where the list is a drawer and the chart gets the whole
+  /// window.
+  static const double _songRailWidth = 260;
+
   late final TextEditingController _pathController;
+
+  /// The scroll position of the song list, kept across the drawer being closed and reopened.
+  ///
+  /// This is the "does not lose their place" half of the phone shell: a musician twenty songs down a
+  /// playlist who opens the drawer, reads, and closes it without picking comes back to the same
+  /// twenty rather than to the top. It is a field rather than a local because the list is rebuilt
+  /// when the drawer opens, and a scroll position that lives in the widget dies with it.
+  final ScrollController _songListScroll = ScrollController();
+
   IRealLibrary? _library;
   int _selectedSong = 0;
   String? _error;
@@ -394,6 +453,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   @override
   void dispose() {
     _pathController.dispose();
+    _songListScroll.dispose();
     // Cleared rather than left dangling: a reader that outlived the screen would answer an
     // inspecting tool with the last state this screen ever held, which reads as a live chart.
     inkStateReader = noInkStatePublished;
@@ -401,6 +461,40 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     inkInputCountersReader = noInkStatePublished;
     pageGeometryReader = noInkStatePublished;
     super.dispose();
+  }
+
+  // PURPOSE: Decide whether the surface is a phone, which is the device's own fact and not the
+  //          chart's.
+  // INPUTS: windowWidth — the width of the whole window in logical pixels, read from the
+  //         [MediaQuery] by [_buildScreen], [_buildBody] and the drawer.
+  // OUTPUTS: True below [sceneBarTabletWidth], the one threshold this application uses to separate
+  //          a tablet from a phone. It is the same number the page-mode default uses, and it is
+  //          deliberately NOT the pane width: the pane's width is an answer about how to engrave the
+  //          music, while this is an answer about where a hand goes and how much screen a rail may
+  //          take. A surface is one or the other, never both.
+  // KEYWORDS: shell-form, phone-vs-tablet, threshold, window-width, d11
+  bool _isPhoneWidth(double windowWidth) => windowWidth < sceneBarTabletWidth;
+
+  // PURPOSE: Report the song list's scroll position when the drawer opens or closes, so "the list
+  //          does not lose its place" is something that was read rather than something asserted.
+  // INPUTS: open — whether the drawer is now open.
+  // OUTPUTS: Nothing. Prints one line AFTER the frame the drawer's animation produced, because the
+  //          list is built as the drawer moves in: read inside this callback the position is
+  //          always `detached` on the opening edge, which is a true statement about the frame and a
+  //          useless one about the list. After the frame the number is the position the musician
+  //          will actually see, so an open line and the close line before it can be compared.
+  // KEYWORDS: drawer, scroll-position, evidence, structured-log, place-keeping
+  void _onDrawerChanged(bool open) {
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (!mounted) {
+        return;
+      }
+      debugPrint(
+        'viewer.song.drawer ${open ? 'open' : 'closed'} '
+        'songs=${_library?.songs.length ?? 0} selected=$_selectedSong '
+        'scroll=${_songListScroll.hasClients ? _songListScroll.offset.toStringAsFixed(1) : 'detached'}',
+      );
+    });
   }
 
   // PURPOSE: Take one raw browser pointer sample and forward the contact width it carries to the
@@ -1080,129 +1174,44 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return screen;
   }
 
-  /// Describes the screen: the app bar, the source bar, the body and the status line.
+  // PURPOSE: Describe the shell — the app bar, the song list, the tools and the body — in the form
+  //          the surface's width asks for.
+  // INPUTS: context — the build context, whose [MediaQuery] holds the window width the shell form is
+  //         decided from.
+  // OUTPUTS: A [Scaffold]. On a tablet-width surface it is the shell this file has always built: the
+  //          eight controls in the app bar, the song list as a permanent left column and nothing at
+  //          the bottom. On a phone-width surface it is D11's phone shell: the four document actions
+  //          in an app-bar overflow menu, the song list in a drawer, and the four tools a musician
+  //          touches while playing in a bottom dock. Which of the two is built is decided ONCE, here,
+  //          from the window width, and every branch below reads that one answer — so the rail and
+  //          the drawer can never both be built, and the tools can never be in two places at once.
+  // KEYWORDS: scaffold, shell, app-bar, drawer, bottom-dock, overflow-menu, phone, tablet, d11,
+  //           one-decision-many-reads
   Widget _buildScreen(BuildContext context) {
     final String? error = _error;
     final EditSession? session = _currentSession;
+    final IRealLibrary? library = _library;
+    final bool phone = _isPhoneWidth(MediaQuery.sizeOf(context).width);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ChartApp — iReal reader'),
-        // Undo and redo stand beside the save action because all three are about the document
-        // rather than about the page: the two reversals move the log, and the save writes what the
-        // log produced. They are disabled rather than hidden when there is nothing to reverse, so
-        // the pair keeps its place in the bar and a musician's hand learns where it is.
-        actions: <Widget>[
-          // The ink switch stands first because it changes what a pen DOES, and a musician about to
-          // write needs it under their thumb before anything else in this bar. It is disabled when
-          // there is no chart, and its icon and tooltip state the mode in words, because a toggle
-          // whose only signal is a colour is not discoverable.
-          IconButton(
-            key: const ValueKey<String>('viewer-ink-toggle'),
-            icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
-            tooltip: _inkOn
-                ? 'Drawing: the pen draws, a finger still selects'
-                : (_eraserOn
-                      ? 'Pen off: the eraser is on'
-                      : 'Selecting: the pen and a finger both select'),
-            onPressed: session == null ? null : () => _toggleInk(session),
-          ),
-          // --- ERASER ---------------------------------------------------------------------------
-          // The eraser stands next to the pen because the two are the two things a contact on the
-          // chart can do to the ink, and there is exactly one of them at a time: pressing it turns
-          // the pen off, and pressing the pen turns it off. It is disabled when there is no chart
-          // for the same reason the pen is, and its tooltip states the gesture in words — a tap on
-          // a stroke removes that whole stroke — because a musician cannot be expected to discover
-          // a mode from an icon. This button, `_toggleEraser` below `_toggleInk`, the `_eraserOn`
-          // getter beside `_inkOn`, the `eraser` keys in `_inkProbeState`, and the eraser branch of
-          // `_onPageTapUp` are the whole of this feature's footprint in this file.
-          IconButton(
-            key: const ValueKey<String>('viewer-eraser-toggle'),
-            icon: const Icon(Icons.auto_fix_normal),
-            tooltip: _eraserOn
-                ? 'Erasing: tap a stroke and its whole length goes'
-                : 'Eraser off',
-            onPressed: session == null ? null : () => _toggleEraser(session),
-          ),
-          IconButton(
-            key: const ValueKey<String>('viewer-undo'),
-            icon: const Icon(Icons.undo),
-            tooltip: 'Undo the last chart edit',
-            onPressed: session != null && session.canUndo
-                ? () => _undo(session)
-                : null,
-          ),
-          IconButton(
-            key: const ValueKey<String>('viewer-redo'),
-            icon: const Icon(Icons.redo),
-            tooltip: 'Redo the last undone chart edit',
-            onPressed: session != null && session.canRedo
-                ? () => _redo(session)
-                : null,
-          ),
-          // --- BARS AND SECTIONS (form editing, owner decision D17) -----------------------------
-          // An app-bar action rather than a row in the body: a body row costs the chart height, and
-          // D13's FIT refuses to shrink a chart past the legible floor (the `.chart` control's move
-          // into this bar, in `chart_file_bar.dart`, is that mistake measured). It is disabled until
-          // a bar is selected, because every operation in its sheet acts on the selected bar's
-          // section and index. This button, the `_openSongForm` method below `_redo`, and the
-          // bar-level branch of `_buildSelectionLine` are the whole of this feature's footprint in
-          // this file.
-          IconButton(
-            key: const ValueKey<String>('viewer-form'),
-            icon: const Icon(Icons.segment),
-            tooltip: 'Bars and sections (the form)',
-            onPressed: session == null || _selection == null
-                ? null
-                : () => _openSongForm(context, session),
-          ),
-          // --- WORDS ON THE CHART (text cues, `textcue.*`) --------------------------------------
-          // Placed beside the form action because both act on the bar the page's hit test named,
-          // and disabled under the same condition: a cue is anchored to an address, so there is
-          // nothing to write on until a bar is selected. It opens a sheet that holds its own
-          // address cursor, so a musician can move to another bar and write there without leaving.
-          // Its icon is a speech mark rather than a pencil, because the pencil is what the ink
-          // switch already means and two controls named "write" would be one too many.
-          IconButton(
-            key: const ValueKey<String>('viewer-text-cue'),
-            icon: const Icon(Icons.format_quote),
-            tooltip: 'Words on the chart (To Coda, Solo, 4×)',
-            onPressed: session == null || _selection == null
-                ? null
-                : () => _openTextCueSheet(context, session),
-          ),
-          // --- THE PROGRAMME (setlist, owner decision D14's scene meaning) -----------------------
-          // The programme is the setlist document the imported playlist becomes. It lives in the app
-          // bar beside the other document-level actions because it is a document, not a property of
-          // the bar under the cursor; the sheet it opens holds the running order. Its undo and redo
-          // live INSIDE the sheet rather than here, because the programme has its own log and its own
-          // history, and a second pair of arrows in this bar would make a musician guess which
-          // document they reverse. This button, `_openSetlist`, `_playSetlistEntry`,
-          // `_chooseSceneKey`, the `_playingItemFor` / `_shownSong` / `_shownSemitones` helpers and
-          // the scene branch of the scene bar in `_buildSongPane` are the whole of this feature's
-          // footprint in this file; the sheet itself is `setlist_sheet.dart` and the import bridge is
-          // `setlist_import.dart`.
-          IconButton(
-            key: const ValueKey<String>('viewer-setlist'),
-            icon: const Icon(Icons.queue_music),
-            tooltip:
-                'Programme (setlist): order, transpose and play the charts',
-            onPressed: _library == null
-                ? null
-                : () => unawaited(_openSetlist(context)),
-          ),
-          // The chart document itself can be named and moved, on every platform: where a path
-          // exists the field holds it, and in a browser it holds the name offered to the browser's
-          // chooser and download. It lives in the app bar because a control in the body takes height
-          // away from the chart, and D13's FIT mode refuses to shrink a chart past a legible floor —
-          // the bar turned a song that fitted on one page into one that did not.
-          ChartFileAction(
-            document: _documentOfSelection,
-            events: session?.log ?? const <ChartEvent>[],
-            initialPath: chartPathBeside(widget.initialPath),
-            onOpened: _adoptOpenedSong,
-          ),
-        ],
+        // The title names the application, not the file, and on a phone it names it in one word:
+        // eight actions beside a two-word title is what left the bar reading `Cha…`, and a title
+        // that cannot be read is worse than a shorter one that can.
+        title: Text(phone ? 'ChartApp' : 'ChartApp — iReal reader'),
+        actions: phone
+            ? <Widget>[_buildOverflowMenu(context, session)]
+            : <Widget>[
+                ..._documentTools(session),
+                ..._sheetActions(context, session),
+              ],
       ),
+      // The drawer exists only when there is a library to list: an empty drawer over a screen that
+      // says "load a file" offers a control that opens nothing.
+      drawer: phone && library != null && library.songs.isNotEmpty
+          ? _buildSongDrawer(context, library)
+          : null,
+      onDrawerChanged: phone ? _onDrawerChanged : null,
+      bottomNavigationBar: phone ? _buildPhoneDock(context, session) : null,
       body: Column(
         children: <Widget>[
           _buildPathBar(context),
@@ -1213,6 +1222,250 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       ),
     );
   }
+
+  // PURPOSE: The four tools whose STATE the bar shows and whose press changes the document, built
+  //          once for whichever surface is going to hold them.
+  // INPUTS: session — the session of the song on screen, or null when nothing is loaded.
+  // OUTPUTS: The pen, the eraser, undo and redo, in that order, as the widgets the app bar and the
+  //          phone dock both use. They carry the keys the tests and the driving tools find them by,
+  //          and the list is built in ONE place because the two surfaces must not be able to
+  //          disagree about what a tool does: the dock is not a second implementation of undo.
+  //          Every control is disabled rather than hidden when there is no chart, so the pair keeps
+  //          its place in the bar and a musician's hand learns where it is.
+  // KEYWORDS: tools, pen, eraser, undo, redo, one-definition-two-surfaces, disabled-not-hidden
+  List<Widget> _documentTools(EditSession? session) => <Widget>[
+    // The ink switch stands first because it changes what a pen DOES, and a musician about to
+    // write needs it under their thumb before anything else in this bar. Its icon and tooltip
+    // state the mode in words, because a toggle whose only signal is a colour is not discoverable.
+    IconButton(
+      key: const ValueKey<String>('viewer-ink-toggle'),
+      icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
+      tooltip: _inkOn
+          ? 'Drawing: the pen draws, a finger still selects'
+          : (_eraserOn
+                ? 'Pen off: the eraser is on'
+                : 'Selecting: the pen and a finger both select'),
+      onPressed: session == null ? null : () => _toggleInk(session),
+    ),
+    // --- ERASER ---------------------------------------------------------------------------------
+    // The eraser stands next to the pen because the two are the two things a contact on the
+    // chart can do to the ink, and there is exactly one of them at a time: pressing it turns
+    // the pen off, and pressing the pen turns it off. Its tooltip states the gesture in words —
+    // a tap on a stroke removes that whole stroke — because a musician cannot be expected to
+    // discover a mode from an icon. This button, `_toggleEraser` below `_toggleInk`, the
+    // `_eraserOn` getter beside `_inkOn`, the `eraser` keys in `_inkProbeState`, and the eraser
+    // branch of `_onPageTapUp` are the whole of this feature's footprint in this file.
+    IconButton(
+      key: const ValueKey<String>('viewer-eraser-toggle'),
+      icon: const Icon(Icons.auto_fix_normal),
+      tooltip: _eraserOn
+          ? 'Erasing: tap a stroke and its whole length goes'
+          : 'Eraser off',
+      onPressed: session == null ? null : () => _toggleEraser(session),
+    ),
+    IconButton(
+      key: const ValueKey<String>('viewer-undo'),
+      icon: const Icon(Icons.undo),
+      tooltip: 'Undo the last chart edit',
+      onPressed: session != null && session.canUndo
+          ? () => _undo(session)
+          : null,
+    ),
+    IconButton(
+      key: const ValueKey<String>('viewer-redo'),
+      icon: const Icon(Icons.redo),
+      tooltip: 'Redo the last undone chart edit',
+      onPressed: session != null && session.canRedo
+          ? () => _redo(session)
+          : null,
+    ),
+  ];
+
+  // PURPOSE: The four actions that OPEN a surface — the form sheet, the words sheet, the programme
+  //          and the chart file — built for the app bar of a tablet.
+  // INPUTS: context — the build context. session — the session of the song on screen, or null.
+  // OUTPUTS: The four controls in the order they have always stood in this bar. They are separated
+  //          from [_documentTools] because a phone puts them somewhere else: they are in the
+  //          overflow menu of the phone app bar, where [PopupMenuButton] calls the very same methods
+  //          by name, so an action never has two implementations.
+  // KEYWORDS: sheet-actions, form, text-cue, programme, chart-file, app-bar, phone-overflow
+  List<Widget> _sheetActions(BuildContext context, EditSession? session) =>
+      <Widget>[
+        // --- BARS AND SECTIONS (form editing, owner decision D17) -----------------------------------
+        // An action rather than a row in the body: a body row costs the chart height, and D13's FIT
+        // refuses to shrink a chart past the legible floor (the `.chart` control's move into this
+        // bar, in `chart_file_bar.dart`, is that mistake measured). It is disabled until a bar is
+        // selected, because every operation in its sheet acts on the selected bar's section and
+        // index. This button, the `_openSongForm` method below `_redo`, and the bar-level branch of
+        // `_buildSelectionLine` are the whole of this feature's footprint in this file.
+        IconButton(
+          key: const ValueKey<String>('viewer-form'),
+          icon: const Icon(Icons.segment),
+          tooltip: 'Bars and sections (the form)',
+          onPressed: session == null || _selection == null
+              ? null
+              : () => _openSongForm(context, session),
+        ),
+        // --- WORDS ON THE CHART (text cues, `textcue.*`) --------------------------------------------
+        // Placed beside the form action because both act on the bar the page's hit test named, and
+        // disabled under the same condition: a cue is anchored to an address, so there is nothing to
+        // write on until a bar is selected. Its icon is a speech mark rather than a pencil, because the
+        // pencil is what the ink switch already means.
+        IconButton(
+          key: const ValueKey<String>('viewer-text-cue'),
+          icon: const Icon(Icons.format_quote),
+          tooltip: 'Words on the chart (To Coda, Solo, 4×)',
+          onPressed: session == null || _selection == null
+              ? null
+              : () => _openTextCueSheet(context, session),
+        ),
+        // --- THE PROGRAMME (setlist, owner decision D14's scene meaning) -----------------------------
+        // The programme is the setlist document the imported playlist becomes. It lives beside the
+        // other document-level actions because it is a document, not a property of the bar under the
+        // cursor; the sheet it opens holds the running order. Its undo and redo live INSIDE the sheet
+        // rather than here, because the programme has its own log and its own history, and a second
+        // pair of arrows in this bar would make a musician guess which document they reverse. This
+        // button, `_openSetlist`, `_playSetlistEntry`, `_chooseSceneKey`, the `_playingItemFor` /
+        // `_shownSong` / `_shownSemitones` helpers and the scene branch of the scene bar in
+        // `_buildSongPane` are the whole of this feature's footprint in this file; the sheet itself is
+        // `setlist_sheet.dart` and the import bridge is `setlist_import.dart`.
+        IconButton(
+          key: const ValueKey<String>('viewer-setlist'),
+          icon: const Icon(Icons.queue_music),
+          tooltip: 'Programme (setlist): order, transpose and play the charts',
+          onPressed: _library == null
+              ? null
+              : () => unawaited(_openSetlist(context)),
+        ),
+        // The chart document itself can be named and moved, on every platform: where a path exists the
+        // field holds it, and in a browser it holds the name offered to the browser's chooser and
+        // download. It lives in the app bar because a control in the body takes height away from the
+        // chart, and D13's FIT mode refuses to shrink a chart past a legible floor — the bar turned a
+        // song that fitted on one page into one that did not.
+        ChartFileAction(
+          document: _documentOfSelection,
+          events: session?.log ?? const <ChartEvent>[],
+          initialPath: chartPathBeside(widget.initialPath),
+          onOpened: _adoptOpenedSong,
+        ),
+      ];
+
+  // PURPOSE: Give a phone the four surface-opening actions in one app bar control, so that the title
+  //          beside them can be read.
+  // INPUTS: context — where the sheets are opened from, and the [PopupMenuButton]'s anchor.
+  //         session — the session of the song on screen, or null when nothing is loaded.
+  // OUTPUTS: One overflow menu holding bars-and-sections, words, the programme and the chart file.
+  //          The first two are DISABLED rather than absent until a bar is selected, matching the app
+  //          bar's own rule and for the same reason: a musician looking for the form should find it
+  //          and be told why it is not available yet rather than hunt a control that is not there.
+  //          Each row calls the same method its app-bar button calls, so the phone and the tablet
+  //          cannot come to mean different things by the same words.
+  // KEYWORDS: overflow-menu, phone-app-bar, disabled-rows, one-implementation, d11
+  Widget _buildOverflowMenu(BuildContext context, EditSession? session) =>
+      PopupMenuButton<String>(
+        key: const ValueKey<String>('viewer-phone-menu'),
+        tooltip: 'Chart, form and programme',
+        onSelected: (String picked) {
+          if (picked == 'form' && session != null) {
+            _openSongForm(context, session);
+          } else if (picked == 'cues' && session != null) {
+            _openTextCueSheet(context, session);
+          } else if (picked == 'setlist') {
+            unawaited(_openSetlist(context));
+          } else if (picked == 'file') {
+            unawaited(
+              showChartFileDialog(
+                context,
+                document: _documentOfSelection,
+                events: session?.log ?? const <ChartEvent>[],
+                initialPath: chartPathBeside(widget.initialPath),
+                onOpened: _adoptOpenedSong,
+              ),
+            );
+          }
+        },
+        itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(
+            value: 'form',
+            enabled: session != null && _selection != null,
+            child: const Text('Bars and sections'),
+          ),
+          PopupMenuItem<String>(
+            value: 'cues',
+            enabled: session != null && _selection != null,
+            child: const Text('Words on the chart'),
+          ),
+          PopupMenuItem<String>(
+            value: 'setlist',
+            enabled: _library != null,
+            child: const Text('Programme (setlist)'),
+          ),
+          const PopupMenuItem<String>(
+            value: 'file',
+            child: Text('Save or open a .chart file'),
+          ),
+        ],
+      );
+
+  // PURPOSE: Put the tools under the thumb on a phone, which is D11's own landing for a phone.
+  // INPUTS: context — the build context, for the surface colour. session — the session of the song
+  //         on screen, or null.
+  // OUTPUTS: A bottom dock holding exactly the widgets [_documentTools] builds, stretched to equal
+  //          shares of the width so a hand finds each of the four in the same place every time. The
+  //          dock's height does not change with what is in it, so the chart above it is laid out for
+  //          one height and stays there as plays change. WHY THIS IS A `Material` OF ITS OWN AND NOT
+  //          A [BottomNavigationBar]: the four controls carry state (pen on, eraser on, undo
+  //          available, redo available) that already has one implementation as an [IconButton]; a
+  //          navigation bar would want the state expressed a second time as a selected index.
+  // KEYWORDS: bottom-dock, phone-tools, equal-shares, fixed-height, d11, state-carrying-controls
+  Widget _buildPhoneDock(BuildContext context, EditSession? session) =>
+      Material(
+        key: const ValueKey<String>('viewer-phone-dock'),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        elevation: 3,
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 56,
+            child: Row(
+              children: <Widget>[
+                for (final Widget tool in _documentTools(session))
+                  Expanded(child: Center(child: tool)),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  // PURPOSE: Give the song list to a phone, which has no width to spare for a permanent column.
+  // INPUTS: context — where the list is built. library — the loaded songs.
+  // OUTPUTS: A drawer holding a header naming how many songs there are and the list itself, which
+  //          closes when a song is picked. The header is not decoration: the drawer covers the chart
+  //          and the status bar under it, so without it the reader has no idea whether they are
+  //          looking at a 22-song playlist or a single chart.
+  // KEYWORDS: drawer, song-list-home, header, close-on-pick, phone, d11
+  Widget _buildSongDrawer(BuildContext context, IRealLibrary library) => Drawer(
+    key: const ValueKey<String>('viewer-song-drawer'),
+    child: SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Text(
+              '${library.songs.length} song(s)'
+              '${library.isPlaylist ? ' · "${library.playlistName}"' : ''}',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _buildSongList(context, library, closeAfterPick: true),
+          ),
+        ],
+      ),
+    ),
+  );
 
   // PURPOSE: Turn pen drawing on or off for the song on screen, which is the whole of the mode
   //          switch a musician needs: with it on a pen lays ink and a finger still selects, with it
@@ -1421,11 +1674,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   }
 
   // PURPOSE: Decide what occupies the window below the path bar: a message, or the song list beside
-  //          the selected song's pages.
-  // INPUTS: context — the build context.
+  //          the selected song's pages — or, on a phone, the chart ALONE with the list in a drawer.
+  // INPUTS: context — the build context, whose [MediaQuery] holds the window width.
   // OUTPUTS: The body widget. Before a load it explains what to do, and after an empty library it
-  //          says so rather than showing an empty list.
-  // KEYWORDS: body, empty-state, split-view
+  //          says so rather than showing an empty list. Where there is a chart, the chart is given
+  //          the WHOLE width on a phone and the window minus the rail on a tablet. That difference
+  //          is the whole point of the shell: at 412 logical pixels a fixed 260-pixel column left
+  //          about 150 for the music, which is one chord per system, and no musician can read from
+  //          that. The page geometry is untouched — the same engine engraves the same chart — so the
+  //          phone gains bars per system purely by having the width to fit them in.
+  // KEYWORDS: body, empty-state, split-view, phone-full-width, tablet-rail, no-list-on-phone
   Widget _buildBody(BuildContext context) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -1453,28 +1711,52 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         _selectedSong >= 0 && _selectedSong < library.songs.length
         ? _selectedSong
         : 0;
+    final bool phone = _isPhoneWidth(MediaQuery.sizeOf(context).width);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SizedBox(width: 260, child: _buildSongList(context, library)),
-        const VerticalDivider(width: 1),
+        // The rail is NOT built on a phone rather than built and hidden: a `SizedBox` still in the
+        // tree would still be taking its width, and the list would then exist twice — once in the
+        // drawer and once in a column the reader cannot see.
+        if (!phone) ...<Widget>[
+          SizedBox(
+            width: _songRailWidth,
+            child: _buildSongList(context, library),
+          ),
+          const VerticalDivider(width: 1),
+        ],
         Expanded(child: _buildSongPane(context, library, songIndex)),
       ],
     );
   }
 
-  // PURPOSE: List the loaded songs so one can be selected.
-  // INPUTS: context — the build context. library — the loaded songs.
+  // PURPOSE: List the loaded songs so one can be selected, whether as the tablet's rail or as the
+  //          phone's drawer.
+  // INPUTS: context — the build context. library — the loaded songs. closeAfterPick — whether
+  //         picking a song must also close the surface the list is in, which is true only in the
+  //         drawer: the list is covering the chart there, and leaving it open would keep the
+  //         musician from the song they just chose. False in the rail, where there is nothing to
+  //         close and closing the route would leave the screen.
   // OUTPUTS: A scrollable list. Each row names the song, its bar count, the key it is shown in and,
   //          when there are any, its issue count. A transposed song shows the move, so the list
   //          says which charts are no longer in their written key. A song whose session exists
   //          reports the NAME and bar count of the EDITED chart, so the row and the pane beside it
   //          cannot disagree about a chart the musician just changed — a rename that reached the
   //          page's own header and not this list would be two names for one song. A song nobody has
-  //          opened reports the loaded values, and no session is created just to read them.
-  // KEYWORDS: song-list, selection, issue-count, shown-key, written-key, edited-title, edited-count
-  Widget _buildSongList(BuildContext context, IRealLibrary library) {
+  //          opened reports the loaded values, and no session is created just to read them. The list
+  //          is scrolled by [_songListScroll] and stored under a [PageStorageKey], so closing the
+  //          drawer and opening it again lands where the musician left it, and the picked song is
+  //          the selected row on the way back for the same reason.
+  // KEYWORDS: song-list, selection, issue-count, shown-key, written-key, edited-title, edited-count,
+  //           drawer-aware, scroll-kept, structured-log
+  Widget _buildSongList(
+    BuildContext context,
+    IRealLibrary library, {
+    bool closeAfterPick = false,
+  }) {
     return ListView.builder(
+      key: const PageStorageKey<String>('viewer-song-list'),
+      controller: _songListScroll,
       itemCount: library.songs.length,
       itemBuilder: (BuildContext context, int index) {
         final IRealSong entry = library.songs[index];
@@ -1499,16 +1781,26 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          onTap: () => setState(() {
-            _selectedSong = index;
-            // Choosing a song by hand LEAVES the programme: the scene offset belongs to a position
-            // in the running order, and reading a chart on its own is not playing that position. The
-            // editor interval remembered for the song is what applies again.
-            _sceneIndex = null;
-            // A selection belongs to the song it was made in; another song's bar at the same
-            // address is a different bar.
-            _selection = null;
-          }),
+          onTap: () {
+            setState(() {
+              _selectedSong = index;
+              // Choosing a song by hand LEAVES the programme: the scene offset belongs to a position
+              // in the running order, and reading a chart on its own is not playing that position.
+              // The editor interval remembered for the song is what applies again.
+              _sceneIndex = null;
+              // A selection belongs to the song it was made in; another song's bar at the same
+              // address is a different bar.
+              _selection = null;
+            });
+            if (closeAfterPick) {
+              Scaffold.of(context).closeDrawer();
+            }
+            debugPrint(
+              'viewer.song.select index=$index title="${_titleFor(entry)}" '
+              'from_drawer=$closeAfterPick '
+              'scroll=${_songListScroll.hasClients ? _songListScroll.offset.toStringAsFixed(1) : 'detached'}',
+            );
+          },
         );
       },
     );
@@ -1624,6 +1916,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               song: displayed,
               semitones: semitones,
               pageMode: mode,
+              // The bar's FORM follows the SHELL's one decision about the surface, taken from the
+              // window width by [_isPhoneWidth] — not from the pane this bar is drawn in. The pane
+              // is the right measure for the page mode above and the wrong one here: the owner's
+              // tablet has a 564-pixel pane, so a bar that called itself narrow on that number would
+              // drop STYLE and REPEATS on the owner's own device while the shell around it was still
+              // the tablet's.
+              compact: _isPhoneWidth(MediaQuery.sizeOf(context).width),
               // The key badge keeps its two-tap meaning in BOTH senses of D14: on a chart read on
               // its own it edits the editor interval, and while a programme entry is playing it
               // edits that entry's scene interval through the setlist log. Which one is in force is

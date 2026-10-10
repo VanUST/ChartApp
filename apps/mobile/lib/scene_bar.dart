@@ -4,17 +4,35 @@
 //          lives here so the performance surface has one place to look, and the key badge is the
 //          handle that opens the twelve-key grid.
 // INPUTS: The displayed position, the displayed song (already transposed for the screen), the
-//         interval it was transposed by, the current page mode, and the callbacks that open the
-//         key grid and change the mode.
-// OUTPUTS: A dark, high-contrast bar. It wraps onto more lines rather than clipping or scrolling,
-//          so every field stays visible and tappable on a phone as well as a tablet.
+//         interval it was transposed by, the current page mode, the callbacks that open the key
+//         grid and change the mode, and [SceneBar.compact] — whether this is the narrow form. The
+//         caller decides that from the WINDOW width, because the bar itself is drawn in a pane
+//         narrower than the window whenever the song list is a permanent column.
+// OUTPUTS: A dark, high-contrast bar. In the full form it carries position, tempo, style, key,
+//          repeats and the page-mode toggle, wrapping onto more lines rather than clipping or
+//          scrolling. In the compact form it carries the four fields a performer reads off before
+//          starting — position, tempo, the key badge (still the transpose handle) and the page-mode
+//          toggle — and defers the two reference readings, STYLE and REPEATS, behind one `more`
+//          control in the same bar. Nothing is removed from the widget tree without a control that
+//          reaches it: the deferred menu shows both values and the STYLE row still opens the same
+//          song-info sheet the full bar's STYLE field opens. The key badge's label is IDENTICAL in
+//          both forms, because the reading is the reading and only its size changes.
 // KEYWORDS: scene-bar, performance-surface, pos-over-n, bpm, style, key-badge, repeats,
-//           fit-pages-toggle, dark-surface, arm-length
+//           fit-pages-toggle, dark-surface, arm-length, compact-form, deferred-fields
 //
 // WHY IT IS DARK AND LARGE. This is the surface a musician reads in a dark room from an arm's
 // length away, so the bar carries its own colours instead of following the application theme, and
 // no text is smaller than 16 logical pixels except the one-word captions. The chart page itself
 // stays white: paper is what a chart page looks like, and this bar is chrome around it.
+//
+// WHY THE NARROW FORM DEFERS RATHER THAN SHRINKS EVERYTHING. A phone-width chart pane leaves about
+// 400 logical pixels of width, and six captioned fields plus a bordered key badge do not fit one
+// row there: the bar wraps to three or four rows and takes roughly half the screen (measured at
+// 412x915, see the layout report). Shrinking every field until six fit would put the tempo and the
+// key below the size this bar exists to be read at. The two fields that a performer does NOT need
+// while playing are the two the chart itself already states: STYLE is written on the page's own
+// header and is edited in the song-info sheet, and REPEATS is by definition what the repeat signs
+// on the page say. They move one tap away; the four that are read at a glance stay.
 
 import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart';
@@ -46,12 +64,30 @@ const Color sceneBarCaptionColor = Color(0xFF8FA8C0);
 /// The accent used for the key badge and the active page mode.
 const Color sceneBarAccent = Color(0xFFFFC857);
 
-/// The width from which a surface counts as a tablet for the default page mode.
+/// The width from which a surface counts as a tablet.
+///
+/// It decides three things and all three are the same question — "is this surface a tablet or a
+/// phone": the default page mode (FIT at or above it, PAGES below), this bar's own form (the full
+/// bar at or above it, the compact one below) and, in the viewer's shell, whether the tools sit in
+/// the app bar or in a bottom dock. One number rather than three, because a surface that is a
+/// tablet for one of them and a phone for another has no form of its own.
+///
+/// It is read against the WINDOW and never against the pane. The pane is the right measure for the
+/// page mode — how wide the music is engraved is what decides whether a whole tune fits — but it is
+/// the wrong measure for the form: the owner's tablet is 824 logical pixels of window against 564 of
+/// pane, so a bar that called itself compact on a 564-pixel pane would drop STYLE and REPEATS on the
+/// owner's own device. The form is a fact about the surface, and the surface is the window.
 const double sceneBarTabletWidth = 600;
 
 /// The scene bar: position, tempo, style, key badge, repeats and the page-mode toggle.
 class SceneBar extends StatelessWidget {
   /// Creates a scene bar for one displayed song.
+  ///
+  /// [compact] selects the narrow form, which keeps the four fields a performer reads off before
+  /// starting and defers STYLE and REPEATS into one control in the same bar. It is passed in rather
+  /// than measured, because the bar's own width is the pane width and the pane width is not the
+  /// question [sceneBarTabletWidth] answers — see the constant's own note. It defaults to false, so
+  /// a caller that does not know about the two forms gets the bar this widget has always drawn.
   const SceneBar({
     super.key,
     required this.position,
@@ -63,7 +99,11 @@ class SceneBar extends StatelessWidget {
     required this.onPageModeChanged,
     required this.onEditTempo,
     required this.onEditStyle,
+    this.compact = false,
   });
+
+  /// Whether this bar is the narrow form: four readings and a control, instead of six.
+  final bool compact;
 
   /// The displayed song's one-based position in the loaded playlist.
   final int position;
@@ -97,58 +137,116 @@ class SceneBar extends StatelessWidget {
   final VoidCallback onEditStyle;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: const ValueKey<String>('scene-bar'),
-      color: sceneBarColor,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Wrap(
-        spacing: 16,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: <Widget>[
-          _Field(
-            fieldKey: 'scene-bar-pos',
-            caption: 'POS',
-            value: '$position/$songCount',
-          ),
-          _separator(),
-          _Field(
-            fieldKey: 'scene-bar-bpm',
-            caption: 'BPM',
-            value: song.tempo > 0 ? '${song.tempo}' : '—',
-            onTap: onEditTempo,
-          ),
-          _separator(),
-          _Field(
-            fieldKey: 'scene-bar-style',
-            caption: 'STYLE',
-            value: song.style.isEmpty ? '—' : song.style,
-            onTap: onEditStyle,
-          ),
-          _separator(),
-          _KeyBadge(
-            key: const ValueKey<String>('scene-bar-key-badge'),
-            song: song,
-            semitones: semitones,
-            onTap: onOpenKeyGrid,
-          ),
-          _separator(),
-          _Field(
-            fieldKey: 'scene-bar-repeat',
-            caption: 'REPEATS',
-            value: repeatSummary(song),
-          ),
-          _separator(),
-          _PageModeToggle(mode: pageMode, onChanged: onPageModeChanged),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey<String>('scene-bar'),
+    color: sceneBarColor,
+    padding: EdgeInsets.symmetric(
+      horizontal: compact ? 8 : 12,
+      vertical: compact ? 4 : 8,
+    ),
+    child: Wrap(
+      spacing: compact ? 6 : 16,
+      runSpacing: compact ? 4 : 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: compact ? _compactFields() : _fullFields(),
+    ),
+  );
+
+  /// The six readings of the full bar, which is what a tablet and a desktop get.
+  ///
+  /// The order is the order a performer reads them in: where they are, how fast, what it is, in
+  /// what key, how many repeats, and whether the whole tune is on the page.
+  List<Widget> _fullFields() => <Widget>[
+    _Field(
+      fieldKey: 'scene-bar-pos',
+      caption: 'POS',
+      value: '$position/$songCount',
+    ),
+    _separator(large: true),
+    _Field(
+      fieldKey: 'scene-bar-bpm',
+      caption: 'BPM',
+      value: song.tempo > 0 ? '${song.tempo}' : '—',
+      onTap: onEditTempo,
+    ),
+    _separator(large: true),
+    _Field(
+      fieldKey: 'scene-bar-style',
+      caption: 'STYLE',
+      value: song.style.isEmpty ? '—' : song.style,
+      onTap: onEditStyle,
+    ),
+    _separator(large: true),
+    _KeyBadge(
+      key: const ValueKey<String>('scene-bar-key-badge'),
+      song: song,
+      semitones: semitones,
+      onTap: onOpenKeyGrid,
+    ),
+    _separator(large: true),
+    _Field(
+      fieldKey: 'scene-bar-repeat',
+      caption: 'REPEATS',
+      value: repeatSummary(song),
+    ),
+    _separator(large: true),
+    _PageModeToggle(mode: pageMode, onChanged: onPageModeChanged),
+  ];
+
+  /// The four readings the compact bar keeps, plus the one control that reaches what it deferred.
+  ///
+  /// WHAT IS KEPT AND WHY. POS is why the musician opened this chart; BPM is the count-in; the key
+  /// badge is the two-tap transposition of D9 and the single most-used control in the application;
+  /// and the page-mode toggle changes how the tune is engraved, which is not something to hunt for
+  /// while playing. WHAT IS DEFERRED: STYLE and REPEATS, both into [_DeferredFields], which states
+  /// both values and keeps the STYLE row an edit entry to the same sheet the full field opens.
+  List<Widget> _compactFields() => <Widget>[
+    _Field(
+      fieldKey: 'scene-bar-pos',
+      caption: 'POS',
+      value: '$position/$songCount',
+      compact: true,
+    ),
+    _separator(large: false),
+    _Field(
+      fieldKey: 'scene-bar-bpm',
+      caption: 'BPM',
+      value: song.tempo > 0 ? '${song.tempo}' : '—',
+      onTap: onEditTempo,
+      compact: true,
+    ),
+    _separator(large: false),
+    _KeyBadge(
+      key: const ValueKey<String>('scene-bar-key-badge'),
+      song: song,
+      semitones: semitones,
+      onTap: onOpenKeyGrid,
+      compact: true,
+    ),
+    _separator(large: false),
+    _PageModeToggle(
+      mode: pageMode,
+      onChanged: onPageModeChanged,
+      compact: true,
+    ),
+    // No rule before the deferred-readings control: a separating line belongs between two VALUES,
+    // and this stands beside the toggle as a control rather than as a reading of its own.
+    _DeferredFields(
+      style: song.style,
+      repeats: repeatSummary(song),
+      onEditStyle: onEditStyle,
+    ),
+  ];
 
   /// The thin rule between two fields, so the eye separates values without a heavy border.
-  Widget _separator() =>
-      Container(width: 1, height: 34, color: const Color(0xFF24405C));
+  ///
+  /// [large] is the full bar's height; the compact form uses a shorter rule so it does not make its
+  /// own row taller than the fields standing on it.
+  Widget _separator({required bool large}) => Container(
+    width: 1,
+    height: large ? 34 : 20,
+    color: const Color(0xFF24405C),
+  );
 }
 
 /// The summary of the repeats and alternative endings a song carries.
@@ -197,11 +295,14 @@ class _Field extends StatelessWidget {
   /// [onTap] makes the field a control: the reading is then also the handle that edits it, which is
   /// what keeps a musician from hunting a menu for a value they can already see. A field without
   /// one is a reading and stays plain text, so the two are told apart by whether the bar reacts.
+  /// [compact] selects the smaller type the narrow form uses, which is a size and NOT a different
+  /// reading: the caption and the value are the same strings in both forms.
   const _Field({
     required this.fieldKey,
     required this.caption,
     required this.value,
     this.onTap,
+    this.compact = false,
   });
 
   /// The value.
@@ -216,6 +317,9 @@ class _Field extends StatelessWidget {
   /// What a press does, or null when this value cannot be changed from the bar.
   final VoidCallback? onTap;
 
+  /// Whether this field is drawn at the narrow form's smaller size.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
     final Widget reading = Column(
@@ -225,17 +329,17 @@ class _Field extends StatelessWidget {
       children: <Widget>[
         Text(
           caption,
-          style: const TextStyle(
+          style: TextStyle(
             color: sceneBarCaptionColor,
-            fontSize: 11,
+            fontSize: compact ? 9 : 11,
             letterSpacing: 1.2,
           ),
         ),
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             color: sceneBarTextColor,
-            fontSize: 20,
+            fontSize: compact ? 15 : 20,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -258,11 +362,17 @@ class _Field extends StatelessWidget {
 /// The key the chart is shown in, and the handle that opens the twelve-key grid.
 class _KeyBadge extends StatelessWidget {
   /// Creates a badge for [song] shown at [semitones] from the written key.
+  ///
+  /// [compact] shrinks the badge for the narrow form and also shortens its one-word caption, which
+  /// is the only text on it that is not a reading. The label itself — the key and the interval —
+  /// is byte for byte the same string in both forms, because that is what the musician reads and
+  /// what the key-grid test asserts.
   const _KeyBadge({
     super.key,
     required this.song,
     required this.semitones,
     required this.onTap,
+    this.compact = false,
   });
 
   /// The displayed song.
@@ -273,6 +383,9 @@ class _KeyBadge extends StatelessWidget {
 
   /// Called when the badge is pressed.
   final VoidCallback onTap;
+
+  /// Whether this badge is drawn at the narrow form's smaller size.
+  final bool compact;
 
   /// The badge label: the key and the interval a musician would say, in that order.
   ///
@@ -285,7 +398,10 @@ class _KeyBadge extends StatelessWidget {
     onTap: onTap,
     borderRadius: BorderRadius.circular(10),
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: compact ? 4 : 6,
+      ),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: sceneBarAccent, width: 2),
@@ -294,19 +410,19 @@ class _KeyBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Text(
-            'KEY · tap to transpose',
+          Text(
+            compact ? 'KEY' : 'KEY · tap to transpose',
             style: TextStyle(
               color: sceneBarCaptionColor,
-              fontSize: 11,
+              fontSize: compact ? 9 : 11,
               letterSpacing: 1.2,
             ),
           ),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               color: sceneBarAccent,
-              fontSize: 22,
+              fontSize: compact ? 16 : 22,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -316,10 +432,73 @@ class _KeyBadge extends StatelessWidget {
   );
 }
 
+/// The two readings the compact bar defers, behind one control in the bar itself.
+///
+/// WHY THEY ARE STATED RATHER THAN HIDDEN. Deferring a reading is not deleting it: the menu shows
+/// the style and the repeat summary as the full bar would, and the style row is still the edit
+/// entry — picking it opens the same song-info sheet, focused on the same field, that pressing the
+/// full bar's STYLE field opens. The repeats row is disabled because the repeat summary is a
+/// reading and not a control anywhere: there has never been a way to change it from this bar.
+class _DeferredFields extends StatelessWidget {
+  /// Creates the deferred-readings control for [style] and [repeats].
+  ///
+  /// [onEditStyle] is called when the style row is picked. The widget carries no key of its own:
+  /// the key a test or a driving tool finds it by is on the [PopupMenuButton] inside it.
+  const _DeferredFields({
+    required this.style,
+    required this.repeats,
+    required this.onEditStyle,
+  });
+
+  /// The style as the full bar would show it, which may be empty.
+  final String style;
+
+  /// The repeat summary as the full bar would show it, which is `none` when nothing is written.
+  final String repeats;
+
+  /// Called when the style row is picked, to open the song-info sheet on the style field.
+  final VoidCallback onEditStyle;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+    key: const ValueKey<String>('scene-bar-more'),
+    tooltip: 'Style and repeats',
+    icon: const Icon(Icons.more_horiz, color: sceneBarTextColor, size: 20),
+    // The default padding of a menu button reserves a 48-pixel touch target, which is more width
+    // than the narrow bar can spend on a control that is not a reading. It is pulled in to the same
+    // size as the fields standing beside it: this bar is read at arm's length, not tapped blind.
+    padding: EdgeInsets.zero,
+    onSelected: (String picked) {
+      if (picked == 'style') {
+        onEditStyle();
+      }
+    },
+    itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+      PopupMenuItem<String>(
+        value: 'style',
+        child: Text('STYLE · ${style.isEmpty ? '—' : style}'),
+      ),
+      PopupMenuItem<String>(
+        value: 'repeats',
+        enabled: false,
+        child: Text('REPEATS · $repeats'),
+      ),
+    ],
+  );
+}
+
 /// The FIT | PAGES control.
 class _PageModeToggle extends StatelessWidget {
   /// Creates a toggle showing [mode] and reporting picks to [onChanged].
-  const _PageModeToggle({required this.mode, required this.onChanged});
+  ///
+  /// [compact] selects the narrow form's smaller buttons and shorter caption. The control and its
+  /// two keys are the same widget in both forms: the page mode is not a reading that can be
+  /// deferred, because it decides how the chart under the bar is engraved.
+  const _PageModeToggle({
+    required this.mode,
+    required this.onChanged,
+    this.compact = false,
+  });
 
   /// The mode currently in force.
   final PageMode mode;
@@ -327,33 +506,46 @@ class _PageModeToggle extends StatelessWidget {
   /// Called with the other mode when it is picked.
   final ValueChanged<PageMode> onChanged;
 
+  /// Whether this toggle is drawn at the narrow form's smaller size.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) => Column(
     key: const ValueKey<String>('scene-bar-page-mode'),
     mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
-      const Text(
+      Text(
         'PAGE',
         style: TextStyle(
           color: sceneBarCaptionColor,
-          fontSize: 11,
+          fontSize: compact ? 9 : 11,
           letterSpacing: 1.2,
         ),
       ),
       Row(
+        // SHRINK-WRAPPED, AND THAT IS A FIX RATHER THAN A STYLE CHOICE. This Row stands inside the
+        // bar's `Wrap`, and a Row's default `MainAxisSize.max` expands to whatever width the parent
+        // offers — so this control alone claimed the WHOLE bar and pushed every field after it onto
+        // a line of its own, on a phone and on a tablet alike. Measured at 412 logical pixels of
+        // window: the bar was three rows (POS/BPM/KEY, then PAGE, then the deferred-readings
+        // control) with most of the second and third row empty. With `min`, the same control is as
+        // wide as its two buttons and the bar is one row.
+        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           _ModeButton(
             fieldKey: 'scene-bar-mode-fit',
             text: 'FIT',
             active: mode == PageMode.fit,
             onTap: () => onChanged(PageMode.fit),
+            compact: compact,
           ),
           _ModeButton(
             fieldKey: 'scene-bar-mode-pages',
             text: 'PAGES',
             active: mode == PageMode.pages,
             onTap: () => onChanged(PageMode.pages),
+            compact: compact,
           ),
         ],
       ),
@@ -364,11 +556,14 @@ class _PageModeToggle extends StatelessWidget {
 /// One half of the page-mode toggle.
 class _ModeButton extends StatelessWidget {
   /// Creates a button labelled [text], active when [active], calling [onTap] when pressed.
+  ///
+  /// [compact] selects the narrow form's smaller label and padding.
   const _ModeButton({
     required this.fieldKey,
     required this.text,
     required this.active,
     required this.onTap,
+    this.compact = false,
   });
 
   /// The label.
@@ -383,12 +578,18 @@ class _ModeButton extends StatelessWidget {
   /// The widget key the tests find this button by.
   final String fieldKey;
 
+  /// Whether this button is drawn at the narrow form's smaller size.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) => InkWell(
     key: ValueKey<String>(fieldKey),
     onTap: onTap,
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: compact ? 3 : 6,
+      ),
       decoration: BoxDecoration(
         color: active ? sceneBarAccent : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
@@ -401,7 +602,7 @@ class _ModeButton extends StatelessWidget {
         text,
         style: TextStyle(
           color: active ? sceneBarColor : sceneBarTextColor,
-          fontSize: 16,
+          fontSize: compact ? 13 : 16,
           fontWeight: FontWeight.w700,
         ),
       ),
