@@ -37,10 +37,13 @@
 // texture path been used, one texture copy and possibly one extra frame would sit between the two
 // and this number would under-state by that much.
 //
-// INPUTS: `MotionEvent` streams from the platform; commands from the plugin (tool, transform,
-//         strokes); the display's refresh rate.
+// INPUTS: `MotionEvent` streams from the platform, touch and stylus-hover alike; commands from the
+//         plugin (tool, transform, strokes); the display's refresh rate.
 // OUTPUTS: pixels on the surface, plus `InkStrokeRecord`s handed to [Listener.onStrokeFinished]
-//          with per-sample latencies, and the properties [describeSurface] reports.
+//          with per-sample latencies and the contact-admission decision each record was taken
+//          under, and the properties [describeSurface] reports, including the palm rule in force
+//          and how long ago a stylus was last seen. A palm-like contact is rejected only while a
+//          stylus is in play, so touch parity is preserved.
 // KEYWORDS: ink-surface, platform-view, latency-measurement, coalesced-samples, historical-samples,
 //           frame-timeline, palm-observation, hybrid-composition
 package com.chartapp.ink_native_android
@@ -216,8 +219,25 @@ class InkSurfaceView(
     // -----------------------------------------------------------------------------------------
 
     private var palmSuppressedCount = 0
+    private var palmSuppressedByToolTypeCount = 0
+    private var palmSuppressedByWidthCount = 0
+    private var palmLikeWidthAdmittedNoStylusCount = 0
     private var concurrentContactSamples = 0
     private var concurrentMaxTouchMajorPx = 0.0
+
+    /**
+     * `eventTime` of the most recent event that came from a stylus, or -1 before the first one.
+     *
+     * This is the gate on palm rejection. A palm-like width is only a palm candidate while a stylus
+     * has been seen within [PalmContactRule.STYLUS_PROXIMITY_WINDOW_MS]; when no pen is in play a
+     * finger draws however wide it is, which is the touch-parity guarantee. The pen's stream stops
+     * while it is lifted between strokes and between hover reports, which is why a window is needed
+     * rather than a per-event flag.
+     */
+    private var lastStylusSeenMs = -1L
+
+    /** How many hover events this surface received; reported so a missing hover path is visible. */
+    private var stylusHoverEvents = 0
 
     init {
         setWillNotDraw(false)
@@ -311,6 +331,15 @@ class InkSurfaceView(
         "deviceModel" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim(),
         "androidRelease" to android.os.Build.VERSION.RELEASE.orEmpty(),
         "palmContactsSuppressed" to palmSuppressedCount,
+        "palmContactsSuppressedByToolType" to palmSuppressedByToolTypeCount,
+        "palmContactsSuppressedByWidth" to palmSuppressedByWidthCount,
+        "palmLikeWidthAdmittedNoStylus" to palmLikeWidthAdmittedNoStylusCount,
+        "palmRuleVersion" to PalmContactRule.VERSION,
+        "palmWidthThreshold" to PalmContactRule.THRESHOLD_TOUCH_MAJOR,
+        "palmStylusProximityWindowMs" to PalmContactRule.STYLUS_PROXIMITY_WINDOW_MS,
+        "displayDensity" to resources.displayMetrics.density.toDouble(),
+        "stylusHoverEvents" to stylusHoverEvents,
+        "stylusInPlay" to stylusInPlay(SystemClock.uptimeMillis()),
         "concurrentContactSamples" to concurrentContactSamples,
         "concurrentMaxTouchMajorPx" to concurrentMaxTouchMajorPx,
         "committedStrokeCount" to strokes.size,
@@ -320,7 +349,23 @@ class InkSurfaceView(
     // Input.
     // -----------------------------------------------------------------------------------------
 
+    /**
+     * Tracks pen proximity from the hover stream and forwards the event.
+     *
+     * This is where "a stylus is in play" is learned without the pen touching: the digitizer reports
+     * the pen hovering a centimetre or so above the glass as hover events, which reach this view
+     * through `onHoverEvent` rather than `onTouchEvent`. Without this the gate would only open for a
+     * second after each pen *stroke*, and a palm resting while the pen hovers would look like a
+     * finger.
+     */
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        stylusHoverEvents++
+        noteStylus(event)
+        return super.onHoverEvent(event)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        noteStylus(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN,
             MotionEvent.ACTION_POINTER_DOWN,
@@ -339,15 +384,48 @@ class InkSurfaceView(
         return true
     }
 
+    /** Marks the pen as in play when [event] carries a stylus pointer. */
+    private fun noteStylus(event: MotionEvent) {
+        for (pointerIndex in 0 until event.pointerCount) {
+            if (event.getToolType(pointerIndex) == MotionEvent.TOOL_TYPE_STYLUS) {
+                lastStylusSeenMs = event.eventTime
+                return
+            }
+        }
+        if (isStylusSource(event.source)) {
+            lastStylusSeenMs = event.eventTime
+        }
+    }
+
+    /** Whether the pen counts as in play at [nowMs]; see [PalmContactRule.STYLUS_PROXIMITY_WINDOW_MS]. */
+    private fun stylusInPlay(nowMs: Long): Boolean {
+        val last = lastStylusSeenMs
+        if (last < 0 || nowMs < last) {
+            return false
+        }
+        return nowMs - last <= PalmContactRule.STYLUS_PROXIMITY_WINDOW_MS
+    }
+
     private fun handlePointerDown(event: MotionEvent, pointerIndex: Int) {
         maybeFinalizeClosing()
         val toolType = event.getToolType(pointerIndex)
         val kind = InkPointerKind.fromToolType(toolType)
         val action = "down"
+        val decision = PalmContactRule.decide(
+            kind = kind,
+            touchMajor = event.getAxisValue(MotionEvent.AXIS_TOUCH_MAJOR, pointerIndex).toDouble(),
+            thresholdTouchMajor = PalmContactRule.THRESHOLD_TOUCH_MAJOR,
+            stylusInPlay = stylusInPlay(event.eventTime),
+        )
 
-        if (kind == InkPointerKind.PALM) {
-            suppressPalmContact(event, pointerIndex, toolType)
+        if (!decision.admitted) {
+            rejectContact(event, pointerIndex, toolType, kind, decision)
             return
+        }
+        if (decision.palmLikeWidth) {
+            // The gate admitted a palm-like width because no pen was in play: touch parity, and an
+            // explicit observation rather than a stroke that merely looks wide in the list.
+            palmLikeWidthAdmittedNoStylusCount++
         }
         if (activeStroke != null) {
             // A second contact arrived while a stroke is live. It is observed rather than drawn:
@@ -356,6 +434,11 @@ class InkSurfaceView(
             return
         }
         val stroke = InkStrokeRecord(nextStrokeId++, currentTool, kind, toolType)
+        stroke.admissionReason = decision.reason
+        stroke.palmLikeWidth = decision.palmLikeWidth
+        stroke.decidingTouchMajor = decision.decidingTouchMajor
+        stroke.palmWidthThreshold = decision.thresholdTouchMajor
+        stroke.stylusInPlay = decision.stylusInPlay
         activeStroke = stroke
         activePointerId = event.getPointerId(pointerIndex)
         collect(event, pointerIndex, action)
@@ -717,25 +800,44 @@ class InkSurfaceView(
     // -----------------------------------------------------------------------------------------
 
     /**
-     * Records a contact the platform classified as a palm and refuses to draw it.
+     * Records a contact the admission rule refused and draws nothing for it.
      *
-     * This is an observation, not a rejection filter: the surface can only report what the
-     * digitizer delivered. If Samsung's palm rejection already removed the contact upstream, this
-     * is never called and the count stays zero, which is the evidence that rejection happened
-     * somewhere the app cannot see.
+     * This is an observation as well as a filter: the surface can only report what the digitizer
+     * delivered. If Samsung's palm rejection already removed a contact upstream, this is never
+     * called for it and the count stays zero, which is the evidence that rejection happened
+     * somewhere the app cannot see rather than that this rule failed to fire. When it is called,
+     * the record carries the reason and the two numbers the decision compared, so a rejection can
+     * be checked rather than taken on trust.
      */
-    private fun suppressPalmContact(event: MotionEvent, pointerIndex: Int, toolType: Int) {
+    private fun rejectContact(
+        event: MotionEvent,
+        pointerIndex: Int,
+        toolType: Int,
+        kind: InkPointerKind,
+        decision: PalmContactRule.Admission,
+    ) {
         palmSuppressedCount++
-        val stroke = InkStrokeRecord(nextStrokeId++, currentTool, InkPointerKind.PALM, toolType)
+        if (decision.reason == PalmContactRule.REASON_PALM_LIKE_WIDTH) {
+            palmSuppressedByWidthCount++
+        } else {
+            palmSuppressedByToolTypeCount++
+        }
+        val stroke = InkStrokeRecord(nextStrokeId++, currentTool, kind, toolType)
         stroke.drawAdmitted = false
+        stroke.admissionReason = decision.reason
+        stroke.palmLikeWidth = decision.palmLikeWidth
+        stroke.decidingTouchMajor = decision.decidingTouchMajor
+        stroke.palmWidthThreshold = decision.thresholdTouchMajor
+        stroke.stylusInPlay = decision.stylusInPlay
         stroke.anchorJson = ""
-        // One synthetic point carries the contact geometry: a palm has no measured latency
-        // because nothing about it was presented, and reporting a latency for it would be
-        // reporting a number for pixels that were never drawn.
+        // One synthetic point carries the contact geometry: a rejected contact has no measured
+        // latency because nothing about it was presented, and reporting a latency for it would be
+        // reporting a number for pixels that were never drawn. The plugin drops non-finite
+        // latencies before they reach a percentile.
         stroke.add(
             InkSampleRecord(
                 sampleIndex = 0,
-                pointerKind = InkPointerKind.PALM,
+                pointerKind = kind,
                 presentationSource = presentSource,
                 touchToPresentMs = Double.NaN,
                 eventTimeNanos = currentEventTimeNanos(event),
@@ -746,10 +848,7 @@ class InkSurfaceView(
                     MotionEvent.AXIS_ORIENTATION,
                     pointerIndex,
                 ).toDouble(),
-                touchMajorPx = event.getAxisValue(
-                    MotionEvent.AXIS_TOUCH_MAJOR,
-                    pointerIndex,
-                ).toDouble(),
+                touchMajorPx = decision.decidingTouchMajor,
                 isHistorical = false,
                 eventAction = "down",
                 sourceIsStylus = false,

@@ -131,7 +131,13 @@ class InkSampleRecord(
     val tiltRadians: Double,
     /** Pointer orientation, radians. */
     val orientationRadians: Double,
-    /** Contact major axis, surface pixels. */
+    /**
+     * Contact major axis in `AXIS_TOUCH_MAJOR` units.
+     *
+     * Not a physical width: Android rescales the digitizer's raw 0-255 axis into display pixels
+     * (the app-visible range on the reference panel is 0..3302.954), yet a fingertip reads 13-15,
+     * which cannot be a millimetre-scale measurement. Compare it only within one device.
+     */
     val touchMajorPx: Double,
     /** True when the sample came from the coalesced historical queue. */
     val isHistorical: Boolean,
@@ -178,6 +184,32 @@ class InkStrokeRecord(
 
     /** True when the surface let this stroke draw; false when it suppressed it. */
     var drawAdmitted: Boolean = true
+
+    /**
+     * Stable wire spelling of why this contact was admitted or rejected.
+     *
+     * One of the `PalmContactRule.REASON_*` constants. Empty for a stroke that was not classified
+     * by this surface, i.e. one decoded from a stored blob, because inventing a reason for a
+     * stroke whose contact never arrived here would be a fabricated observation.
+     */
+    var admissionReason: String = ""
+
+    /** Whether the width that decided admission was at or above the threshold in force. */
+    var palmLikeWidth: Boolean = false
+
+    /** The `AXIS_TOUCH_MAJOR` value, in axis units, that the admission rule compared. */
+    var decidingTouchMajor: Double = 0.0
+
+    /** The palm-width threshold in force, in the same units, when the rule ran. */
+    var palmWidthThreshold: Double = 0.0
+
+    /**
+     * Whether a stylus was in play when admission was decided.
+     *
+     * The second half of the rule: a palm-like width is rejected only when this is true, so a stroke
+     * admitted with a palm-like width and this false is the touch-parity case working as intended.
+     */
+    var stylusInPlay: Boolean = false
 
     /**
      * The document anchor for this stroke, as JSON text, or the empty string.

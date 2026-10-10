@@ -1,13 +1,19 @@
 // PURPOSE: Hold a bench run's state — which phase it is in, what has been measured so far, and what
 //          the surface observed — and decide which samples count. It is the one place that knows
 //          the difference between a warm-up sample, which is shown but never logged, and a measured
-//          sample, which is logged and against which the thresholds are applied.
+//          sample, which is logged and against which the thresholds are applied. It also owns the
+//          two cross-checks a run's report is worthless without: whether the log's record count
+//          matches the artifact, and whether the surface's contact-admission decisions match the
+//          documented palm rule.
 // INPUTS: Samples, palm observations and committed strokes pushed from the ink platform streams;
 //         a [BenchLogWriter] to hand measured samples to; a clock for the phase countdown.
 // OUTPUTS: Per-pointer-kind [BenchStats] for the measured window and for the warm-up window, the
-//          phase and its remaining time, and a `notifyListeners()` at most every 100 ms rather
-//          than once per sample, so refreshing the screen never becomes part of what is measured.
-// KEYWORDS: bench-state, warm-up-window, measurement-window, phase-machine, percentiles
+//          phase and its remaining time, the log's count and integrity record, the palm counters
+//          and every admission decision the surface reported, and a `notifyListeners()` at most
+//          every 100 ms rather than once per sample, so refreshing the screen never becomes part of
+//          what is measured.
+// KEYWORDS: bench-state, warm-up-window, measurement-window, phase-machine, percentiles,
+//           palm-rule-audit, log-integrity
 library;
 
 import 'dart:async';
@@ -72,6 +78,16 @@ class LatencyRecorder extends ChangeNotifier {
   InkLatencySample? _lastSample;
   int _committedStrokes = 0;
   int _suppressedPalmContacts = 0;
+  int _rejectedByPlatformToolType = 0;
+  int _rejectedByPalmLikeWidth = 0;
+  int _admittedPalmLikeWidthWithStylus = 0;
+  int _admittedPalmLikeWidthWithoutStylus = 0;
+  int _admittedThenExceededThreshold = 0;
+  int _palmRuleDisagreements = 0;
+  final List<int> _admittedPalmLikeWidthWithStylusStrokeIds = <int>[];
+  final List<int> _admittedPalmLikeWidthWithoutStylusStrokeIds = <int>[];
+  final List<int> _admittedThenExceededStrokeIds = <int>[];
+  final List<int> _palmRuleDisagreementStrokeIds = <int>[];
   int _concurrentContactSamples = 0;
   double _concurrentMaxTouchMajorPx = 0;
   InkSurfaceInfo? _surfaceInfo;
@@ -79,6 +95,12 @@ class LatencyRecorder extends ChangeNotifier {
   bool _timelineDelivered = false;
   bool _usedTimelinePoster = false;
   String _eventTimePrecision = 'unknown';
+
+  /// The end-of-run work, while it is running, so a restart can wait for it instead of racing it.
+  Future<void>? _finishFuture;
+
+  /// True while [_finishFuture] has not settled; guards against two end-of-run writes.
+  bool _finishing = false;
 
   /// The phase the run is in.
   BenchPhase get phase => _phase;
@@ -114,14 +136,70 @@ class LatencyRecorder extends ChangeNotifier {
   /// How many strokes the native surface has committed since the run started.
   int get committedStrokes => _committedStrokes;
 
-  /// How many contacts the surface refused to draw because the platform called them palms.
+  /// How many contacts the surface refused to draw.
   int get suppressedPalmContacts => _suppressedPalmContacts;
+
+  /// How many of those rejections the platform decided by classifying the contact itself as a palm.
+  int get rejectedByPlatformToolType => _rejectedByPlatformToolType;
+
+  /// How many of those rejections the palm-width rule decided.
+  int get rejectedByPalmLikeWidth => _rejectedByPalmLikeWidth;
+
+  /// How many admitted contacts were palm-like by width AND had the pen in play.
+  ///
+  /// Expected to be zero: with the gate in place the rule refuses exactly this combination, so a
+  /// non-zero value means a palm-like contact was drawn as ink while a stylus was in play. The run's
+  /// info file states it at the top level instead of leaving it to be found in a list.
+  int get admittedPalmLikeWidthWithStylus => _admittedPalmLikeWidthWithStylus;
+
+  /// How many admitted contacts were palm-like by width but had NO pen in play.
+  ///
+  /// This is the touch-parity case working as intended: a wide finger draws when no stylus is in
+  /// play. Counted separately from the line above so a legitimate wide finger can never be mistaken
+  /// for the defect, and the same wide contact can be told apart by the pen's presence.
+  int get admittedPalmLikeWidthWithoutStylus =>
+      _admittedPalmLikeWidthWithoutStylus;
+
+  /// How many admitted strokes were narrow at down and grew past the threshold during the stroke.
+  ///
+  /// Admission is decided once, on the down sample, so this can be non-zero; it is counted
+  /// separately because "admitted while it looked like a finger" is a different finding from
+  /// "admitted while it already looked like a palm".
+  int get admittedThenExceededThreshold => _admittedThenExceededThreshold;
+
+  /// How many strokes where the native decision disagreed with the documented rule.
+  ///
+  /// The documented rule is the Dart predicate and the native decision is the Kotlin mirror; this
+  /// count is what keeps the two implementations from drifting silently.
+  int get palmRuleDisagreements => _palmRuleDisagreements;
+
+  /// Stroke identifiers of the admitted contacts that were palm-like with the pen in play.
+  List<int> get admittedPalmLikeWidthWithStylusStrokeIds =>
+      List<int>.unmodifiable(_admittedPalmLikeWidthWithStylusStrokeIds);
+
+  /// Stroke identifiers of the admitted contacts that were palm-like with no pen in play.
+  List<int> get admittedPalmLikeWidthWithoutStylusStrokeIds =>
+      List<int>.unmodifiable(_admittedPalmLikeWidthWithoutStylusStrokeIds);
+
+  /// Stroke identifiers of the admitted strokes that grew past the threshold.
+  List<int> get admittedThenExceededStrokeIds =>
+      List<int>.unmodifiable(_admittedThenExceededStrokeIds);
+
+  /// Stroke identifiers where the native decision and the documented rule disagreed.
+  List<int> get palmRuleDisagreementStrokeIds =>
+      List<int>.unmodifiable(_palmRuleDisagreementStrokeIds);
 
   /// How many contacts from non-owning pointers were observed while a stroke was drawing.
   int get concurrentContactSamples => _concurrentContactSamples;
 
-  /// Largest contact width seen among those non-owning contacts, in surface pixels.
+  /// Largest contact value seen among those non-owning contacts, in axis units.
   double get concurrentMaxTouchMajorPx => _concurrentMaxTouchMajorPx;
+
+  /// Whether the writer lost records to failed writes.
+  bool get logLossy => writer.lossy;
+
+  /// The last read-back comparison of the reported count against the artifact.
+  LogIntegrity? get logIntegrity => writer.integrity;
 
   /// The surface description read at the start of the run, or null before it was read.
   InkSurfaceInfo? get surfaceInfo => _surfaceInfo;
@@ -179,6 +257,17 @@ class LatencyRecorder extends ChangeNotifier {
     required Duration measure,
   }) async {
     stop();
+    // The previous run's close and read-back must settle before a new file is opened: its close
+    // would otherwise land on the sink the new run just opened and truncate it.
+    final Future<void>? previousFinish = _finishFuture;
+    if (previousFinish != null) {
+      try {
+        await previousFinish;
+      } on Object {
+        // A failed end-of-run report must not stop the next run from starting; the failure is
+        // already visible in the previous run's writer counters.
+      }
+    }
     await reset();
     await writer.open();
     _measureDuration = measure;
@@ -195,7 +284,7 @@ class LatencyRecorder extends ChangeNotifier {
     _phaseClock.stop();
     if (_phase == BenchPhase.warmup || _phase == BenchPhase.measuring) {
       _phase = BenchPhase.finished;
-      unawaited(_finish());
+      _scheduleFinish();
     }
     notifyListeners();
   }
@@ -213,6 +302,16 @@ class LatencyRecorder extends ChangeNotifier {
     _lastSample = null;
     _committedStrokes = 0;
     _suppressedPalmContacts = 0;
+    _rejectedByPlatformToolType = 0;
+    _rejectedByPalmLikeWidth = 0;
+    _admittedPalmLikeWidthWithStylus = 0;
+    _admittedPalmLikeWidthWithoutStylus = 0;
+    _admittedThenExceededThreshold = 0;
+    _palmRuleDisagreements = 0;
+    _admittedPalmLikeWidthWithStylusStrokeIds.clear();
+    _admittedPalmLikeWidthWithoutStylusStrokeIds.clear();
+    _admittedThenExceededStrokeIds.clear();
+    _palmRuleDisagreementStrokeIds.clear();
     _concurrentContactSamples = 0;
     _concurrentMaxTouchMajorPx = 0;
     _phase = BenchPhase.idle;
@@ -258,10 +357,17 @@ class LatencyRecorder extends ChangeNotifier {
 
   /// Accepts one contact observation, keeping only the most recent [maxObservations].
   ///
-  /// The surface-level palm counters are summed here rather than read from the surface description,
+  /// The surface-level counters are summed here rather than read from the surface description,
   /// because a description read at the start of a run cannot know what happened during it. Every
   /// number below is derived from observations the surface actually sent, so a zero means the
-  /// surface never reported a palm contact — which is the finding, not an absence of data.
+  /// surface never reported a contact of that kind — which is the finding, not an absence of data.
+  ///
+  /// The documented rule is re-run here on the numbers the surface reported. Three things come out
+  /// of it: an explicit count of palm-like contacts that were admitted WITH the pen in play (the
+  /// defect — expected zero), an explicit count of those admitted WITHOUT it (touch parity working
+  /// as intended), and a disagreement count that catches the Dart predicate and the native mirror
+  /// drifting apart. All three are written into the info file, so none has to be found by reading a
+  /// list by hand.
   void acceptPalmObservation(
     InkPalmObservation observation, {
     int maxObservations = 200,
@@ -272,7 +378,49 @@ class LatencyRecorder extends ChangeNotifier {
     }
     if (!observation.drawAdmitted) {
       _suppressedPalmContacts++;
+      if (observation.admissionReason == PalmWidthRule.reasonPalmLikeWidth) {
+        _rejectedByPalmLikeWidth++;
+      } else if (observation.admissionReason ==
+          PalmWidthRule.reasonPlatformPalm) {
+        _rejectedByPlatformToolType++;
+      }
     }
+
+    final PalmContactDecision recomputed = PalmWidthRule.decide(
+      kind: observation.pointerKind,
+      touchMajor: observation.decidingTouchMajor,
+      thresholdTouchMajor: observation.palmWidthThreshold,
+      stylusInPlay: observation.stylusInPlay,
+    );
+    if (recomputed.admitted != observation.drawAdmitted ||
+        recomputed.palmLikeWidth != observation.palmLikeWidth) {
+      _palmRuleDisagreements++;
+      _palmRuleDisagreementStrokeIds.add(observation.strokeId);
+    }
+
+    if (observation.drawAdmitted && observation.palmLikeWidth) {
+      if (observation.stylusInPlay) {
+        // The gate should have refused this. Getting here means a palm-like contact was drawn while
+        // the pen was in play, which is the defect the rule exists to prevent.
+        _admittedPalmLikeWidthWithStylus++;
+        _admittedPalmLikeWidthWithStylusStrokeIds.add(observation.strokeId);
+      } else {
+        // Touch parity: a wide finger with no pen in play draws, by design.
+        _admittedPalmLikeWidthWithoutStylus++;
+        _admittedPalmLikeWidthWithoutStylusStrokeIds.add(observation.strokeId);
+      }
+    }
+    if (observation.drawAdmitted &&
+        !observation.palmLikeWidth &&
+        observation.palmWidthThreshold > 0 &&
+        PalmWidthRule.isPalmLikeWidth(
+          touchMajor: observation.maxTouchMajorPx,
+          thresholdTouchMajor: observation.palmWidthThreshold,
+        )) {
+      _admittedThenExceededThreshold++;
+      _admittedThenExceededStrokeIds.add(observation.strokeId);
+    }
+
     _concurrentContactSamples += observation.concurrentPointerSamples;
     if (observation.concurrentMaxTouchMajorPx > _concurrentMaxTouchMajorPx) {
       _concurrentMaxTouchMajorPx = observation.concurrentMaxTouchMajorPx;
@@ -312,12 +460,29 @@ class LatencyRecorder extends ChangeNotifier {
   }
 
   /// Writes the run's non-latency facts next to the log.
+  ///
+  /// Call it after the writer has closed, so the log's integrity record is available: the reported
+  /// record count and the count read back from the artifact are the two numbers a reader compares,
+  /// and this is the file that states both next to each other.
   Future<void> writeRunInfo({required Map<String, Object?> extra}) async {
+    final LogIntegrity? integrity = writer.integrity;
     final Map<String, Object?> info = <String, Object?>{
       'run': writer.runId,
       'device': _deviceLabel,
       'phase': _phase.name,
+      // The count the bench reports as logged, and the artifact's own count. They are equal when
+      // `logIntegrityOk` is true, and the run is lossy when it is not.
       'loggedSampleCount': writer.lineCount,
+      'writtenSampleCount': writer.writtenRecordCount,
+      'logFile': writer.logPath,
+      'logFileWritten': writer.writesFile,
+      'logLossy': writer.lossy,
+      'logWriteFailures': writer.flushFailureCount,
+      'recordsLostToWriteFailures': writer.recordsLostToWriteFailures,
+      'lastLogWriteError': writer.lastWriteError,
+      'logIntegrityOk': integrity?.ok,
+      'logIntegrity': integrity?.toJson(),
+      'logWriteMode': 'single open IOSink per run, flushes chained on one future, failures counted',
       'committedStrokes': _committedStrokes,
       'suppressedPalmContacts': _suppressedPalmContacts,
       'concurrentContactSamples': _concurrentContactSamples,
@@ -340,6 +505,39 @@ class LatencyRecorder extends ChangeNotifier {
             'passes': passesBudget(kind),
           },
       },
+      // The rule itself, so a run in which no contact was ever palm-like still records the
+      // threshold it was judged by. A threshold nobody can see is a threshold nobody can check.
+      'palmWidthRule': _palmRuleJson(),
+      // The defect, stated explicitly: a palm-like contact drawn while the pen was in play. The
+      // gate should make this zero.
+      'admittedPalmLikeWidthWithStylus': <String, Object?>{
+        'count': _admittedPalmLikeWidthWithStylus,
+        'strokeIds': _admittedPalmLikeWidthWithStylusStrokeIds,
+        'note':
+            'A non-zero count means a contact whose compared value was at or above the palm '
+            'threshold was admitted and drawn as ink WHILE a stylus was in play. It is stated here '
+            'rather than left to be found among the per-stroke observations below.',
+      },
+      // Touch parity, stated explicitly: a palm-like width drawn because no pen was in play.
+      'admittedPalmLikeWidthWithoutStylus': <String, Object?>{
+        'count': _admittedPalmLikeWidthWithoutStylus,
+        'strokeIds': _admittedPalmLikeWidthWithoutStylusStrokeIds,
+        'note':
+            'A wide contact admitted because no stylus had been seen within the proximity window. '
+            'This is the touch-parity case working as intended, not a defect: with no pen in play a '
+            'finger draws however wide it is.',
+      },
+      'admittedThenExceededPalmThreshold': <String, Object?>{
+        'count': _admittedThenExceededThreshold,
+        'strokeIds': _admittedThenExceededStrokeIds,
+        'note':
+            'Admission is decided once, on the pointer-down sample. These strokes were narrower '
+            'than the threshold then and their maximum value later crossed it, so the rule could '
+            'not have rejected them at down.',
+      },
+      'rejectedByPlatformToolType': _rejectedByPlatformToolType,
+      'rejectedByPalmLikeWidth': _rejectedByPalmLikeWidth,
+      'palmRuleDisagreements': _palmRuleDisagreements,
       'palmObservations': <Map<String, Object?>>[
         for (final InkPalmObservation observation in _palmObservations)
           <String, Object?>{
@@ -350,6 +548,11 @@ class LatencyRecorder extends ChangeNotifier {
             'meanTouchMajorPx': observation.meanTouchMajorPx,
             'rawToolType': observation.rawToolType,
             'drawAdmitted': observation.drawAdmitted,
+            'admissionReason': observation.admissionReason,
+            'palmLikeWidth': observation.palmLikeWidth,
+            'decidingTouchMajor': observation.decidingTouchMajor,
+            'palmWidthThreshold': observation.palmWidthThreshold,
+            'stylusInPlay': observation.stylusInPlay,
             'concurrentPointerSamples': observation.concurrentPointerSamples,
             'concurrentMaxTouchMajorPx': observation.concurrentMaxTouchMajorPx,
           },
@@ -358,6 +561,52 @@ class LatencyRecorder extends ChangeNotifier {
     };
     await writer.writeInfo(info);
     notifyListeners();
+  }
+
+  // PURPOSE: Publish the palm rule next to the run's numbers, so the artifact states the threshold,
+  //          the unit it is in and the stylus gate even when no contact ever crossed it.
+  // INPUTS: None; the rule constants, the surface's own values and the audit counters.
+  // OUTPUTS: A flat map for the info file. The Dart constants and the surface's reported values sit
+  //          side by side so a drift between the two implementations is visible rather than
+  //          inferred; `constantsAgree` is that comparison.
+  // KEYWORDS: palm-rule, threshold, unit, provenance, stylus-gate, audit, inspectable
+  Map<String, Object?> _palmRuleJson() {
+    final double surfaceThreshold = _surfaceInfo?.palmWidthThreshold ?? 0;
+    final int surfaceWindow = _surfaceInfo?.palmStylusProximityWindowMs ?? 0;
+    return <String, Object?>{
+      'version': PalmWidthRule.version,
+      'thresholdTouchMajor': PalmWidthRule.thresholdTouchMajor,
+      'thresholdUnit': PalmWidthRule.thresholdUnit,
+      'thresholdUnitEvidence': PalmWidthRule.thresholdUnitEvidence,
+      'thresholdIsPhysicalLength': false,
+      'densityScalingApplied': false,
+      'comparison': 'palmLikeWidth = decidingTouchMajor >= thresholdTouchMajor (inclusive)',
+      'stylusGate':
+          'palmLikeWidth is REJECTED only while a stylus was seen within '
+          'stylusProximityWindowMs; with no pen in play a finger draws however wide it is '
+          '(touch parity)',
+      'stylusProximityWindowMs': PalmWidthRule.stylusProximityWindowMs,
+      'appliesTo':
+          'every contact the platform did not classify as a stylus, eraser or mouse; a contact the '
+          'platform classified as a palm is rejected whatever its width',
+      'provenance': PalmWidthRule.provenance,
+      'surfaceValues': <String, Object?>{
+        'thresholdTouchMajor': surfaceThreshold,
+        'stylusProximityWindowMs': surfaceWindow,
+        'displayDensity': _surfaceInfo?.displayDensity ?? 0,
+        'displayDensityUsedForThreshold': false,
+        'stylusHoverEvents': _surfaceInfo?.stylusHoverEventCount ?? 0,
+        'stylusHoverNote':
+            'Hover is how the gate learns a pen is near the glass without it touching. Zero on a '
+            'run made with a pen in hand means the proximity signal never reached the view, and '
+            'the gate opened only during and just after pen strokes.',
+      },
+      'constantsAgree':
+          surfaceThreshold == PalmWidthRule.thresholdTouchMajor &&
+          surfaceWindow == PalmWidthRule.stylusProximityWindowMs,
+      'disagreementsWithSurface': _palmRuleDisagreements,
+      'disagreementStrokeIds': _palmRuleDisagreementStrokeIds,
+    };
   }
 
   @override
@@ -398,20 +647,56 @@ class LatencyRecorder extends ChangeNotifier {
     _ticker = null;
     _phaseClock.stop();
     _phase = BenchPhase.finished;
-    unawaited(_finish());
+    _scheduleFinish();
   }
 
   Duration _measureDuration = Duration.zero;
 
+  /// Starts the end-of-run work at most once, so a stop racing a phase change cannot write two
+  /// info files or close the sink twice.
+  void _scheduleFinish() {
+    if (_finishing) {
+      return;
+    }
+    _finishing = true;
+    _finishFuture = _finish().whenComplete(() {
+      _finishing = false;
+    });
+  }
+
+  // PURPOSE: Close the log, check it against its own artifact, and write the run's info file, in
+  //          that order, because the check needs the file closed and the report needs the check.
+  // INPUTS: None; the recorder's counters and the writer's integrity record.
+  // OUTPUTS: Nothing. Writes the info file, which is the only place the integrity result reaches a
+  //          reader, and completes when it has. Does not throw for a failed write: a run that
+  //          discovers a loss is exactly the run whose report must survive.
+  // KEYWORDS: finish-run, close-log, integrity, info-file, ordering
   Future<void> _finish() async {
+    await writer.close();
+    final LogIntegrity? integrity = writer.integrity;
     await writeRunInfo(
       extra: <String, Object?>{
         'note':
             'Records in the .jsonl file are per drawn sample and all carry '
             'touchToPresentMs and pointerType, so logview reports no missing metric.',
+        'logIntegrityCheck': integrity == null
+            ? 'No log file was written, so there is no artifact to compare the count against.'
+            : integrity.ok
+            ? 'loggedSampleCount equals the number of valid records in the .jsonl file '
+                  '(${integrity.validJsonRecordCount}), with ${integrity.tornLineCount} torn lines.'
+            : 'THE ARTIFACT DISAGREES WITH THE REPORTED COUNT. Reported '
+                  '${integrity.reportedRecordCount}, file lines ${integrity.fileLineCount}, '
+                  'valid records ${integrity.validJsonRecordCount}, torn lines '
+                  '${integrity.tornLineCount}, failed flushes ${integrity.flushFailureCount}, '
+                  'records lost ${integrity.recordsLostCount}. The p95 above is not reproducible '
+                  'from this file.',
+        'palmRuleNote':
+            'Every stroke carries an admission reason and the value, threshold and stylus-in-play '
+            'fact that decided it, and the documented rule was re-run on those numbers; see '
+            'palmWidthRule, admittedPalmLikeWidthWithStylus (the defect, expected 0) and '
+            'admittedPalmLikeWidthWithoutStylus (touch parity).',
       },
     );
-    await writer.close();
   }
 
   InkSurfaceInfo _unsupportedInfo() => const InkSurfaceInfo(
@@ -425,5 +710,9 @@ class LatencyRecorder extends ChangeNotifier {
     androidRelease: '',
     eventTimePrecision: 'unknown',
     usedTimelinePoster: false,
+    displayDensity: 0,
+    palmWidthThreshold: 0,
+    palmStylusProximityWindowMs: 0,
+    stylusHoverEventCount: 0,
   );
 }

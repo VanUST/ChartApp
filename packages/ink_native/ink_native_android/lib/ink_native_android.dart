@@ -5,10 +5,11 @@
 //          digitizer and the Choreographer exist, and that is behind this channel.
 // INPUTS: Method calls from the app (`initialize`, `setTool`, `setTransform`, `loadStrokes`,
 //         `exportStrokes`, `describeSurface`, `benchLogDirectory`) and `onStrokeFinished`
-//         callbacks pushed by the Kotlin plugin.
+//         callbacks pushed by the Kotlin plugin, each stroke carrying its contact-admission
+//         decision (reason, compared width, threshold) alongside its geometry.
 // OUTPUTS: Futures that complete when the native side has applied a change; broadcast streams
 //          `onStrokeCommitted`, `onLatencySample` and `onPalmObservation`; and a description of
-//          what the surface measures.
+//          what the surface measures, including the palm-width threshold it applied.
 //          A latency sample is emitted only for a sample the surface actually drew. An eraser
 //          gesture and a suppressed palm contact therefore produce none, because nothing was
 //          presented for them and a latency for them would be a measurement of nothing.
@@ -176,6 +177,10 @@ class InkNativeAndroid extends InkNativePlatform {
       androidRelease: _stringOf(map['androidRelease']) ?? '',
       eventTimePrecision: _stringOf(map['eventTimePrecision']) ?? 'unknown',
       usedTimelinePoster: map['usedTimelinePoster'] == true,
+      displayDensity: _doubleOf(map['displayDensity']),
+      palmWidthThreshold: _doubleOf(map['palmWidthThreshold']),
+      palmStylusProximityWindowMs: _intOf(map['palmStylusProximityWindowMs']),
+      stylusHoverEventCount: _intOf(map['stylusHoverEvents']),
     );
     _lastSurfaceInfo = info;
     return info;
@@ -263,6 +268,11 @@ class InkNativeAndroid extends InkNativePlatform {
         drawAdmitted: drawAdmitted,
         concurrentPointerSamples: _intOf(raw['concurrentPointerSamples']),
         concurrentMaxTouchMajorPx: _doubleOf(raw['concurrentMaxTouchMajorPx']),
+        admissionReason: _stringOf(raw['admissionReason']) ?? '',
+        palmLikeWidth: raw['palmLikeWidth'] == true,
+        decidingTouchMajor: _doubleOf(raw['decidingTouchMajor']),
+        palmWidthThreshold: _doubleOf(raw['palmWidthThreshold']),
+        stylusInPlay: raw['stylusInPlay'] == true,
       ),
     );
   }

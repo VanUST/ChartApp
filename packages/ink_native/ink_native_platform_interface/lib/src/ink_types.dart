@@ -1,12 +1,13 @@
 // PURPOSE: Define the value types that cross the Dart/native boundary for ink, so that the
 //          three platform implementations and the app agree on what a tool, a transform, a
-//          stored stroke, a committed stroke and a latency measurement are, and a change to
-//          one of them is a compile error in all of them rather than a silent mismatch at
-//          runtime.
+//          stored stroke, a committed stroke, a latency measurement and a contact-admission
+//          decision are, and a change to one of them is a compile error in all of them rather
+//          than a silent mismatch at runtime.
 // INPUTS: None; these are plain immutable values.
 // OUTPUTS: Immutable objects with value equality is NOT provided — identity is by reference —
 //          so an instance is compared only after conversion at the boundary.
-// KEYWORDS: ink-tool, view-transform, stroke-blob, committed-stroke, latency-sample, value-types
+// KEYWORDS: ink-tool, view-transform, stroke-blob, committed-stroke, latency-sample,
+//           palm-observation, value-types
 import 'dart:typed_data';
 import 'dart:ui' show Offset, Size;
 
@@ -291,6 +292,14 @@ class InkLatencySample {
 /// Palm rejection is reported as an observation and never as a verdict: the app cannot see the
 /// events a digitizer removed before delivering them, so the only honest statement is what
 /// arrived and what the surface did with it.
+///
+/// The admission fields were added together because a bare [drawAdmitted] boolean cannot be
+/// checked: it says what happened but not which number caused it, so a contact of palm-like width
+/// that was admitted could only be found by digging through the width list afterwards. With them,
+/// every stroke carries the reason, the compared width, the threshold it was compared against, the
+/// width result and whether a stylus was in play, and the bench re-runs the `PalmWidthRule.decide`
+/// predicate on the reported numbers to check that the documented rule and the native decision
+/// agree.
 class InkPalmObservation {
   /// Creates an observation for one stroke.
   const InkPalmObservation({
@@ -303,6 +312,11 @@ class InkPalmObservation {
     required this.drawAdmitted,
     required this.concurrentPointerSamples,
     required this.concurrentMaxTouchMajorPx,
+    required this.admissionReason,
+    required this.palmLikeWidth,
+    required this.decidingTouchMajor,
+    required this.palmWidthThreshold,
+    required this.stylusInPlay,
   });
 
   /// Identifier of the stroke this observation belongs to.
@@ -314,10 +328,14 @@ class InkPalmObservation {
   /// Number of input samples in the stroke.
   final int eventCount;
 
-  /// Largest touch-major value seen in the stroke, in surface pixels.
+  /// Largest touch-major value seen in the stroke, in `AXIS_TOUCH_MAJOR` units.
+  ///
+  /// The `Px` suffix is inherited from the field's first version and is not a claim of physical
+  /// size: `PalmWidthRule.thresholdUnitEvidence` records why the value cannot be read as a
+  /// contact diameter and must not be converted through the display density.
   final double maxTouchMajorPx;
 
-  /// Mean touch-major value seen in the stroke, in surface pixels.
+  /// Mean touch-major value seen in the stroke, in the same units as [maxTouchMajorPx].
   final double meanTouchMajorPx;
 
   /// The raw tool type of the owning pointer.
@@ -335,10 +353,54 @@ class InkPalmObservation {
   final int concurrentPointerSamples;
 
   /// Largest touch-major value among the non-owning contacts counted by
-  /// [concurrentPointerSamples], in surface pixels, or 0 when there were none.
+  /// [concurrentPointerSamples], in the same units as [maxTouchMajorPx], or 0 when there were none.
   final double concurrentMaxTouchMajorPx;
+
+  /// Stable wire spelling of why the contact was admitted or rejected.
+  ///
+  /// One of the `PalmWidthRule.reason*` constants: `platform-palm-tool-type`, `stylus-tool`,
+  /// `mouse-tool`, `width-below-threshold`, `palm-like-width` or `palm-like-width-no-stylus`. A
+  /// string rather than an enum because a surface built against a newer rule must still describe
+  /// itself to an older reader, and an unrecognised reason is then visibly unrecognised instead of
+  /// mapped to a neighbour.
+  final String admissionReason;
+
+  /// Whether [decidingTouchMajor] was at or above [palmWidthThreshold].
+  ///
+  /// This is the width test alone: it is true for a wide finger that was admitted because no stylus
+  /// was in play, which is what makes the touch-parity case visible. Reported by the surface; the
+  /// bench recomputes it with `PalmWidthRule.isPalmLikeWidth` and reports any disagreement, so this
+  /// field is checkable rather than trusted.
+  final bool palmLikeWidth;
+
+  /// The touch-major value that the surface compared against [palmWidthThreshold], in
+  /// `AXIS_TOUCH_MAJOR` units. For a decision taken at pointer-down this is the down sample's
+  /// value; [maxTouchMajorPx] is the whole stroke's maximum and may be larger.
+  final double decidingTouchMajor;
+
+  /// The palm-width threshold in force, in the same units as [decidingTouchMajor], when this
+  /// stroke was decided.
+  ///
+  /// Carried per stroke rather than only once per run so a decision can never be read against a
+  /// threshold from a different moment or a different surface.
+  final double palmWidthThreshold;
+
+  /// Whether a stylus was in play when this contact was decided.
+  ///
+  /// Reported rather than re-derived on the Dart side because the proximity window is a property of
+  /// the surface's own event stream. It is the second half of the admission rule: a palm-like width
+  /// is only rejected while this is true.
+  final bool stylusInPlay;
 }
 
+// PURPOSE: Describe the ink surface this bench is running on, so a run's artifact records what
+//          produced its numbers: the platform view mode, the presentation clock, the display,
+//          and the palm-width rule in force.
+// INPUTS: None; every field is read from the surface.
+// OUTPUTS: A description object. Fields the surface could not read are reported as zero or an
+//          empty string, never as a plausible default, so "not measured" stays distinguishable
+//          from "measured as zero".
+// KEYWORDS: surface-description, provenance, measurement-limits, palm-rule, bench
 /// What a native surface is actually measuring, read once per bench run.
 ///
 /// The bench prints this above the numbers because the same p95 means different things on a
@@ -356,6 +418,10 @@ class InkSurfaceInfo {
     required this.androidRelease,
     required this.eventTimePrecision,
     required this.usedTimelinePoster,
+    required this.displayDensity,
+    required this.palmWidthThreshold,
+    required this.palmStylusProximityWindowMs,
+    required this.stylusHoverEventCount,
   });
 
   /// How the native view reaches Flutter: `hybridComposition` is a real view in the Android
@@ -408,4 +474,36 @@ class InkSurfaceInfo {
   /// Largest change in [clockOffsetMs] observed since the surface started, in milliseconds. It
   /// is reported so a drifting clock is visible rather than silently folded into the latency.
   final double clockOffsetDriftMs;
+
+  /// The display density the surface reports (`Resources.getDisplayMetrics().density`), or 0 when
+  /// it could not be read.
+  ///
+  /// Carried as a fact about the device, and deliberately NOT used to convert the palm rule's
+  /// threshold: version 1 of that rule multiplied the threshold by this number and called the
+  /// result pixels, which asserted a physical size the touch-major value does not have. See
+  /// `PalmWidthRule.thresholdUnitEvidence`.
+  final double displayDensity;
+
+  /// The palm-width threshold as the surface computed it, in `AXIS_TOUCH_MAJOR` units, or 0 when
+  /// there is no surface.
+  ///
+  /// Reported on the surface description as well as per observation so a run in which no contact
+  /// was ever palm-like still states the threshold it was judged by; a rule nobody can see is a
+  /// rule nobody can check.
+  final double palmWidthThreshold;
+
+  /// How long, in milliseconds, a stylus counts as in play after the surface last saw one, as the
+  /// surface applies it, or 0 when there is no surface.
+  ///
+  /// The other half of the admission rule: a palm-like width is rejected only inside this window,
+  /// so reporting it is what lets a reader tell a rejection that was gated from one that was not.
+  final int palmStylusProximityWindowMs;
+
+  /// How many hover events the surface received, or 0 when there is no surface.
+  ///
+  /// Hover is where the gate learns that a pen is near the glass without it touching, so a zero
+  /// here on a run made with a pen in hand means the proximity signal never reached the view and
+  /// the gate was open only during and just after pen strokes. Reporting the count is what makes
+  /// that difference measurable instead of a guess.
+  final int stylusHoverEventCount;
 }

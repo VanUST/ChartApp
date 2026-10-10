@@ -62,6 +62,13 @@ class UnsupportedInkPlatform extends InkNativePlatform {
     androidRelease: '',
     eventTimePrecision: 'unknown',
     usedTimelinePoster: false,
+    // Zero, not a plausible default: with no surface there is no density and no palm rule in
+    // force, and a bench report that showed a real threshold here would claim a rule that never
+    // ran.
+    displayDensity: 0,
+    palmWidthThreshold: 0,
+    palmStylusProximityWindowMs: 0,
+    stylusHoverEventCount: 0,
   );
 
   @override

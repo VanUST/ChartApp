@@ -4,9 +4,11 @@
 //          logic, which lives in the recorder and behind the platform channel.
 // INPUTS: The ink platform implementation installed at startup, and taps on its buttons.
 // OUTPUTS: A drawing area hosting the native surface, a live per-pointer-kind verdict against the
-//          45 ms stylus and 60 ms finger budgets, the palm and contact observations, a list of the
-//          measurement's own limits, and the path of the JSONL log being written.
-// KEYWORDS: bench-screen, hud, verdict, budget, limits, warm-up, protocol
+//          45 ms stylus and 60 ms finger budgets, the palm rule together with what it decided, a
+//          live log-write readout that turns red when records were lost, the log's own read-back
+//          integrity result, a list of the measurement's own limits, and the path of the JSONL log
+//          being written.
+// KEYWORDS: bench-screen, hud, verdict, budget, limits, warm-up, protocol, palm-rule, log-integrity
 library;
 
 import 'dart:async';
@@ -318,8 +320,9 @@ class _BenchScreenState extends State<BenchScreen> {
                 '${_recorder.phase.name}  |  '
                 '${_recorder.phaseRemaining.inSeconds}s left  |  '
                 'logged ${_recorder.loggedSampleCount}  |  '
+                'lost ${_recorder.writer.recordsLostToWriteFailures}  |  '
                 'strokes $_committedStrokeCount',
-                style: _small,
+                style: _recorder.logLossy ? _smallAlarm : _small,
               ),
             ),
           ],
@@ -330,9 +333,12 @@ class _BenchScreenState extends State<BenchScreen> {
 
   Widget _facts() {
     final InkSurfaceInfo? info = _recorder.surfaceInfo;
+    final BenchLogWriter writer = _recorder.writer;
+    final LogIntegrity? integrity = writer.integrity;
     final String display =
         'apiLevel: ${info?.apiLevel ?? 0}   '
         'refreshHz: ${(info?.refreshRateHz ?? 0).toStringAsFixed(1)}   '
+        'density: ${(info?.displayDensity ?? 0).toStringAsFixed(2)}   '
         'platformViewMode: ${info?.platformViewMode ?? 'unknown'}';
     final String clocks =
         'presentSource: ${info?.presentationSource.wireName ?? 'unknown'}   '
@@ -342,6 +348,19 @@ class _BenchScreenState extends State<BenchScreen> {
         'eventTimePrecision: ${_recorder.eventTimePrecision}   '
         'clockOffsetMs: ${(info?.clockOffsetMs ?? 0).toStringAsFixed(3)}   '
         'clockDriftMs: ${(info?.clockOffsetDriftMs ?? 0).toStringAsFixed(3)}';
+    final String logWrite =
+        'log: accepted ${writer.lineCount}   written ${writer.writtenRecordCount}   '
+        'lost ${writer.recordsLostToWriteFailures}   '
+        'failed flushes ${writer.flushFailureCount}';
+    final String logCheck = integrity == null
+        ? 'log check: runs when the run ends — reads the .jsonl back and counts the records'
+        : 'log check: file ${integrity.validJsonRecordCount} valid records '
+              '(${integrity.fileLineCount} lines, ${integrity.tornLineCount} torn) vs '
+              'reported ${integrity.reportedRecordCount}  ->  '
+              '${integrity.ok ? 'MATCH' : 'MISMATCH'}';
+    final String writeNote = writer.lastWriteError == null
+        ? 'log writes: one open sink for the run, flushes chained, failures counted'
+        : 'last log write error: ${writer.lastWriteError}';
     return _card('What is measuring', <String>[
       'device: ${_recorder.deviceLabel}',
       display,
@@ -350,6 +369,9 @@ class _BenchScreenState extends State<BenchScreen> {
       'log dir: ${_recorder.logDirectory ?? '(none offered by the platform)'}',
       'log file: ${_recorder.logPath ?? '(created when a run starts)'}',
       'info file: ${_recorder.infoPath ?? '(written when a run ends)'}',
+      logWrite,
+      logCheck,
+      writeNote,
     ]);
   }
 
@@ -406,29 +428,75 @@ class _BenchScreenState extends State<BenchScreen> {
   }
 
   Widget _palm() {
-    final String howToRead =
-        'How to read it: rest a palm on the glass while drawing with the pen. '
-        'If both numbers stay 0, the palm never reached the app — the '
-        'digitizer removed it upstream and this app cannot see it. If the '
-        'count rises, a palm DID arrive and was ignored; a large width is '
-        'the signature of an unfiltered palm the platform called a finger.';
-    final String suppressed =
-        'platform-classified palm contacts suppressed: '
-        '${_recorder.suppressedPalmContacts}';
+    final InkSurfaceInfo? info = _recorder.surfaceInfo;
+    final double surfaceThreshold = info?.palmWidthThreshold ?? 0;
+    final String rule =
+        'rule v${PalmWidthRule.version}: these are TWO conditions, both needed to reject. '
+        '(1) palm-like when touchMajor >= ${PalmWidthRule.thresholdTouchMajor.toStringAsFixed(1)} '
+        'in AXIS_TOUCH_MAJOR units — NOT scaled by display density'
+        '${surfaceThreshold > 0 ? ' (surface agrees: ${surfaceThreshold.toStringAsFixed(1)}; density ${(info?.displayDensity ?? 0).toStringAsFixed(2)} is reported but not used)' : ' (no surface value yet)'}'
+        '. (2) rejected ONLY while a stylus was seen in the last '
+        '${PalmWidthRule.stylusProximityWindowMs} ms'
+        '${info == null ? '' : ' (surface agrees: ${info.palmStylusProximityWindowMs} ms)'}. '
+        'With no pen in play a finger draws however wide it is — touch parity.';
+    final String unit =
+        'Unit: AXIS_TOUCH_MAJOR as the app sees it, not a physical width. The kernel axis is 0-255 '
+        'while Android presents 0-3302.954 (this panel\'s diagonal in px), yet a fingertip reads '
+        '13-15, which cannot be a millimetre-scale contact. So the threshold is a device-calibrated '
+        'value: it separates the two populations here and is validated for this digitizer only. '
+        'The measurements are in the info file.';
+    final String provenance =
+        'Where the threshold came from: NOT an Android constant. It sits between the two '
+        'populations measured in the owner run bench-20261010T143629 on this device — admitted '
+        'finger contacts at 13-15, palm-like contacts at 86 and 91. Full text in the info file.';
+    final String rejected =
+        'contacts rejected: ${_recorder.suppressedPalmContacts} '
+        '(platform tool type ${_recorder.rejectedByPlatformToolType}, '
+        'palm-like width with pen in play ${_recorder.rejectedByPalmLikeWidth})';
+    final String admittedWithPen =
+        'palm-like ADMITTED with the pen in play: ${_recorder.admittedPalmLikeWidthWithStylus}'
+        '${_recorder.admittedPalmLikeWidthWithStylus > 0 ? '   <-- this is the defect, not a verdict' : ''}';
+    final String admittedNoPen =
+        'palm-like admitted with NO pen in play (touch parity, intended): '
+        '${_recorder.admittedPalmLikeWidthWithoutStylus}';
+    final String grew =
+        'admitted while under the threshold, then crossed it: '
+        '${_recorder.admittedThenExceededThreshold}';
+    final String disagreements =
+        'surface decisions disagreeing with the documented rule: '
+        '${_recorder.palmRuleDisagreements}';
     final String concurrent =
         'contacts from a non-owning pointer during a stroke: '
         '${_recorder.concurrentContactSamples}';
     final String largest =
         'largest such contact: '
-        '${_recorder.concurrentMaxTouchMajorPx.toStringAsFixed(1)} px';
-    final List<String> lines = <String>[suppressed];
-    lines
-      ..add(concurrent)
-      ..add(largest)
-      ..add(howToRead);
+        '${_recorder.concurrentMaxTouchMajorPx.toStringAsFixed(1)}';
+    final String hover =
+        'stylus hover events seen by the surface: ${info?.stylusHoverEventCount ?? 0} '
+        '(0 on a pen run means the proximity signal never arrived, so the gate opened only for '
+        'pen strokes)';
+    final String howToRead =
+        'How to read it: rest a palm on the glass while drawing with the pen. The rejected and '
+        'admitted counts above are decided by the two conditions printed first; a zero rejection '
+        'count means no contact reached the app at all, which is the digitizer removing it '
+        'upstream, not this rule failing. A wide contact admitted with no pen in play is a finger '
+        'being drawn, as required.';
     return _card(
-      'Palm and contact observation (what arrived, not what was assumed)',
-      lines,
+      'Palm classification (the rule, then what it decided)',
+      <String>[
+        rule,
+        unit,
+        provenance,
+        rejected,
+        admittedWithPen,
+        admittedNoPen,
+        grew,
+        disagreements,
+        concurrent,
+        largest,
+        hover,
+        howToRead,
+      ],
     );
   }
 
@@ -510,6 +578,15 @@ class _BenchScreenState extends State<BenchScreen> {
   }
 
   static const TextStyle _small = TextStyle(fontSize: 12, height: 1.3);
+
+  /// The same size as [_small] but red and bold: used only for a number that means the run is not
+  /// trustworthy, so a lossy log cannot be mistaken for a normal readout.
+  static const TextStyle _smallAlarm = TextStyle(
+    fontSize: 12,
+    height: 1.3,
+    color: Color(0xFFB00020),
+    fontWeight: FontWeight.bold,
+  );
 
   static const TextStyle _cardTitle = TextStyle(
     fontSize: 13,

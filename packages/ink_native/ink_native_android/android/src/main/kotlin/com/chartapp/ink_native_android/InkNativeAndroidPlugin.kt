@@ -5,7 +5,9 @@
 //         `loadStrokes`, `exportStrokes`, `clearStrokes`, `describeSurface`,
 //         `benchLogDirectory`, `strokesRoundTripCheck`) and [InkSurfaceView] stroke reports.
 // OUTPUTS: Method-call results, plus two calls up to Dart: `onStrokeFinished` for each stroke the
-//          surface ends, and nothing else. A call arriving before a surface exists is answered
+//          surface ends — carrying its contact-admission decision (reason, compared width,
+//          threshold) so a rejected contact can be checked rather than taken on trust — and
+//          nothing else. A call arriving before a surface exists is answered
 //          from the standalone surface description rather than by throwing, because a hot restart
 //          can ask for it while the platform view is being rebuilt.
 // KEYWORDS: plugin, method-channel, platform-view-registration, stroke-report, anchor-passthrough
@@ -132,6 +134,11 @@ class InkNativeAndroidPlugin :
             "bboxHeight" to stroke.bboxHeight().toDouble(),
             "maxTouchMajorPx" to stroke.maxTouchMajorPx,
             "meanTouchMajorPx" to stroke.meanTouchMajorPx(),
+            "admissionReason" to stroke.admissionReason,
+            "palmLikeWidth" to stroke.palmLikeWidth,
+            "decidingTouchMajor" to stroke.decidingTouchMajor,
+            "palmWidthThreshold" to stroke.palmWidthThreshold,
+            "stylusInPlay" to stroke.stylusInPlay,
             "concurrentPointerSamples" to stroke.concurrentPointerSamples,
             "concurrentMaxTouchMajorPx" to stroke.concurrentMaxTouchMajorPx,
             "samples" to samples,
@@ -180,6 +187,15 @@ class InkNativeAndroidPlugin :
         "deviceModel" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim(),
         "androidRelease" to android.os.Build.VERSION.RELEASE.orEmpty(),
         "palmContactsSuppressed" to 0,
+        "palmContactsSuppressedByToolType" to 0,
+        "palmContactsSuppressedByWidth" to 0,
+        "palmLikeWidthAdmittedNoStylus" to 0,
+        "palmRuleVersion" to PalmContactRule.VERSION,
+        "palmWidthThreshold" to 0.0,
+        "palmStylusProximityWindowMs" to 0L,
+        "displayDensity" to 0.0,
+        "stylusHoverEvents" to 0,
+        "stylusInPlay" to false,
         "concurrentContactSamples" to 0,
         "concurrentMaxTouchMajorPx" to 0.0,
         "committedStrokeCount" to 0,
