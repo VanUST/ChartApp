@@ -45,12 +45,22 @@ class IRealSong {
   final List<IRealParseIssue> issues;
 
   /// The title to show, which is `Untitled` when the payload carries an empty title field.
-  String get title => song.title.isEmpty ? 'Untitled' : song.title;
+  String get title => songDisplayTitle(song);
 
   @override
   String toString() =>
       'IRealSong($index, "$title", ${song.writtenBarCount} bar(s))';
 }
+
+// PURPOSE: Give the name to SHOW for a song, so the one fallback every place a name is printed needs
+//          is decided once instead of being repeated at each call site and eventually drifting.
+// INPUTS: song — any song, whose title may be empty.
+// OUTPUTS: The title, or `Untitled` when it is empty. Never null and never the empty string, so a
+//          status line that prints this can never print nothing where a name belongs.
+// KEYWORDS: title, fallback, untitled, display-name, one-place
+/// Returns [song]'s title, or `Untitled` when it carries none.
+String songDisplayTitle(Song song) =>
+    song.title.isEmpty ? 'Untitled' : song.title;
 
 /// Every song one payload holds, plus the name of the playlist it came from.
 class IRealLibrary {

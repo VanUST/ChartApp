@@ -47,6 +47,7 @@ import 'package:flutter/material.dart';
 
 import 'chart_document.dart';
 import 'chart_source.dart';
+import 'ireal_library.dart';
 
 /// Moves a container's bytes to the place the reader named.
 typedef ChartFileSaver = Future<void> Function(String path, Uint8List bytes);
@@ -402,7 +403,10 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       final DocumentState document = decoded.file.snapshot;
       // The song a session opened from this file will reach, used for the status line only. It is
       // the reduction, because a `song.update` in the tail may have renamed the tune and the reader
-      // should read the name they are about to see on the page.
+      // should read the name they are about to see on the page. The status line names the tune's
+      // TITLE and not the song value: interpolating the `Song` printed its `toString()` — the whole
+      // shape of the object, `Song(...)` — into a sentence a musician reads, which named neither
+      // the tune nor anything else they asked for.
       final Song shown = decoded.file.reducedDocument.song;
       if (!mounted) {
         return;
@@ -411,7 +415,8 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       setState(() {
         _busy = false;
         _status =
-            'Opened "$shown" · ${decoded.file.events.length} operation(s).'
+            'Opened "${songDisplayTitle(shown)}" · '
+            '${decoded.file.events.length} operation(s).'
             '${_warningSuffix(decoded.warnings)}';
       });
       debugPrint(

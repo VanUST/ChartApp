@@ -647,6 +647,178 @@ class EditSession {
     return true;
   }
 
+  // --- Repeats and alternative endings ---------------------------------------------------------
+  //
+  // The catalogue has carried `repeat.set` and `volta.set` since it was written, and until these
+  // methods existed nothing wrote either: the scene bar counted the repeats a chart already had and
+  // a musician had no way to give it one. Both events carry the WHOLE state of the sign on both
+  // sides — `repeat.set` carries all four fields of `RepeatSigns` and `volta.set` a nullable
+  // bracket — and that is what decides the shape of everything below.
+  //
+  // WHY THE BAR IS READ HERE AND NOT BY THE CALLER. A caller that built the `to` half itself would
+  // be restating the model's own shape, and a caller that read the bar to build the `from` half
+  // could read it after some other edit had already moved it. Deciding both halves next to the one
+  // writer is the same rule the form operations follow.
+  //
+  // WHAT CLEARING MEANS, AND WHY IT IS NOT ONE RULE. A repeat barline is cleared by setting it
+  // back to `Barline.single`, because a barline has a neutral value and the model has no way to
+  // write "no barline at all". A volta is cleared by REMOVING it — `to: null` — because
+  // `Bar.volta == null` and `Volta(0)` are two different things in this model: null is "no
+  // bracket", and 0 is an UNNUMBERED bracket the musician asked for and the page draws. Setting a
+  // volta to zero would not clear it, it would draw a bracket.
+  //
+  // WHAT IS ALLOWED, AND WHY THE DERIVATION DECIDES IT. A repeat start with no repeat end, and a
+  // bracket on a bar inside no repeat, are both LEGAL here. `derivePlayOrder` already answers what
+  // each one means — the unmatched start plays once and is reported as
+  // `repeatStartWithoutEnd`; the stray bracket selects no pass and is reported as
+  // `voltaOutsideRepeat` — and a UI that refused them would be a second answer to a question the
+  // derivation has already answered, written at the edit instead of at the reading. The two things
+  // REFUSED here are the ones nothing downstream can read: a negative bracket figure, which no pass
+  // can ever select, and a change whose two halves are equal, which would be a log row and an offer
+  // to undo an edit that did not happen.
+
+  // PURPOSE: Mark or unmark the selected bar as the start of a repeated passage, which is one half
+  //          of the gesture that makes a chart repeat — the other half is [setRepeatEnd] on the bar
+  //          the passage comes back to.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. starts — true to put a
+  //         repeat-start barline on it, false to take one off.
+  // OUTPUTS: True when the sign changed, false when the address names no bar or the bar already
+  //          carries exactly that opening barline. Turning the sign OFF is a real edit with a real
+  //          inverse, so it appends rather than doing nothing. A start with no matching end is
+  //          allowed and not rejected: the derivation reads it as a passage played once and reports
+  //          [PlayOrderIssueKind.repeatStartWithoutEnd].
+  // KEYWORDS: repeat-start, barline, toggle, repeat-set, undoable, unmatched-start-allowed
+  /// Sets or clears the repeat-start barline of the bar at ([sectionId], [barIndex]).
+  bool setRepeatStart({
+    required String sectionId,
+    required int barIndex,
+    required bool starts,
+  }) => _setRepeatSigns(
+    sectionId,
+    barIndex,
+    opening: starts ? Barline.repeatStart : Barline.single,
+  );
+
+  // PURPOSE: Mark or unmark the selected bar as the end of a repeated passage, which is the bar the
+  //          repeat barline is drawn on and the bar the passage jumps from.
+  // INPUTS: sectionId and barIndex — the bar. ends — true to put a repeat-end barline on it, false
+  //         to take one off.
+  // OUTPUTS: True when the sign changed, false when the address names no bar or the bar already
+  //          carries exactly that closing barline. An end with no matching start is allowed and not
+  //          rejected: the derivation plays the barline as an ordinary one and reports
+  //          [PlayOrderIssueKind.repeatEndWithoutStart].
+  // KEYWORDS: repeat-end, barline, toggle, repeat-set, undoable, unmatched-end-allowed
+  /// Sets or clears the repeat-end barline of the bar at ([sectionId], [barIndex]).
+  bool setRepeatEnd({
+    required String sectionId,
+    required int barIndex,
+    required bool ends,
+  }) => _setRepeatSigns(
+    sectionId,
+    barIndex,
+    closing: ends ? Barline.repeatEnd : Barline.single,
+  );
+
+  // PURPOSE: Change what the selected bar says about repeating the music before it — nothing, the
+  //          previous bar, or the previous two — which is the `%` symbol a chart uses to avoid
+  //          writing a bar twice.
+  // INPUTS: sectionId and barIndex — the bar. previous — the symbol it should carry.
+  // OUTPUTS: True when the symbol changed, false when the address names no bar or the bar already
+  //          carries that symbol. A `%` as the first bar of the song is allowed: the derivation
+  //          keeps the position, names the bar itself as what sounds, and reports
+  //          [PlayOrderIssueKind.percentWithoutPreviousBar].
+  // KEYWORDS: repeat-previous, percent-bar, repeat-set, toggle, undoable, first-bar-allowed
+  /// Sets the repeat-previous symbol of the bar at ([sectionId], [barIndex]).
+  bool setRepeatPrevious({
+    required String sectionId,
+    required int barIndex,
+    required RepeatPrevious previous,
+  }) => _setRepeatSigns(sectionId, barIndex, previous: previous);
+
+  // PURPOSE: Put an alternative-ending bracket on the selected bar, change which ending it is, or
+  //          take the bracket off — the sign a musician reads as "first time" and "second time".
+  // INPUTS: sectionId and barIndex — the bar. volta — the bracket it should carry: `Volta(0)` for
+  //         an unnumbered bracket, `Volta(n)` for the n-th ending, or null to remove the bracket.
+  // OUTPUTS: True when the bracket changed, false when the address names no bar, when the bar
+  //          already carries that bracket, and when the figure is negative. The negative refusal is
+  //          the one rule this method adds to the catalogue's: no pass the derivation can take
+  //          equals a negative number, so a bar carrying one would select no pass — a bracket that
+  //          silences the bar it is drawn on. Setting a bracket on a bar inside no repeat is
+  //          ALLOWED: [PlayOrderIssueKind.voltaOutsideRepeat] is the derivation's answer, and it is
+  //          reported there rather than refused here.
+  // KEYWORDS: volta, ending, bracket, clear-by-null, negative-refusal, undoable, stray-allowed
+  /// Sets or removes the alternative-ending bracket of the bar at ([sectionId], [barIndex]).
+  bool setVolta({
+    required String sectionId,
+    required int barIndex,
+    required Volta? volta,
+  }) {
+    if (volta != null && volta.number < 0) {
+      return false;
+    }
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null || bar.volta == volta) {
+      return false;
+    }
+    apply(
+      VoltaSetEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        from: bar.volta,
+        to: volta,
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Apply one change to the repeat signs of a bar, so the four calls above share one place
+  //          where the bar is read, the change is merged into the signs already there, and a change
+  //          that alters nothing is refused.
+  // INPUTS: sectionId and barIndex — the bar. opening, closing and previous — the fields to change;
+  //         a null argument leaves that field as the bar already carries it, and a caller that
+  //         wants a field cleared passes the value that means cleared (`Barline.single`), never
+  //         null.
+  // OUTPUTS: True when an event was appended, false when the address names no bar or when the
+  //          merged signs equal the ones already on the bar. The event carries the complete signs on
+  //          both sides, read from the bar here, so its inverse restores the bar exactly and no
+  //          field the caller did not name is lost.
+  // KEYWORDS: repeat-set, read-modify-append, whole-value, no-op-refusal, one-home
+  bool _setRepeatSigns(
+    String sectionId,
+    int barIndex, {
+    Barline? opening,
+    Barline? closing,
+    RepeatPrevious? previous,
+  }) {
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null) {
+      return false;
+    }
+    final RepeatSigns from = RepeatSigns.of(bar);
+    final RepeatSigns to = RepeatSigns(
+      openingBarline: opening ?? from.openingBarline,
+      closingBarline: closing ?? from.closingBarline,
+      repeatPrevious: previous ?? from.repeatPrevious,
+      slashRepeat: from.slashRepeat,
+    );
+    if (to == from) {
+      return false;
+    }
+    apply(
+      RepeatSetEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        from: from,
+        to: to,
+      ),
+    );
+    return true;
+  }
+
   // --- The song's own metadata ------------------------------------------------------------------
   //
   // One event family covers all four fields, because they are one thing a musician edits: what the

@@ -1,9 +1,9 @@
 // PURPOSE: Offer the operations that decide the SHAPE of a tune — put a bar in, take it out, copy
-//          it; add, rename, copy, move and remove a section — as one sheet over the chart, so a
-//          musician can build a 32-bar form and a rehearsal-letter form without a menu search and
-//          without a keyboard. It is the form half of the edit loop: `edit_session.dart` decides
-//          which event each operation is, and this file decides where the buttons go and what a tap
-//          does.
+//          it; mark where it repeats and which ending each pass takes; add, rename, copy, move and
+//          remove a section — as one sheet over the chart, so a musician can build a 32-bar form, a
+//          rehearsal-letter form and a repeated form without a menu search and without a keyboard.
+//          It is the form half of the edit loop: `edit_session.dart` decides which event each
+//          operation is, and this file decides where the buttons go and what a tap does.
 // INPUTS: The session being edited, the address of the bar the musician selected (section id and
 //         zero-based index inside it), and a callback the sheet calls after every applied edit.
 // OUTPUTS: A modal bottom sheet whose result is nothing: every button applies through [EditSession]
@@ -11,9 +11,10 @@
 //          The sheet keeps its own cursor — the address the NEXT operation will use — because a
 //          form edit moves the very address it was given: inserting a bar before the selection
 //          pushes the selected bar one place later, and after a delete the old index may name the
-//          bar after the one that went away.
-// KEYWORDS: song-form, bars, sections, rehearsal-letter, bottom-sheet, op-log, undoable,
-//           edit-session, no-keyboard
+//          bar after the one that went away. A repeat or an ending does NOT move an address, so the
+//          cursor stays where it was for those.
+// KEYWORDS: song-form, bars, sections, rehearsal-letter, repeat, ending, volta, percent-bar,
+//           bottom-sheet, op-log, undoable, edit-session, no-keyboard
 //
 // WHY A SHEET AND NOT A ROW OF BUTTONS ABOVE THE CHART.
 //
@@ -50,6 +51,24 @@
 // — a state reachable in one tap and impossible to leave is worse than a button that says no. These
 // refusals are the one rule this sheet adds to the catalogue, and they are reported on screen rather
 // than only in the log.
+//
+// WHY REPEATS AND ENDINGS ARE HERE, AND WHY THEY ARE NOT CHECKED HERE.
+//
+// Repeat barlines and alternative-ending brackets are STATE ON A BAR (A14) and they are read by
+// `derivePlayOrder`, so the bar this sheet already holds a cursor on is exactly the thing they attach
+// to: no second selection mechanism and no second sheet were needed, and the controls sit beside the
+// operations that move a bar because both act on the same selected bar. What the sheet does NOT do
+// is decide whether a repeat is well formed: a start with no end, an end with no start and a bracket
+// on a bar inside no repeat are all written as asked, because the derivation already says what each
+// one means and reports it (`repeatStartWithoutEnd`, `repeatEndWithoutStart`, `voltaOutsideRepeat`).
+// A refusal here would be a second rule about the same music, living in the UI and disagreeing with
+// the reader the musician plays from.
+//
+// CLEARING IS TWO DIFFERENT GESTURES, AND THAT IS THE MODEL'S SHAPE, NOT A CHOICE MADE HERE. A
+// repeat barline is switched off by pressing its button again — the button is a toggle and shows
+// which state the bar is in — which writes the neutral `Barline.single`. A bracket is removed
+// through the ending dialog's "No bracket", which writes a null bracket, because `Volta(0)` is an
+// unnumbered bracket the page DRAWS and is not the same thing as having none.
 import 'package:chart_core/chart_core.dart';
 // Flutter's own `Key` (widget identity) collides with the domain's musical Key, and this file names
 // the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
@@ -113,6 +132,35 @@ SectionLabel sectionLabelFrom(String text) {
     return SectionLabel.letter(trimmed.toUpperCase());
   }
   return SectionLabel.custom(trimmed);
+}
+
+// PURPOSE: Word the repeat-previous symbol of a bar, so the sheet's control and the text a
+//          verification quotes name the state the same way.
+// INPUTS: previous — the symbol the bar carries, or null when no bar is selected.
+// OUTPUTS: `off`, `1 bar` or `2 bars`, and `off` for null: a bar nobody selected carries no symbol
+//          as far as this label is concerned, and inventing a fourth word for "no bar" would make
+//          the label describe the selection rather than the sign.
+// KEYWORDS: repeat-previous, percent-bar, label, total-function, shared-wording
+/// Returns the words that name [previous] on the sheet's button.
+String repeatPreviousText(RepeatPrevious? previous) => switch (previous) {
+  null || RepeatPrevious.none => 'off',
+  RepeatPrevious.oneBar => '1 bar',
+  RepeatPrevious.twoBars => '2 bars',
+};
+
+// PURPOSE: Word an alternative-ending bracket the way it is drawn on the page, so the button and
+//          the engraved `[1.` cannot be read as two different things.
+// INPUTS: volta — the bracket, or null when the bar carries none.
+// OUTPUTS: `none`, `unnumbered`, or the figure with a leading dot as in `1.` / `2.`. Null and the
+//          unnumbered bracket are given different words because they are different states: the
+//          first draws nothing and the second draws an empty bracket.
+// KEYWORDS: volta, ending, bracket, label, unnumbered-is-not-none
+/// Returns the words that name [volta] on the sheet's button.
+String voltaText(Volta? volta) {
+  if (volta == null) {
+    return 'none';
+  }
+  return volta.number == 0 ? 'unnumbered' : '${volta.number}.';
 }
 
 /// The form sheet itself: the bar group, the section group and the address both act on.
@@ -279,6 +327,127 @@ class _SongFormSheetState extends State<SongFormSheet> {
           'Nothing was deleted: a section keeps at least one bar, or it could '
           'not be shown or selected.',
       barIndex: next,
+    );
+  }
+
+  // PURPOSE: Switch the repeat-start barline on the cursor's bar on or off, which is one half of
+  //          marking the passage a musician repeats: this bar starts the passage, and the bar the
+  //          passage comes back to carries the repeat end.
+  // INPUTS: None; reads the cursor's bar to decide which way the toggle goes.
+  // OUTPUTS: Nothing. The button is a toggle rather than two buttons because a sign that is either
+  //          present or absent has two states, and showing which one the bar is in is the whole of
+  //          what "set or clear" needs. A repeat start with no end is written as asked: the
+  //          derivation reads it as a passage played once and reports it, and the status line says
+  //          so rather than the sheet refusing it.
+  // KEYWORDS: repeat-start, toggle, unmatched-start-note, op-log, rebuild-on-apply
+  void _toggleRepeatStart() {
+    final Bar? bar = _bar;
+    if (bar == null) {
+      return;
+    }
+    final bool starts = bar.openingBarline != Barline.repeatStart;
+    final bool applied = widget.session.setRepeatStart(
+      sectionId: _sectionId,
+      barIndex: _barIndex,
+      starts: starts,
+    );
+    _report(
+      applied,
+      starts ? 'Repeat start set.' : 'Repeat start cleared.',
+      refusal: 'Nothing changed: the bar already carries that barline.',
+    );
+  }
+
+  // PURPOSE: Switch the repeat-end barline on the cursor's bar on or off, which closes the passage
+  //          the repeat start opened.
+  // INPUTS: None; reads the cursor's bar to decide which way the toggle goes.
+  // OUTPUTS: Nothing. As with the start, a lone repeat end is written as asked and reported by the
+  //          derivation instead of being refused here.
+  // KEYWORDS: repeat-end, toggle, unmatched-end-note, op-log, rebuild-on-apply
+  void _toggleRepeatEnd() {
+    final Bar? bar = _bar;
+    if (bar == null) {
+      return;
+    }
+    final bool ends = bar.closingBarline != Barline.repeatEnd;
+    final bool applied = widget.session.setRepeatEnd(
+      sectionId: _sectionId,
+      barIndex: _barIndex,
+      ends: ends,
+    );
+    _report(
+      applied,
+      ends ? 'Repeat end set.' : 'Repeat end cleared.',
+      refusal: 'Nothing changed: the bar already carries that barline.',
+    );
+  }
+
+  // PURPOSE: Step the cursor's bar through the three states of the repeat-previous symbol — no
+  //          symbol, the previous bar, the previous two bars — which is how a `%` bar is written,
+  //          and how it is taken away again.
+  // INPUTS: None; reads the symbol the cursor's bar carries now.
+  // OUTPUTS: Nothing. The cycle is ordered off → one bar → two bars → off so that every state is
+  //          reachable from every other by pressing the same button, which is what makes this one
+  //          control instead of three and keeps it inside D2's two-tap budget. The button's own
+  //          label carries the state, because a musician who cannot see what the symbol currently
+  //          is cannot tell what the next press will do.
+  // KEYWORDS: repeat-previous, percent-bar, cycle, three-states, op-log, rebuild-on-apply
+  void _cycleRepeatPrevious() {
+    final Bar? bar = _bar;
+    if (bar == null) {
+      return;
+    }
+    final RepeatPrevious next = switch (bar.repeatPrevious) {
+      RepeatPrevious.none => RepeatPrevious.oneBar,
+      RepeatPrevious.oneBar => RepeatPrevious.twoBars,
+      RepeatPrevious.twoBars => RepeatPrevious.none,
+    };
+    final bool applied = widget.session.setRepeatPrevious(
+      sectionId: _sectionId,
+      barIndex: _barIndex,
+      previous: next,
+    );
+    _report(
+      applied,
+      'Repeat previous: ${repeatPreviousText(next)}.',
+      refusal: 'Nothing changed: the bar already carries that symbol.',
+    );
+  }
+
+  // PURPOSE: Ask which alternative ending the cursor's bar carries and apply the answer, because a
+  //          bracket's figure is a small set of choices rather than text and asking through a
+  //          keyboard would charge a musician for a number the sheet can offer as a button.
+  // INPUTS: None; reads the bracket the cursor's bar carries now, so the dialog can show it.
+  // OUTPUTS: Nothing. A dismissed dialog and a choice equal to what the bar already carries change
+  //          nothing. "No bracket" is a real choice and removes the bracket; it is not the same as
+  //          the unnumbered bracket, which the page draws and the musician asked for.
+  // KEYWORDS: volta, ending, bracket, dialog, no-keyboard, clear-by-null, op-log
+  Future<void> _chooseVolta() async {
+    final Bar? bar = _bar;
+    if (bar == null) {
+      return;
+    }
+    final _VoltaChoice? choice = await showDialog<_VoltaChoice>(
+      context: context,
+      builder: (BuildContext context) => _VoltaDialog(current: bar.volta),
+    );
+    if (!mounted || choice == null || !choice.chosen) {
+      return;
+    }
+    final bool applied = widget.session.setVolta(
+      sectionId: _sectionId,
+      barIndex: _barIndex,
+      volta: choice.volta,
+    );
+    _report(
+      applied,
+      // No full stop after the figure: `voltaText` names a bracket the way it is drawn, and the
+      // figure already carries the dot that belongs to it, so a sentence ending here would print
+      // `[1..` — two dots where the page has one.
+      choice.volta == null
+          ? 'Ending bracket removed.'
+          : 'Ending bracket set to ${voltaText(choice.volta!)}',
+      refusal: 'Nothing changed: the bar already carries that bracket.',
     );
   }
 
@@ -453,6 +622,42 @@ class _SongFormSheetState extends State<SongFormSheet> {
                 ),
               ]),
               const SizedBox(height: 14),
+              // Where the tune repeats and which pass takes which ending. The buttons carry the
+              // state of the cursor's bar as well as the action, because a sign that is present or
+              // absent is something a musician reads before deciding what to press; a row of
+              // identical buttons would say what CAN be done and not what IS.
+              _buildGroup('REPEAT', <Widget>[
+                _FormButton(
+                  buttonKey: 'song-form-repeat-start',
+                  icon: Icons.first_page,
+                  label: 'Repeat start',
+                  active: bar?.openingBarline == Barline.repeatStart,
+                  onTap: hasBar ? _toggleRepeatStart : null,
+                ),
+                _FormButton(
+                  buttonKey: 'song-form-repeat-end',
+                  icon: Icons.last_page,
+                  label: 'Repeat end',
+                  active: bar?.closingBarline == Barline.repeatEnd,
+                  onTap: hasBar ? _toggleRepeatEnd : null,
+                ),
+                _FormButton(
+                  buttonKey: 'song-form-repeat-previous',
+                  icon: Icons.repeat,
+                  label: 'Previous: ${repeatPreviousText(bar?.repeatPrevious)}',
+                  active:
+                      bar != null && bar.repeatPrevious != RepeatPrevious.none,
+                  onTap: hasBar ? _cycleRepeatPrevious : null,
+                ),
+                _FormButton(
+                  buttonKey: 'song-form-volta',
+                  icon: Icons.bookmark_border,
+                  label: 'Ending: ${voltaText(bar?.volta)}',
+                  active: bar?.volta != null,
+                  onTap: hasBar ? () => _chooseVolta() : null,
+                ),
+              ]),
+              const SizedBox(height: 14),
               _buildGroup('SECTION', <Widget>[
                 _FormButton(
                   buttonKey: 'song-form-section-insert-before',
@@ -611,12 +816,18 @@ class _FormButton extends StatelessWidget {
   ///
   /// [danger] colours the label as a removal, so the two destructive operations are not one slip of
   /// the thumb away from looking like the harmless ones beside them.
+  ///
+  /// [active] marks a button whose operation the selected bar already carries — a repeat barline
+  /// that is already there, a bracket that is already drawn. It is drawn as a chosen state rather
+  /// than as a second label, so a toggle shows what IS as well as what it would do, and the same
+  /// button is what switches it off again.
   const _FormButton({
     required this.buttonKey,
     required this.icon,
     required this.label,
     required this.onTap,
     this.danger = false,
+    this.active = false,
   });
 
   /// The widget key the tests and the driving tools find this button by.
@@ -634,14 +845,21 @@ class _FormButton extends StatelessWidget {
   /// Whether this button removes something.
   final bool danger;
 
+  /// Whether the selected bar already carries what this button sets.
+  final bool active;
+
   @override
   Widget build(BuildContext context) {
     final bool enabled = onTap != null;
     final Color foreground = !enabled
         ? sheetMutedColor
-        : (danger ? _dangerColor : sheetOnPanelColor);
+        : (danger
+              ? _dangerColor
+              : (active ? sheetAccentColor : sheetOnPanelColor));
     return Material(
-      color: enabled ? sheetCellColor : sheetCellColor.withValues(alpha: 0.35),
+      color: enabled
+          ? (active ? sheetSelectedCellColor : sheetCellColor)
+          : sheetCellColor.withValues(alpha: 0.35),
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         key: ValueKey<String>(buttonKey),
@@ -732,3 +950,78 @@ class _RenameSectionDialogState extends State<_RenameSectionDialog> {
     ],
   );
 }
+
+/// What the ending dialog gave back: whether the musician chose anything at all, and the bracket
+/// they chose — a null bracket being a real choice ("no bracket"), not an absence of one.
+///
+/// A record rather than a nullable [Volta] because the two states a caller must tell apart would
+/// otherwise share a value: a dismissed dialog and "remove the bracket" would both arrive as null.
+typedef _VoltaChoice = ({bool chosen, Volta? volta});
+
+/// The brackets the ending dialog offers, in the order they are shown.
+///
+/// `0` is the unnumbered bracket — the one iReal writes `N0` and the page draws as a bare `[` — and
+/// it is offered beside "No bracket" because they are different states of the bar. The figures stop
+/// at 4: a chart that needs a fifth ending is expressible in the model, but none appeared in the
+/// corpus this project checked against, and a row of every figure to twenty-six would be a wall of
+/// buttons to solve a case nobody has.
+const List<_VoltaChoice> _voltaChoices = <_VoltaChoice>[
+  (chosen: true, volta: null),
+  (chosen: true, volta: Volta(0)),
+  (chosen: true, volta: Volta(1)),
+  (chosen: true, volta: Volta(2)),
+  (chosen: true, volta: Volta(3)),
+  (chosen: true, volta: Volta(4)),
+];
+
+// PURPOSE: Ask which alternative-ending bracket a bar carries, as buttons rather than as a number
+//          to type, because a phone's keyboard covers half the screen and a bracket figure is one
+//          of a handful of choices.
+// INPUTS: current — the bracket the bar carries now, so the dialog can mark it and a musician can
+//         see what they are changing from.
+// OUTPUTS: A [_VoltaChoice] when an option is pressed, or null when the dialog is dismissed. The
+//          dialog never edits the document itself: it hands the choice back, so a dismissed dialog
+//          cannot have half-changed anything.
+// KEYWORDS: volta, ending, dialog, choices, no-keyboard, dismiss-safe, cancel-is-null
+class _VoltaDialog extends StatelessWidget {
+  /// Creates the ending chooser showing [current] as the chosen figure.
+  const _VoltaDialog({required this.current});
+
+  /// The bracket the bar carries, or null when it carries none.
+  final Volta? current;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Alternative ending'),
+    content: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: <Widget>[
+        for (final _VoltaChoice choice in _voltaChoices)
+          _FormButton(
+            buttonKey: 'song-form-volta-${_voltaChoiceKey(choice.volta)}',
+            icon: choice.volta == null ? Icons.block : Icons.bookmark_border,
+            label: choice.volta == null
+                ? 'No bracket'
+                : (choice.volta!.number == 0
+                      ? 'Unnumbered ['
+                      : '[${choice.volta!.number}.'),
+            active: current == choice.volta,
+            onTap: () => Navigator.of(context).pop(choice),
+          ),
+      ],
+    ),
+    actions: <Widget>[
+      TextButton(
+        key: const ValueKey<String>('song-form-volta-cancel'),
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+    ],
+  );
+}
+
+/// The key fragment naming one ending choice, so a test and a driving tool can address each option
+/// without depending on the order the buttons happen to be built in.
+String _voltaChoiceKey(Volta? volta) =>
+    volta == null ? 'none' : 'n${volta.number}';
