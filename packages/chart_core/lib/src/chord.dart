@@ -1,13 +1,12 @@
-// PURPOSE: Model a chord the way a chart writes one — a root, a quality suffix, optional added
-//          tensions, an optional slash bass and an optional parenthesised marking — so that the
+// PURPOSE: Model a chord the way a chart writes one — a root, a quality suffix carrying its
+//          tensions, an optional slash bass and an optional alternate chord — so that the
 //          transposer can move a chord without understanding what its quality means.
-// INPUTS: A ChordRoot (sounding pitch plus an optional spelling override), a ChordQuality, a
-//         list of tension tokens, an optional ChordRoot for the slash bass, and a parenthesised
-//         flag.
+// INPUTS: A ChordRoot (sounding pitch plus an optional spelling override), a ChordQuality, an
+//         optional ChordRoot for the slash bass, and an optional nested Chord for the alternate.
 // OUTPUTS: Immutable values. [Chord.render] turns one into the text a chart shows, in a given
-//          key. Chord equality compares every part including the tension list by value, so two
-//          chords built separately from the same data are equal.
-// KEYWORDS: chord, chord-root, chord-quality, slash-chord, alterations, chart-notation
+//          key. Chord equality compares every part, including the nested alternate, so two chords
+//          built separately from the same data are equal.
+// KEYWORDS: chord, chord-root, chord-quality, slash-chord, alternate-chord, chart-notation
 import 'key.dart';
 import 'pitch.dart';
 import 'spelling_table.dart';
@@ -114,101 +113,89 @@ class ChordRoot {
 }
 
 /// A chord as it appears on a chart.
+///
+/// The shape is taken from the format rather than invented, and two earlier guesses were removed
+/// once the iReal protocol document was read:
+///
+///   - There is no separate list of tensions. `7b9`, `^7#11` and `add9` are single quality
+///     suffixes, and splitting them into a quality plus a list of alterations would mean the
+///     codec had to reassemble one token from two fields on every round trip.
+///   - Parentheses do not mark a chord as parenthesised. `(Db^7/F)` is an ALTERNATE chord drawn
+///     small above the main one, so it is a chord in its own right and carries its own root,
+///     quality and bass. A boolean could not have expressed that, and transposing it would have
+///     been forgotten.
 class Chord {
-  /// Creates a chord from its [root], [quality], tension [alterations], optional slash [bass]
-  /// and [parenthesised] marking.
+  /// Creates a chord from its [root], [quality], optional slash [bass] and optional [alternate].
   const Chord({
     required this.root,
     this.quality = ChordQuality.majorTriad,
-    this.alterations = const <String>[],
     this.bass,
-    this.parenthesised = false,
+    this.alternate,
   });
 
   /// The root of the chord.
   final ChordRoot root;
 
-  /// The quality suffix.
+  /// The quality suffix, carrying any tensions: `m7`, `7b9`, `^7#11`, or empty for a major triad.
   final ChordQuality quality;
-
-  /// Added tensions in chart order, such as `b9` or `#11`. Stored as their written tokens
-  /// because they do not participate in transposition — a `b9` stays a `b9` when the root moves.
-  final List<String> alterations;
 
   /// The slash bass, or null when the chord is in root position.
   final ChordRoot? bass;
 
-  /// Whether the chart writes this chord in parentheses.
-  final bool parenthesised;
+  /// The alternate chord drawn above this one, or null when there is none.
+  ///
+  /// Nested rather than flagged, because an alternate is a whole chord: it has its own root, its
+  /// own quality and possibly its own bass. It transposes with the chord it sits above, which is
+  /// why [Transposer.transposeChord] recurses into it.
+  final Chord? alternate;
 
   // PURPOSE: Render the chord as chart text in a given key, which is what a golden test or a
   //          spike log compares and what a musician finally reads.
   // INPUTS: key — the key in force. table — the spelling rule to apply.
-  // OUTPUTS: Root, quality, tensions and slash bass concatenated in chart order; the slash bass
-  //          is omitted when absent. A parenthesised chord is wrapped in round brackets.
-  // KEYWORDS: rendering, chart-notation, slash-chord, golden
+  // OUTPUTS: Root, quality and slash bass concatenated in chart order, and then the alternate
+  //          chord wrapped in parentheses when there is one. The rendering round-trips: parsing
+  //          the output of a chord imported from a chart returns the same chord.
+  // KEYWORDS: rendering, chart-notation, slash-chord, alternate-chord, golden
   /// Returns this chord as the text a chart shows in [key].
   String render(Key key, SpellingTable table) {
     final StringBuffer buffer = StringBuffer();
-    if (parenthesised) {
-      buffer.write('(');
-    }
     buffer.write(root.spellIn(key, table).toString());
     buffer.write(quality.token);
-    for (final String alteration in alterations) {
-      buffer.write(alteration);
-    }
     final ChordRoot? slash = bass;
     if (slash != null) {
       buffer.write('/');
       buffer.write(slash.spellIn(key, table).toString());
     }
-    if (parenthesised) {
+    final Chord? above = alternate;
+    if (above != null) {
+      buffer.write('(');
+      buffer.write(above.render(key, table));
       buffer.write(')');
     }
     return buffer.toString();
   }
 
   // PURPOSE: Compare chords by value so that a transposition test can assert equality of whole
-  //          chords rather than of rendered strings, which would hide a spelling change behind
-  //          a formatting coincidence.
+  //          chords rather than of rendered strings, which would hide a spelling change behind a
+  //          formatting coincidence.
   // INPUTS: other — any object.
-  // OUTPUTS: True when every part matches and the tension lists are equal element by element.
-  //          Implemented directly rather than with a collection helper because chart_core's
-  //          dependency list is empty by design and equality of two short string lists does not
-  //          justify the first one.
-  // KEYWORDS: equality, value-semantics, list-equality
+  // OUTPUTS: True when root, quality, bass and alternate all match. Implemented directly rather
+  //          than with a collection helper, because the only collection this class ever had is
+  //          gone and chart_core's dependency list is empty by design.
+  // KEYWORDS: equality, value-semantics, nested-chord
   @override
-  bool operator ==(Object other) {
-    if (other is! Chord) {
-      return false;
-    }
-    if (other.root != root ||
-        other.quality != quality ||
-        other.bass != bass ||
-        other.parenthesised != parenthesised ||
-        other.alterations.length != alterations.length) {
-      return false;
-    }
-    for (int index = 0; index < alterations.length; index++) {
-      if (other.alterations[index] != alterations[index]) {
-        return false;
-      }
-    }
-    return true;
-  }
+  bool operator ==(Object other) =>
+      other is Chord &&
+      other.root == root &&
+      other.quality == quality &&
+      other.bass == bass &&
+      other.alternate == alternate;
 
   @override
-  int get hashCode => Object.hash(
-    root,
-    quality,
-    bass,
-    parenthesised,
-    Object.hashAll(alterations),
-  );
+  int get hashCode => Object.hash(root, quality, bass, alternate);
 
   @override
   String toString() =>
-      'Chord($root${quality.token.isEmpty ? '' : quality.token}'
-      '${alterations.join()}${bass == null ? '' : '/$bass'})';
+      'Chord($root${quality.token}${bass == null ? '' : '/$bass'}'
+      '${alternate == null ? '' : ' ($alternate)'})';
 }

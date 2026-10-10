@@ -29,7 +29,7 @@ const List<Key> _chromaticKeys = <Key>[
 ];
 
 /// Chords covering the shapes a chart contains: every triad, a seventh, a tension, a slash bass
-/// and a parenthesised marking. Every root pitch class appears at least once across the set.
+/// and an alternate chord. Every root pitch class appears at least once across the set.
 const List<Chord> _probeChords = <Chord>[
   Chord(root: ChordRoot(0)),
   Chord(root: ChordRoot(1)),
@@ -45,16 +45,15 @@ const List<Chord> _probeChords = <Chord>[
   Chord(root: ChordRoot(11)),
   Chord(root: ChordRoot(0), quality: ChordQuality.minorTriad),
   Chord(root: ChordRoot(2), quality: ChordQuality.minorSeventh),
-  Chord(
-    root: ChordRoot(7),
-    quality: ChordQuality.dominantSeventh,
-    alterations: <String>['b9'],
-  ),
+  // A tension written the way the format writes it: inside the quality suffix, not as a separate
+  // list. `7b9` is one token.
+  Chord(root: ChordRoot(7), quality: ChordQuality('7b9')),
   Chord(root: ChordRoot(0), bass: ChordRoot(4)),
+  // An alternate chord, which carries its own root and so has to be transposed too.
   Chord(
     root: ChordRoot(5),
     quality: ChordQuality.majorSeventh,
-    parenthesised: true,
+    alternate: Chord(root: ChordRoot(0), quality: ChordQuality('7b9')),
   ),
 ];
 
@@ -108,23 +107,38 @@ void main() {
       );
     });
 
-    test('the quality, the tensions and the marking survive the move', () {
+    test('a tension inside the quality survives the move', () {
       final Chord moved = transposer.transposeChord(
-        const Chord(
-          root: ChordRoot(0),
-          quality: ChordQuality.dominantSeventh,
-          alterations: <String>['b9'],
-          parenthesised: true,
-        ),
+        const Chord(root: ChordRoot(0), quality: ChordQuality('7b9')),
         2,
       );
-      // Root C up a whole tone is D; nothing else changes.
+      // Root C up a whole tone is D; the quality is one opaque token and moves with it.
       expect(
         moved.render(
           const Key(tonic: WrittenNote(NoteLetter.d, 0), mode: Mode.major),
           table,
         ),
-        '(D7b9)',
+        'D7b9',
+      );
+    });
+
+    test('an alternate chord transposes with the chord it sits above', () {
+      // The case a boolean flag could not have expressed: the alternate has its own root, and
+      // copying it instead of transposing it would leave the small chord in the old key.
+      final Chord moved = transposer.transposeChord(
+        const Chord(
+          root: ChordRoot(0),
+          quality: ChordQuality.majorSeventh,
+          alternate: Chord(root: ChordRoot(7), quality: ChordQuality('7b9')),
+        ),
+        2,
+      );
+      expect(
+        moved.render(
+          const Key(tonic: WrittenNote(NoteLetter.d, 0), mode: Mode.major),
+          table,
+        ),
+        'Dmaj7(A7b9)',
       );
     });
 

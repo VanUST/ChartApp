@@ -25,11 +25,12 @@ class Transposer {
   // INPUTS: chord — the chord to move. semitones — the interval; negative moves downward, zero
   //         returns an equal chord, and a magnitude of 12 or more is allowed and reduced by the
   //         spelling table rather than here.
-  // OUTPUTS: A new Chord with root and slash bass moved and everything else preserved: quality,
-  //          tension tokens, and the parenthesised flag. The root's spelling preference is
-  //          carried across, because a chord the composer forced to be written with sharps keeps
-  //          that intent after transposition.
-  // KEYWORDS: transposition, chord, interval, spelling-preference-preservation
+  // OUTPUTS: A new Chord with root, slash bass and alternate chord moved, and the quality
+  //          preserved. The root's spelling preference is carried across, because a chord the
+  //          composer forced to be written with sharps keeps that intent after transposition. The
+  //          alternate is transposed by recursion, because it is a chord in its own right rather
+  //          than a marking on this one.
+  // KEYWORDS: transposition, chord, interval, spelling-preference-preservation, alternate-chord
   /// Returns [chord] moved by [semitones], with its written form left undecided.
   Chord transposeChord(Chord chord, int semitones) {
     final ChordRoot root = ChordRoot(
@@ -37,17 +38,20 @@ class Transposer {
       preference: chord.root.preference,
     );
     final ChordRoot? slash = chord.bass;
+    final Chord? above = chord.alternate;
     return Chord(
       root: root,
       quality: chord.quality,
-      alterations: chord.alterations,
       bass: slash == null
           ? null
           : ChordRoot(
               slash.semitones + semitones,
               preference: slash.preference,
             ),
-      parenthesised: chord.parenthesised,
+      // The alternate chord is transposed by recursion rather than copied, because it is a whole
+      // chord with its own root and its own bass. Copying it would leave the small chord printed
+      // above the main one in the key the chart used to be in.
+      alternate: above == null ? null : transposeChord(above, semitones),
     );
   }
 

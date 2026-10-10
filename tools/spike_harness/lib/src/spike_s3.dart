@@ -110,9 +110,9 @@ const List<Key> _chromaticKeys = <Key>[
   Key(tonic: WrittenNote(NoteLetter.b, 0), mode: Mode.major),
 ];
 
-/// The chords the measurement runs over: every triad, then sevenths, tensions, a slash bass and
-/// a parenthesised marking, so that a property which held only for bare triads is not reported
-/// as holding for chords.
+/// The chords the measurement runs over: every triad, then sevenths, a tension, a slash bass and
+/// an alternate chord, so that a property which held only for bare triads is not reported as
+/// holding for chords.
 const List<Chord> _probeChords = <Chord>[
   Chord(root: ChordRoot(0)),
   Chord(root: ChordRoot(1)),
@@ -128,16 +128,14 @@ const List<Chord> _probeChords = <Chord>[
   Chord(root: ChordRoot(11)),
   Chord(root: ChordRoot(0), quality: ChordQuality.minorTriad),
   Chord(root: ChordRoot(2), quality: ChordQuality.minorSeventh),
-  Chord(
-    root: ChordRoot(7),
-    quality: ChordQuality.dominantSeventh,
-    alterations: <String>['b9'],
-  ),
+  // A tension as the format writes it — one quality token — and an alternate chord, which has a
+  // root of its own and must transpose with the chord it sits above.
+  Chord(root: ChordRoot(7), quality: ChordQuality('7b9')),
   Chord(root: ChordRoot(0), bass: ChordRoot(4)),
   Chord(
     root: ChordRoot(5),
     quality: ChordQuality.majorSeventh,
-    parenthesised: true,
+    alternate: Chord(root: ChordRoot(0), quality: ChordQuality('7b9')),
   ),
 ];
 
