@@ -22,6 +22,7 @@ import 'dart:ui' as ui;
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:chartapp/ireal_library.dart';
+import 'package:chartapp/ireal_source.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

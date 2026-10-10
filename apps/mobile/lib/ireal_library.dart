@@ -1,31 +1,29 @@
-// PURPOSE: Turn an iReal export into the list of songs a reader can page through, and load that
-//          list from the `.html` file an iReal Pro export usually is. A payload can hold several
-//          songs separated by `===` with the last segment being the playlist name, and
-//          `parseIRealPayload` deliberately parses ONE song and reports the ambiguity rather than
-//          guessing where the next begins — so the enumeration happens here, exactly as
-//          `packages/chart_core/tool/probe_ireal.dart` does it.
-// INPUTS: A decoded `irealb://` payload, or a path to an `.html` file holding one in an
-//         `irealb://` link.
+// PURPOSE: Turn the text of an iReal export into the list of songs a reader can page through. A
+//          payload can hold several songs separated by `===` with the last segment being the
+//          playlist name, and `parseIRealPayload` deliberately parses ONE song and reports the
+//          ambiguity rather than guessing where the next begins — so the enumeration happens here,
+//          exactly as `packages/chart_core/tool/probe_ireal.dart` does it.
+// INPUTS: The decoded text of an `irealb://` payload, or the whole text of an export file holding
+//         one in an `irealb://` link. Never a path and never a byte stream.
 // OUTPUTS: An [IRealLibrary] holding the playlist name and one [IRealSong] per segment, each with
-//          its parsed [Song] and the issues the import reported. Loading a path that is missing,
-//          unreadable or carries no `irealb://` link throws; the caller is expected to show that
-//          message rather than to receive a silent empty library.
-// KEYWORDS: ireal, import, playlist, enumeration, file-load, viewer, reader
+//          its parsed [Song] and the issues the import reported. Text that carries no `irealb://`
+//          link throws a [FormatException]; the caller is expected to show that message rather than
+//          to receive a silent empty library.
+// KEYWORDS: ireal, import, playlist, enumeration, text-parse, platform-free, viewer, reader
 //
 // A SONG WITH A TRANSPOSITION IS IMPORTED AS WRITTEN. `parseIRealPayload` keeps the written key
 // and reports the requested transposition as an issue rather than rewriting every chord; this file
 // preserves that choice and carries the issue through to the song entry, where the viewer shows it.
 // Nothing here re-applies or hides a transposition.
-
-import 'dart:io';
+//
+// WHY THERE IS NO FILE ACCESS HERE. This library is the part of loading that is the same in a
+// browser and on a desktop, so it stays free of `dart:io` and of the DOM: the web build compiles
+// this file, and a browser has no filesystem for `dart:io` to reach. Where the text comes from —
+// a typed path or a file the reader picked in the browser — is decided in `ireal_source.dart`,
+// which routes to a per-platform implementation. The viewer injects that loader, so it never knows
+// which one it got.
 
 import 'package:chart_core/chart_core.dart';
-
-/// The path the viewer opens when the reader gives it nothing else.
-///
-/// It is an absolute path on the owner's machine rather than a package asset because the file is
-/// outside this repository: the export belongs to the person reading it, not to the source tree.
-const String defaultIRealPath = r'C:\Users\1\Downloads\Ракета Русское.html';
 
 /// One song read out of an iReal payload.
 class IRealSong {
@@ -106,24 +104,21 @@ IRealLibrary parseIRealLibrary(String decoded) {
   return IRealLibrary(playlistName: playlistName, songs: songs);
 }
 
-// PURPOSE: Read the export a reader points at and hand back its songs, which is the only file
-//          access the viewer performs.
-// INPUTS: path — a path to an `.html` file that contains an `irealb://` link, or to a text file
-//         holding the decoded payload's link form.
-// OUTPUTS: The parsed [IRealLibrary]. Throws a [FileSystemException] when the path does not exist,
-//          and a [FormatException] when it holds no `irealb://` link. Both are ordinary outcomes
-//          for a typed path and are meant to be shown, not swallowed.
-// KEYWORDS: file, read, irealb-link, decode, total-io, error-reporting
-/// Loads the iReal library stored at [path].
-Future<IRealLibrary> loadIRealLibraryFromFile(String path) async {
-  final File file = File(path);
-  if (!file.existsSync()) {
-    throw FileSystemException('No file exists at this path.', path);
-  }
-  final String contents = await file.readAsString();
+// PURPOSE: Read the `irealb://` link an iReal export wraps its payload in and parse every song it
+//          holds, which is the half of loading that does not care where the text came from.
+// INPUTS: contents — the whole text of an export (.html wrapper or bare payload text). source — a
+//         label for where the text came from (a path on desktop, a file name in a browser), used
+//         only to make the thrown [FormatException] point at the file the reader chose. It may be
+//         empty, which the exception tolerates.
+// OUTPUTS: The parsed [IRealLibrary]. Throws a [FormatException] when [contents] carries no
+//          `irealb://` link; the message is meant to be shown, not swallowed. Never throws for an
+//          empty [source].
+// KEYWORDS: ireal-link, decode, shared-parse, platform-free, error-reporting
+/// Parses the iReal export held in [contents], naming [source] if it is not an export.
+IRealLibrary parseIRealExport(String contents, {String source = ''}) {
   final RegExpMatch? link = RegExp('irealb://([^"]*)').firstMatch(contents);
   if (link == null) {
-    throw FormatException('No irealb:// link was found in this file.', path);
+    throw FormatException('No irealb:// link was found in this file.', source);
   }
   return parseIRealLibrary(Uri.decodeFull(link.group(1)!));
 }

@@ -3,14 +3,21 @@
 //          and with the performance facts — position, tempo, style, key and repeats — on one bar.
 //          It is a reader first: it shows the layout the engine produced and the issue list the
 //          import reported.
-// INPUTS: A path typed by the reader, an [IRealLibraryLoader] that turns a path into an
-//         [IRealLibrary], a starting path, and whether to load that path on the first frame. The
-//         loader is injected so a widget test can pump this screen with a synthetic payload and
-//         never touch the filesystem.
-// OUTPUTS: A screen with a path bar, a song list, a scene bar and the selected song's page or
+// INPUTS: A reference the reader supplies, an [IRealLibraryLoader] that turns that reference into
+//         an [IRealLibrary], a starting reference, whether a reference is a filesystem path at all,
+//         and whether to load the starting reference on the first frame. The loader is injected so
+//         a widget test can pump this screen with a synthetic payload and never touch the
+//         filesystem, and so the web build can hand it a browser file chooser instead of a path.
+// OUTPUTS: A screen with a source bar, a song list, a scene bar and the selected song's page or
 //          pages, each drawn by `ChartPainter` at the size the window gives it.
 // KEYWORDS: viewer, ireal, reader, screen, page-view, transposition, scene-bar, page-modes,
-//           widget-test-seam, verification
+//           widget-test-seam, platform-seam, verification
+//
+// WHAT CHANGES ON THE WEB, AND WHAT DOES NOT. Everything below the source bar is identical on
+// every platform, because nothing below it touches a file: the loader is the seam and it is the
+// same seam the widget tests use. Only the source bar differs — a path field where a path exists
+// and a file-picker button where the browser can only offer a choice — which is what
+// [sourceIsFilePath] selects. A screen that cannot name a file must not pretend to.
 //
 // WHICH TRANSPOSITION THIS IS. Owner decision D14 gives transposition two meanings, and this screen
 // implements the EDITOR meaning: the chart is shown in another key, its key badge changes, and every
@@ -30,33 +37,54 @@ import 'package:chart_ui/chart_ui.dart';
 import 'package:flutter/material.dart' hide Key;
 
 import 'ireal_library.dart';
+import 'ireal_source.dart';
 import 'key_grid.dart';
 import 'scene_bar.dart';
 
-/// Turns a path into the library it holds.
-typedef IRealLibraryLoader = Future<IRealLibrary> Function(String path);
+/// Turns a reference into the library it holds.
+///
+/// On a platform with a filesystem the reference is a path. In a browser it is whatever the web
+/// implementation needs it to be — currently nothing, because the reader picks a file — but the
+/// shape is kept so that there is ONE loading seam rather than one per platform.
+typedef IRealLibraryLoader = Future<IRealLibrary> Function(String reference);
 
 /// The screen that loads an iReal export and renders its songs.
 class IRealViewerScreen extends StatefulWidget {
   /// Creates the viewer.
+  ///
+  /// [sourceIsFilePath] and the default of [autoLoad] both come from `ireal_source.dart`, so a
+  /// build on any target gets the affordance its platform can honour without the caller passing
+  /// anything.
   const IRealViewerScreen({
     super.key,
-    this.loader = loadIRealLibraryFromFile,
+    this.loader = loadIRealLibrary,
     this.initialPath = defaultIRealPath,
-    this.autoLoad = true,
+    this.autoLoad = iRealSourceIsFilePath,
+    this.sourceIsFilePath = iRealSourceIsFilePath,
   });
 
-  /// How a path becomes a library.
+  /// How a reference becomes a library.
   final IRealLibraryLoader loader;
 
-  /// The path the text field starts with.
+  /// The reference the source bar starts with.
+  ///
+  /// A path where one exists, and the empty string in a browser, where there is no reference to
+  /// type and the bar shows no field to type it into.
   final String initialPath;
 
   /// Whether to load [initialPath] once, after the first frame.
   ///
-  /// True in the application, so a launch shows a chart without a click. A test that wants to
-  /// decide exactly when the loader runs passes false and presses Load itself.
+  /// True where [initialPath] is a path, so a launch shows a chart without a click. False in a
+  /// browser: the source is a file chooser, and a browser refuses to open one outside a user
+  /// gesture, so a load on the first frame would be refused rather than deferred. A test that
+  /// wants to decide exactly when the loader runs passes false and presses the button itself.
   final bool autoLoad;
+
+  /// Whether [initialPath] is a filesystem path the reader may type.
+  ///
+  /// True selects the path field and the Load button; false selects a button that opens the
+  /// platform's own file chooser and tells the reader the file is read where it already is.
+  final bool sourceIsFilePath;
 
   @override
   State<IRealViewerScreen> createState() => _IRealViewerScreenState();
@@ -278,12 +306,28 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
-  // PURPOSE: Give the reader the path field and the button that starts a load.
+  // PURPOSE: Give the reader the control that starts a load, in the form the platform can honour.
   // INPUTS: context — the build context.
-  // OUTPUTS: The bar widget. The button is disabled while a load is running, so two reads cannot
-  //          race for the same state.
-  // KEYWORDS: path-field, load-button, busy-guard
+  // OUTPUTS: The bar widget. Where a path exists this is the path field and the Load button; in a
+  //          browser it is a single button that opens the file chooser, because a text field for a
+  //          path no browser can resolve would invite the reader to type something meaningless. The
+  //          button is disabled while a load is running, so two reads cannot race for the same
+  //          state.
+  // KEYWORDS: source-bar, path-field, load-button, file-picker, busy-guard, platform-affordance
   Widget _buildPathBar(BuildContext context) {
+    if (!widget.sourceIsFilePath) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            onPressed: _loading ? null : () => unawaited(_load()),
+            icon: const Icon(Icons.folder_open),
+            label: const Text('Open .html file'),
+          ),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
       child: Row(
@@ -337,14 +381,17 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     }
     final IRealLibrary? library = _library;
     if (library == null) {
+      // The prompt names the platform's own way in, because the alternative — telling a browser
+      // reader to type a Windows path — is the one instruction they cannot follow.
+      final String prompt = widget.sourceIsFilePath
+          ? 'Load an iReal .html file to see its songs.\n'
+                'Default: $defaultIRealPath'
+          : 'Open an iReal .html file exported from iReal Pro.\n'
+                'It is read in the browser and is not uploaded.';
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            'Load an iReal .html file to see its songs.\n'
-            'Default: $defaultIRealPath',
-            textAlign: TextAlign.center,
-          ),
+          child: Text(prompt, textAlign: TextAlign.center),
         ),
       );
     }

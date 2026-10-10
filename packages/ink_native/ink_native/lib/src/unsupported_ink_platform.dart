@@ -1,19 +1,27 @@
 // PURPOSE: Provide the implementation used on platforms without a native ink surface — Linux,
-//          Windows and any target whose native package has not claimed the slot. It exists so
-//          that the absence of a pen is an ordinary state the editor can display, instead of an
-//          exception that reaches the widget tree.
+//          Windows, iOS, the web, and any target whose native package has not claimed the slot. It
+//          exists so that the absence of a pen is an ordinary state the editor can display,
+//          instead of an exception that reaches the widget tree. On the web it is not a placeholder
+//          for a missing binding: a browser implementation would be a third implementation of this
+//          contract, and writing it before the raw pointer behaviour has been measured would fix
+//          its design on a guess, so the honest answer there is "no surface yet".
 // INPUTS: None. Every mutating method accepts its arguments and ignores them.
 // OUTPUTS: [supportsInk] is false; [exportStrokes] answers with an empty list rather than null;
 //          [onStrokeCommitted], [onLatencySample] and [onPalmObservation] are permanently empty
 //          streams, so a listener waits forever rather than being told a stroke or a sample
 //          arrived. [describeSurface] answers with a description that names itself as having no
-//          native surface, and [benchLogDirectory] answers null, so a bench run on a desktop
-//          prints "no surface" instead of reporting a latency of zero. Nothing here throws for
-//          a call made in the wrong order, because a desktop build has no ordering to enforce.
-// KEYWORDS: ink-native, no-op, desktop, unsupported, empty-stream, graceful-degradation
+//          native surface, and [benchLogDirectory] answers null, so a bench run on a desktop or in
+//          a browser prints "no surface" instead of reporting a latency of zero. Nothing here
+//          throws for a call made in the wrong order, because a build with no pen has no ordering
+//          to enforce.
+// KEYWORDS: ink-native, no-op, desktop, web, unsupported, empty-stream, graceful-degradation
 import 'package:ink_native_platform_interface/ink_native_platform_interface.dart';
 
 /// An ink surface that accepts every call and draws nothing.
+///
+/// The answer on every platform whose native package has not claimed the slot, the web included:
+/// `supportsInk` is false rather than a claim the surface cannot keep, so a caller that asks
+/// whether it can draw gets a truthful no.
 class UnsupportedInkPlatform extends InkNativePlatform {
   /// Creates the no-op implementation.
   UnsupportedInkPlatform();

@@ -1,15 +1,18 @@
 # PURPOSE: Declare the ChartApp application — the top-level Flutter target that composes the
-#          UI package, the domain, persistence and ink into a runnable app on Android, iOS,
+#          UI package, the domain, persistence and ink into a runnable app on web, Android, iOS,
 #          Linux and Windows.
 # INPUTS: None. Resolved as a member of the root pub workspace.
 # OUTPUTS: The `chartapp` application. Listing every workspace package as a dependency is
 #          deliberate: it makes the whole dependency graph resolve in CI, so a package that
 #          cannot resolve fails here rather than at the moment a feature first imports it.
-# KEYWORDS: app, flutter, android, ios, linux, windows, composition-root, phase-0
+#          A declared dependency is not a compiled one: `storage_drift` is listed here for that
+#          resolution check, and the web entrypoint never imports it, so its native SQLite build
+#          hook stays off the web path (owner decision D20, see apps/mobile/web/).
+# KEYWORDS: app, flutter, web, android, ios, linux, windows, composition-root, phase-0
 name: chartapp
 description: >-
-  ChartApp: a mobile-first chord-chart editor with native handwriting. Android, iOS, Linux and
-  Windows targets from one codebase.
+  ChartApp: a mobile-first chord-chart editor with native handwriting. Web, Android, iOS, Linux
+  and Windows targets from one codebase.
 version: 0.1.0+1
 publish_to: none
 

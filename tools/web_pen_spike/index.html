@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<!--
+  PURPOSE: Measure what a BROWSER actually delivers for stylus and finger input, so the decision to
+           distribute as a web page can rest on a number instead of on an assumption. It measures
+           the raw Pointer Events API on purpose, with no framework in between: a framework maps,
+           coalesces or drops events before application code sees them, and the ceiling belongs to
+           the browser, not to the framework.
+
+  INPUTS: A touch-capable browser. Open the page over HTTP from this machine. Draw in the canvas
+          with an Apple Pencil, an S Pen, or a finger.
+
+  OUTPUTS: Live counters on screen and one JSON object per stroke in the log panel, plus the same
+           lines on the console. The numbers that decide the architecture are:
+             - samplesPerStroke and coalescedPerEvent: whether the digitizer's high-rate stream
+               survives to the page, or arrives as a coarse polyline;
+             - pressureDistinct and tiltDistinct: whether those axes are real or constant;
+             - paintLatencyP95Ms: input timestamp to the end of the frame that drew it;
+             - palmWouldReject / palmWouldAdmit: how the rule already used on Android behaves when
+               fed this browser's contact geometry.
+
+  KEYWORDS: spike, pointer-events, stylus, apple-pencil, s-pen, coalesced, latency, palm, web
+  NOT PART OF THE PRODUCT. A diagnostic, like tool/probe_ireal.dart.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Web pen spike — what does the browser deliver?</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0b1622; color: #e6edf3;
+               font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { display: flex; flex-direction: column; }
+  header { padding: 8px 12px; background: #12233a; display: flex; gap: 16px; flex-wrap: wrap;
+           align-items: center; }
+  header b { color: #ffc857; }
+  #surface { flex: 1; position: relative; background: #fdfdfb; touch-action: none;
+             user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  footer { padding: 8px 12px; background: #12233a; display: flex; gap: 12px; flex-wrap: wrap;
+           align-items: center; max-height: 42vh; overflow: auto; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #2e5d8a;
+           background: #1b3554; color: #e6edf3; }
+  button.primary { background: #2e5d8a; }
+  #log { white-space: pre-wrap; word-break: break-all; color: #9fb3c8; }
+  .ok { color: #7ee787; } .warn { color: #ffc857; } .bad { color: #ff7b72; }
+</style>
+</head>
+<body>
+<header>
+  <span><b>Web pen spike</b></span>
+  <span id="ua"></span>
+  <span>strokes <b id="strokes">0</b></span>
+  <span>samples <b id="samples">0</b></span>
+  <span>samples/stroke <b id="perStroke">0</b></span>
+  <span>coalesced/event <b id="coalesced">0</b></span>
+  <span>paint p95 <b id="p95">–</b> ms</span>
+</header>
+
+<div id="surface"><canvas id="canvas"></canvas></div>
+
+<footer>
+  <button class="primary" id="copy">Copy JSON</button>
+  <button id="download">Download JSON</button>
+  <button id="clear">Clear</button>
+  <span id="hint">Draw with the pen first, then with a finger. Rest a palm on the glass while drawing with the pen.</span>
+  <div id="log"></div>
+</footer>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------------------------
+// The rule the Android surface already uses, restated here so this page measures the SAME thing
+// rather than a fresh invention. On Android the threshold is 40 in AXIS_TOUCH_MAJOR units, which
+// was measured to be a vendor signal rather than a physical width; here the browser gives
+// `width` in CSS pixels, so the number cannot be carried across. It is a knob to READ, not to
+// compare: the interesting output is how wide a palm and a fingertip actually appear in this
+// browser, and whether a pen seen recently is a usable gate signal at all.
+const PALM_WIDTH_PX = 20.0;
+const STYLUS_PROXIMITY_WINDOW_MS = 1000;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { desynchronized: true });
+const el = (id) => document.getElementById(id);
+
+const stats = {
+  strokes: 0, samples: 0, coalescedEvents: 0, rawEvents: 0,
+  latencies: [], pressureValues: new Set(), tiltValues: new Set(),
+  penSamples: 0, touchSamples: 0, mouseSamples: 0,
+  palmWouldReject: 0, palmWouldAdmit: 0, penSeen: 0,
+  widthSeenPen: new Set(), widthSeenTouch: new Set(),
+  coalescedUnavailable: false, hoverSeen: 0, hoverKinds: new Set(),
+};
+const strokeLog = [];
+let lastStylusSeenMs = -Infinity;
+
+function devicePixelRatioSafe() { return window.devicePixelRatio || 1; }
+function resize() {
+  const r = el('surface').getBoundingClientRect();
+  const dpr = devicePixelRatioSafe();
+  canvas.width = Math.round(r.width * dpr);
+  canvas.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+
+el('ua').textContent = navigator.userAgent;
+
+// ---------------------------------------------------------------------------------------------
+// Latency: the timestamp of a sample, against the moment the frame that drew it finished. This is
+// a LOWER BOUND and the page says so — there is no browser API for the moment a frame is presented
+// on glass, which is exactly the API our Android surface had to work around too. What it does
+// measure honestly is input-to-our-paint.
+let pendingLatency = [];
+function flushLatency() {
+  if (pendingLatency.length === 0) return;
+  const painted = performance.now();
+  for (const t of pendingLatency) stats.latencies.push(painted - t);
+  pendingLatency = [];
+  render();
+}
+
+function percentile(sorted, p) {
+  if (sorted.length === 0) return null;
+  const i = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+  return sorted[Math.max(0, i)];
+}
+
+function render() {
+  el('strokes').textContent = stats.strokes;
+  el('samples').textContent = stats.samples;
+  el('perStroke').textContent = stats.strokes ? Math.round(stats.samples / stats.strokes) : 0;
+  el('coalesced').textContent = stats.rawEvents
+    ? (stats.coalescedEvents / stats.rawEvents).toFixed(2) : 0;
+  const sorted = stats.latencies.slice().sort((a, b) => a - b);
+  const p95 = percentile(sorted, 95);
+  el('p95').textContent = p95 === null ? '–' : p95.toFixed(1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Drawing. Every sample the browser offers is drawn, coalesced ones included: dropping them would
+// change the very thing being measured, and a coarse polyline is exactly the failure this spike
+// exists to detect.
+let drawing = false;
+let current = null;
+
+function beginStroke(e) {
+  drawing = true;
+  current = {
+    pointerType: e.pointerType, id: e.pointerId,
+    samples: 0, coalesced: 0, events: 0,
+    pressureDistinct: new Set(), tiltDistinct: new Set(),
+    widths: new Set(), startMs: e.timeStamp, admitted: true,
+  };
+  ctx.beginPath();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = e.pointerType === 'pen' ? '#102a43' : '#b04a5a';
+  ctx.moveTo(e.offsetX, e.offsetY);
+}
+
+function addSample(e, sample) {
+  current.samples++;
+  stats.samples++;
+  pendingLatency.push(sample.timeStamp);
+  // Both the aggregate and the per-stroke set are kept: the aggregate answers "is this axis real at
+  // all on this device", the per-stroke set answers "was it real for THIS stroke", and a constant
+  // pressure in one stroke can hide a working axis in another.
+  const pressure = Math.round(sample.pressure * 100) / 100;
+  const tilt = Math.round((sample.tiltX || 0) / 5) * 5;
+  stats.pressureValues.add(pressure);
+  stats.tiltValues.add(tilt);
+  current.pressureDistinct.add(pressure);
+  current.tiltDistinct.add(tilt);
+  const width = Math.round(sample.width || 0);
+  current.widths.add(width);
+  if (sample.width) {
+    if (e.pointerType === 'touch') stats.widthSeenTouch.add(width);
+    else stats.widthSeenPen.add(width);
+  }
+  ctx.lineTo(sample.offsetX, sample.offsetY);
+}
+
+// Palm rule, the same two conditions the Android surface uses: a wide non-stylus contact is only a
+// palm candidate while a stylus was seen recently. Without a pen a finger draws however wide it is.
+function decideAdmission(e) {
+  if (e.pointerType !== 'touch') return { admit: true, reason: 'not-a-touch' };
+  const penInPlay = (e.timeStamp - lastStylusSeenMs) <= STYLUS_PROXIMITY_WINDOW_MS;
+  const wide = (e.width || 0) >= PALM_WIDTH_PX;
+  if (wide && penInPlay) return { admit: false, reason: 'palm-like-width-with-stylus' };
+  if (wide) return { admit: true, reason: 'palm-like-width-no-stylus' };
+  return { admit: true, reason: 'width-below-threshold' };
+}
+
+el('surface').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  el('surface').setPointerCapture?.(e.pointerId);
+  const d = decideAdmission(e);
+  if (e.pointerType === 'pen') { lastStylusSeenMs = e.timeStamp; stats.penSeen++; }
+  if (!d.admit) { stats.palmWouldReject++; flash('rejected: ' + d.reason); return; }
+  if (e.pointerType !== 'pen' && (e.width || 0) >= PALM_WIDTH_PX && d.reason === 'palm-like-width-no-stylus') {
+    stats.palmWouldAdmit++;
+  }
+  beginStroke(e);
+}, { passive: false });
+
+// Hover is the signal that opens the palm gate on a device that reports it. Whether it arrives at
+// all is one of the things this page answers, so it is counted rather than assumed.
+el('surface').addEventListener('pointermove', (e) => {
+  if (!drawing && e.pointerType === 'pen') {
+    stats.hoverSeen++;
+    stats.hoverKinds.add(e.pointerType);
+    lastStylusSeenMs = e.timeStamp;
+  }
+  if (!drawing) return;
+  e.preventDefault();
+  current.events++;
+  stats.rawEvents++;
+
+  // The coalesced stream, when the browser admits to having one. `getCoalescedEvents` is absent or
+  // broken on some builds — WebKit has an open bug about overlapping sequences — so its absence is
+  // recorded as a finding rather than treated as a zero.
+  let samples = [e];
+  if (typeof e.getCoalescedEvents === 'function') {
+    try {
+      const c = e.getCoalescedEvents();
+      if (c && c.length) { samples = c; }
+    } catch (err) { stats.coalescedUnavailable = true; }
+  } else {
+    stats.coalescedUnavailable = true;
+  }
+  current.coalesced += samples.length;
+  stats.coalescedEvents += samples.length;
+  for (const s of samples) addSample(e, s);
+  ctx.stroke();
+  ctx.beginPath();
+  const last = samples[samples.length - 1];
+  ctx.moveTo(last.offsetX, last.offsetY);
+
+  const kind = e.pointerType === 'pen' ? 'pen' : (e.pointerType === 'touch' ? 'touch' : 'mouse');
+  if (kind === 'pen') stats.penSamples += samples.length;
+  else if (kind === 'touch') stats.touchSamples += samples.length;
+  else stats.mouseSamples += samples.length;
+}, { passive: false });
+
+function endStroke(e) {
+  if (!drawing) return;
+  drawing = false;
+  ctx.stroke();
+  stats.strokes++;
+  const sorted = stats.latencies.slice().sort((a, b) => a - b);
+  const record = {
+    v: 1, name: 'web.pen.stroke',
+    pointerType: current.pointerType,
+    samples: current.samples,
+    rawEvents: current.events,
+    coalescedPerEvent: current.events ? +(current.coalesced / current.events).toFixed(2) : 0,
+    pressureDistinct: current.pressureDistinct.size,
+    tiltDistinct: current.tiltDistinct.size,
+    widths: Array.from(current.widths).slice(0, 12),
+    durationMs: +(e.timeStamp - current.startMs).toFixed(1),
+    paintLatencyP50Ms: pctOf(sorted, 50),
+    paintLatencyP95Ms: pctOf(sorted, 95),
+  };
+  strokeLog.push(record);
+  el('log').textContent = JSON.stringify(record) + '\n' + el('log').textContent;
+  console.log(JSON.stringify(record));
+  current = null;
+  render();
+}
+el('surface').addEventListener('pointerup', endStroke);
+el('surface').addEventListener('pointercancel', endStroke);
+
+// One frame is one flush. Without this guard every pointermove would queue its own animation frame,
+// and the painted timestamp the latency is measured against would belong to a frame that drew
+// nothing.
+let frameQueued = false;
+window.addEventListener('pointermove', () => {
+  if (frameQueued) return;
+  frameQueued = true;
+  requestAnimationFrame(() => { frameQueued = false; flushLatency(); });
+});
+
+function pctOf(sorted, p) { const v = percentile(sorted, p); return v === null ? null : +v.toFixed(1); }
+
+let flashTimer = null;
+function flash(text) {
+  el('hint').textContent = text;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => {
+    el('hint').textContent =
+      'Draw with the pen first, then with a finger. Rest a palm on the glass while drawing with the pen.';
+  }, 1500);
+}
+
+function summary() {
+  const sorted = stats.latencies.slice().sort((a, b) => a - b);
+  const touchWidths = Array.from(stats.widthSeenTouch.values()).sort((a, b) => a - b);
+  const penWidths = Array.from(stats.widthSeenPen.values()).sort((a, b) => a - b);
+  return {
+    v: 1, name: 'web.pen.summary',
+    userAgent: navigator.userAgent,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    devicePixelRatio: devicePixelRatioSafe(),
+    strokes: stats.strokes,
+    samples: stats.samples,
+    samplesPerStroke: stats.strokes ? +(stats.samples / stats.strokes).toFixed(1) : 0,
+    coalescedPerEvent: stats.rawEvents ? +(stats.coalescedEvents / stats.rawEvents).toFixed(2) : 0,
+    coalescedApiPresent: !stats.coalescedUnavailable,
+    penSamples: stats.penSamples, touchSamples: stats.touchSamples, mouseSamples: stats.mouseSamples,
+    penHoverEvents: stats.hoverSeen,
+    distinctPressureValues: stats.pressureValues.size,
+    distinctTiltValues: stats.tiltValues.size,
+    touchWidthsSeen: touchWidths,
+    penWidthsSeen: penWidths,
+    palmWouldReject: stats.palmWouldReject,
+    palmWouldAdmitWideFinger: stats.palmWouldAdmit,
+    penSeen: stats.penSeen,
+    paintLatencyP50Ms: pctOf(sorted, 50),
+    paintLatencyP95Ms: pctOf(sorted, 95),
+    paintLatencyMaxMs: sorted.length ? +sorted[sorted.length - 1].toFixed(1) : null,
+    latencyIsLowerBound:
+      'input timestamp to the end of the frame that drew it; the browser exposes no presentation time',
+  };
+}
+
+el('copy').addEventListener('click', async () => {
+  const text = JSON.stringify(summary(), null, 2);
+  try { await navigator.clipboard.writeText(text); flash('summary copied'); }
+  catch (err) { el('log').textContent = text + '\n' + el('log').textContent; flash('clipboard blocked — written to the log'); }
+});
+el('download').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(summary(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'web-pen-spike.json';
+  a.click();
+});
+el('clear').addEventListener('click', () => {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  stats.latencies = []; stats.strokes = 0; stats.samples = 0;
+  stats.rawEvents = 0; stats.coalescedEvents = 0; strokeLog.length = 0;
+  el('log').textContent = '';
+  render();
+});
+
+resize();
+render();
+el('log').textContent = 'ready — draw in the white area\n';
+</script>
+</body>
+</html>
