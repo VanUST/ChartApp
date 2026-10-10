@@ -75,10 +75,8 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 
+import 'sheet_button.dart';
 import 'sheet_surface.dart';
-
-/// The colour of a destructive action's label.
-const Color _dangerColor = Color(0xFFFF8A80);
 
 // PURPOSE: Open the form sheet for one selected bar and resolve when the musician is finished.
 // INPUTS: context — where to open the sheet. session — the document being edited. sectionId and
@@ -595,25 +593,25 @@ class _SongFormSheetState extends State<SongFormSheet> {
               const SizedBox(height: 10),
               _buildStatus(),
               _buildGroup('BAR', <Widget>[
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-bar-insert-before',
                   icon: Icons.add,
                   label: 'Bar before',
                   onTap: hasBar ? () => _insertBar(before: true) : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-bar-insert-after',
                   icon: Icons.add,
                   label: 'Bar after',
                   onTap: hasBar ? () => _insertBar(before: false) : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-bar-duplicate',
                   icon: Icons.copy_all_outlined,
                   label: 'Duplicate bar',
                   onTap: hasBar ? _duplicateBar : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-bar-delete',
                   icon: Icons.delete_outline,
                   label: 'Delete bar',
@@ -627,21 +625,21 @@ class _SongFormSheetState extends State<SongFormSheet> {
               // absent is something a musician reads before deciding what to press; a row of
               // identical buttons would say what CAN be done and not what IS.
               _buildGroup('REPEAT', <Widget>[
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-repeat-start',
                   icon: Icons.first_page,
                   label: 'Repeat start',
                   active: bar?.openingBarline == Barline.repeatStart,
                   onTap: hasBar ? _toggleRepeatStart : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-repeat-end',
                   icon: Icons.last_page,
                   label: 'Repeat end',
                   active: bar?.closingBarline == Barline.repeatEnd,
                   onTap: hasBar ? _toggleRepeatEnd : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-repeat-previous',
                   icon: Icons.repeat,
                   label: 'Previous: ${repeatPreviousText(bar?.repeatPrevious)}',
@@ -649,7 +647,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
                       bar != null && bar.repeatPrevious != RepeatPrevious.none,
                   onTap: hasBar ? _cycleRepeatPrevious : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-volta',
                   icon: Icons.bookmark_border,
                   label: 'Ending: ${voltaText(bar?.volta)}',
@@ -659,7 +657,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
               ]),
               const SizedBox(height: 14),
               _buildGroup('SECTION', <Widget>[
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-section-insert-before',
                   icon: Icons.playlist_add,
                   label: 'Section before',
@@ -667,7 +665,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
                       ? null
                       : () => _insertSection(before: true),
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-section-insert-after',
                   icon: Icons.playlist_add,
                   label: 'Section after',
@@ -675,31 +673,31 @@ class _SongFormSheetState extends State<SongFormSheet> {
                       ? null
                       : () => _insertSection(before: false),
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-section-duplicate',
                   icon: Icons.copy_all_outlined,
                   label: 'Duplicate section',
                   onTap: section == null ? null : _duplicateSection,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-section-rename',
                   icon: Icons.edit_outlined,
                   label: 'Rename section',
                   onTap: section == null ? null : () => _renameSection(),
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-section-up',
                   icon: Icons.arrow_upward,
                   label: 'Move earlier',
                   onTap: canMoveUp ? () => _moveSection(-1) : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-section-down',
                   icon: Icons.arrow_downward,
                   label: 'Move later',
                   onTap: canMoveDown ? () => _moveSection(1) : null,
                 ),
-                _FormButton(
+                SheetButton(
                   buttonKey: 'song-form-section-delete',
                   icon: Icons.delete_outline,
                   label: 'Delete section',
@@ -811,82 +809,10 @@ class _SongFormSheetState extends State<SongFormSheet> {
 }
 
 /// One operation button in the form sheet.
-class _FormButton extends StatelessWidget {
-  /// Creates a button labelled [label] that calls [onTap], or does nothing when [onTap] is null.
-  ///
-  /// [danger] colours the label as a removal, so the two destructive operations are not one slip of
-  /// the thumb away from looking like the harmless ones beside them.
-  ///
-  /// [active] marks a button whose operation the selected bar already carries — a repeat barline
-  /// that is already there, a bracket that is already drawn. It is drawn as a chosen state rather
-  /// than as a second label, so a toggle shows what IS as well as what it would do, and the same
-  /// button is what switches it off again.
-  const _FormButton({
-    required this.buttonKey,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.danger = false,
-    this.active = false,
-  });
-
-  /// The widget key the tests and the driving tools find this button by.
-  final String buttonKey;
-
-  /// The glyph beside the label.
-  final IconData icon;
-
-  /// The words on the button, which name the operation and not the mechanism.
-  final String label;
-
-  /// What a press does, or null when the operation is not available right now.
-  final VoidCallback? onTap;
-
-  /// Whether this button removes something.
-  final bool danger;
-
-  /// Whether the selected bar already carries what this button sets.
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool enabled = onTap != null;
-    final Color foreground = !enabled
-        ? sheetMutedColor
-        : (danger
-              ? _dangerColor
-              : (active ? sheetAccentColor : sheetOnPanelColor));
-    return Material(
-      color: enabled
-          ? (active ? sheetSelectedCellColor : sheetCellColor)
-          : sheetCellColor.withValues(alpha: 0.35),
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        key: ValueKey<String>(buttonKey),
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(icon, size: 18, color: foreground),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: foreground,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+///
+/// The button itself lives in `sheet_button.dart`, shared with the text-cue sheet: the two sheets
+/// are one surface to a musician, and a copy of this widget in each would be two looks for one
+/// gesture. Everything below decides WHERE the buttons go and WHAT a tap does.
 
 /// The dialog that asks for a section's new name.
 class _RenameSectionDialog extends StatefulWidget {
@@ -998,7 +924,7 @@ class _VoltaDialog extends StatelessWidget {
       runSpacing: 8,
       children: <Widget>[
         for (final _VoltaChoice choice in _voltaChoices)
-          _FormButton(
+          SheetButton(
             buttonKey: 'song-form-volta-${_voltaChoiceKey(choice.volta)}',
             icon: choice.volta == null ? Icons.block : Icons.bookmark_border,
             label: choice.volta == null

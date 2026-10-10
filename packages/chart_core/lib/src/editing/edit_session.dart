@@ -819,6 +819,241 @@ class EditSession {
     return true;
   }
 
+  // --- Text cues: the words a musician writes on the chart -------------------------------------
+  //
+  // `textcue.insert`, `textcue.edit`, `textcue.move` and `textcue.delete` have been in the
+  // catalogue since it was written and until these four methods existed nothing appended one: a
+  // musician could write `To Coda` with a pen and not in words. They are here, next to the one
+  // writer, for the same reason the form and repeat operations are (A35, A38, A41).
+  //
+  // WHY A CUE REUSES THE ANCHOR RATHER THAN A PAGE COORDINATE. `TextCue.place` is an
+  // [AnchoredPlace] — an [EventAnchor] plus an anchor-local offset — which is the SAME value an
+  // [Annotation] carries and the same address scheme an ink stroke is captured against
+  // (`resolveEventAnchor`). One mechanism for "where on the music is this thing" is what makes a
+  // cue survive a FITTED page, a transposition and a round trip for exactly the reasons a stroke
+  // does: the address is re-resolved against the layout on screen and the stored offset is not a
+  // page coordinate at all. A second scheme — a page pixel, a bar-relative fraction — would have
+  // been a second thing to keep true.
+  //
+  // WHAT IS REFUSED HERE, AND WHY IT IS REFUSED AT THE EDIT RATHER THAN AT THE DRAWING. An anchor
+  // naming a bar the song does not have, and a negative beat, are both refused by returning null
+  // or false. Neither is caught by the reducer: `_withCueInserted` stores the cue whatever its
+  // place says, and a cue whose anchor resolves nowhere is simply never drawn — an edit the
+  // musician made and cannot see, which is the one outcome an event log exists to make
+  // impossible. A bar an older version of the song had, restored by an undo, is not this case:
+  // the address exists or it does not, and this is the only place that can answer.
+  //
+  // AN EMPTY CUE IS ALLOWED, AND THAT IS THE MODEL'S OWN ANSWER. `TextCue.text` documents empty as
+  // "inserted and not yet typed into", which is an ordinary editing state: the cue has to exist
+  // before there is a cursor to type into. So the insert may carry empty words and `editTextCue`
+  // may write them back — the log then shows an insert followed by an edit to empty, in that
+  // order, and each half is separately undoable. What the DOCUMENT may not do is keep one: a cue
+  // with no words draws nothing, so nothing on the page can be tapped to select it, and only the
+  // log could ever reach it again. That end is the app's to enforce (it deletes one it leaves
+  // empty, through `textcue.delete`), and this class deliberately does not enforce it, because
+  // "empty" is reachable as an intermediate state here and the model says so.
+  //
+  // TWO CUES AT ONE PLACE ARE BOTH KEPT. The reducer appends to an ordered list and nothing here
+  // refuses an address another cue already occupies, so two remarks on one bar are two cues and
+  // the later one in document order is drawn over the earlier one. Refusing the second would make
+  // the app arbitrate which remark a musician "really" wanted, and nudging it aside would be the
+  // app rewriting a place the musician chose — and rewriting it differently after every reflow.
+  // Separating them is an edit, and it is exactly what `moveTextCue` is for.
+
+  // PURPOSE: Put a piece of text a musician wants to read on the chart — `To Coda`, `D.C. al
+  //          Fine`, `Solo`, `Vamp`, `4×` — at an address in the music, through the operation log.
+  // INPUTS: sectionId and barIndex — the bar to hang it on, in the model's own address. beat — the
+  //         cell inside that bar to hang it on, or null for the bar as a whole, which is what a
+  //         remark about the whole bar (a navigation word at the top of it) wants. offsetX and
+  //         offsetY — where the words sit from the anchor's own top-left corner, in anchor-local
+  //         logical pixels; the defaults place a bar-level cue in the bar's sign band. text — the
+  //         words, empty to insert and then type into (see the section note).
+  // OUTPUTS: The new cue's identity, or null when the address names no bar or [beat] is negative —
+  //          in both cases nothing is appended and the document is untouched. The cue is appended
+  //          at the END of the cue list, which is the end of the render order: a cue put on a bar
+  //          now is drawn over cues that were already there, so the musician sees what they just
+  //          wrote rather than the remark it landed on top of.
+  // KEYWORDS: text-cue, insert, anchored, bar-level, cell-level, offset, render-order, undoable
+  /// Inserts a text cue at ([sectionId], [barIndex], [beat]) and returns its id, or null.
+  String? insertTextCue({
+    required String sectionId,
+    required int barIndex,
+    int? beat,
+    double offsetX = 0,
+    double offsetY = 0,
+    String text = '',
+  }) {
+    if (beat != null && beat < 0) {
+      return null;
+    }
+    if (_document.song.barAt(sectionId, barIndex) == null) {
+      return null;
+    }
+    final TextCue cue = TextCue(
+      id: _freshCueId(),
+      place: AnchoredPlace(
+        anchor: EventAnchor(sectionId: sectionId, bar: barIndex, beat: beat),
+        offsetX: offsetX,
+        offsetY: offsetY,
+      ),
+      text: text,
+    );
+    apply(
+      TextCueInsertEvent(
+        docId: _docId,
+        seq: _seq,
+        index: _document.textCues.length,
+        cue: cue,
+      ),
+    );
+    return cue.id;
+  }
+
+  // PURPOSE: Change the words of a cue the musician already wrote, which is the edit separate from
+  //          moving it — the catalogue keeps them apart, and so does this (see `textcue_events`).
+  // INPUTS: id — the cue to edit. text — what it should say; empty clears it.
+  // OUTPUTS: True when an edit was appended, false when no cue carries [id] and false when the cue
+  //          already says exactly that. The second refusal is the rule every other edit here
+  //          follows (see [setVolta], [updateSong]): an event whose two sides are equal is a log
+  //          row that changed nothing and an offer to undo an edit that did not happen. The event
+  //          carries the words on BOTH sides, read from the cue here, so its inverse is a swap and
+  //          restores the previous words exactly.
+  // KEYWORDS: text-cue, edit-words, before-after, no-op-refusal, undoable
+  /// Replaces the words of the cue [id] with [text], reporting whether anything changed.
+  bool editTextCue(String id, String text) {
+    final int index = _cueIndex(id);
+    if (index < 0) {
+      return false;
+    }
+    final String from = _document.textCues[index].text;
+    if (from == text) {
+      return false;
+    }
+    apply(
+      TextCueEditEvent(docId: _docId, seq: _seq, id: id, from: from, to: text),
+    );
+    return true;
+  }
+
+  // PURPOSE: Move a cue to another place in the music — another bar, another cell of the same bar,
+  //          or another offset within the cell it already sits on — which is how a musician
+  //          separates two remarks that landed on top of each other and how a cue written on the
+  //          wrong bar is put right without retyping its words.
+  // INPUTS: id — the cue to move. sectionId and barIndex — the bar to move it to. beat — the cell
+  //         inside that bar, or null for the bar as a whole. offsetX and offsetY — the new
+  //         anchor-local offset.
+  // OUTPUTS: True when a move was appended, false when no cue carries [id], when the TARGET names
+  //          no bar, when [beat] is negative, and when the target place equals the one the cue
+  //          already occupies. The target is deliberately not restricted to the cue's own bar or
+  //          section: `textcue.move` carries a whole [AnchoredPlace] on each side and the reducer
+  //          accepts any address, so a cue can be moved anywhere the song has a bar, and a rule
+  //          confining it here would be a second, weaker copy of the model's own address rule. A
+  //          call that moves a cue one bar has the same effect as a drag, which is why the app can
+  //          offer the operation as buttons without a second event type.
+  // KEYWORDS: text-cue, move, re-anchor, offset, any-bar, no-op-refusal, undoable
+  /// Moves the cue [id] to ([sectionId], [barIndex], [beat]) with the given offset.
+  bool moveTextCue(
+    String id, {
+    required String sectionId,
+    required int barIndex,
+    int? beat,
+    double offsetX = 0,
+    double offsetY = 0,
+  }) {
+    final int index = _cueIndex(id);
+    if (index < 0 || (beat != null && beat < 0)) {
+      return false;
+    }
+    if (_document.song.barAt(sectionId, barIndex) == null) {
+      return false;
+    }
+    final AnchoredPlace from = _document.textCues[index].place;
+    final AnchoredPlace to = AnchoredPlace(
+      anchor: EventAnchor(sectionId: sectionId, bar: barIndex, beat: beat),
+      offsetX: offsetX,
+      offsetY: offsetY,
+    );
+    if (to == from) {
+      return false;
+    }
+    apply(
+      TextCueMoveEvent(docId: _docId, seq: _seq, id: id, from: from, to: to),
+    );
+    return true;
+  }
+
+  // PURPOSE: Take a cue off the chart, which is the half `textcue.insert`'s inverse needs and the
+  //          gesture that removes a remark the band no longer reads.
+  // INPUTS: id — the cue to remove.
+  // OUTPUTS: True when a deletion was appended, false when no cue carries [id]. The event carries
+  //          the cue IN FULL and the position it occupied, so undoing the deletion restores the
+  //          words, the cell and the offset exactly, and restores the cue's place in the render
+  //          order rather than appending it to the end.
+  // KEYWORDS: text-cue, delete, whole-value, render-order, undoable
+  /// Removes the cue [id] from the document, reporting whether one was there.
+  bool deleteTextCue(String id) {
+    final int index = _cueIndex(id);
+    if (index < 0) {
+      return false;
+    }
+    apply(
+      TextCueDeleteEvent(
+        docId: _docId,
+        seq: _seq,
+        index: index,
+        removed: _document.textCues[index],
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Answer what a cue currently says and where it sits, so a sheet that holds an identity
+  //          across several edits can read the value it is editing rather than a copy it took when
+  //          it opened.
+  // INPUTS: id — the identity to look for.
+  // OUTPUTS: The cue, or null when the document has none with that id. Null is a real answer: a
+  //          deletion, or an undo of an insertion, is exactly how an identity stops naming
+  //          anything, and a sheet that has to keep working after either needs to be told.
+  // KEYWORDS: text-cue, lookup, identity, null-when-absent, total-function
+  /// Returns the cue with [id], or null when the document has none.
+  TextCue? textCueById(String id) {
+    final int index = _cueIndex(id);
+    return index < 0 ? null : _document.textCues[index];
+  }
+
+  // PURPOSE: Find where a cue sits in the document's cue list, so every cue operation turns an
+  //          identity into the position the events need — and, for a deletion, the position its
+  //          inverse must restore the cue to.
+  // INPUTS: id — the identity to look for.
+  // OUTPUTS: The cue's index, or -1 when no cue carries that id. Negative rather than null so
+  //          every caller's guard is the same single comparison, as [_sectionIndex] is.
+  // KEYWORDS: lookup, cue-index, identity-to-position, sentinel
+  int _cueIndex(String id) =>
+      _document.textCues.indexWhere((TextCue cue) => cue.id == id);
+
+  // PURPOSE: Mint an identity for a cue that is being inserted, which no operation may leave to a
+  //          caller: two cues sharing an id would make `textcue.edit` and `textcue.move`
+  //          ambiguous — they address a cue by id alone — and the reducer refuses a second cue
+  //          with an id already present, so a collision would be a failed insert rather than a
+  //          renamed cue.
+  // INPUTS: None; reads the document's cues and this session's sequence counter.
+  // OUTPUTS: An id of the form `cue-N` that no cue currently carries. The counter starts at the
+  //          next sequence number, and the loop closes the remaining case: a cue restored from a
+  //          file that happens to be named `cue-N` already.
+  // KEYWORDS: identity, fresh-id, collision-avoidance, monotone, cue-creation
+  String _freshCueId() {
+    final Set<String> used = <String>{
+      for (final TextCue cue in _document.textCues) cue.id,
+    };
+    int counter = _seq + 1;
+    String candidate = 'cue-$counter';
+    while (used.contains(candidate)) {
+      counter++;
+      candidate = 'cue-$counter';
+    }
+    return candidate;
+  }
+
   // --- The song's own metadata ------------------------------------------------------------------
   //
   // One event family covers all four fields, because they are one thing a musician edits: what the

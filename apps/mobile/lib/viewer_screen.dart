@@ -14,16 +14,20 @@
 //          bars-and-sections switch, a song list, a scene bar and the selected song's page or pages,
 //          each drawn by `ChartPainter` at
 //          the size the window gives it and covered by an `InkPainter` carrying the document's
-//          strokes. A tap on a page selects the bar and cell under it, the painter highlights them,
+//          strokes and a `TextCuePainter` carrying the words written on the chart. A tap on a page
+//          selects the bar and cell under it, the painter highlights them,
 //          and a line above the page states the selected position in words. Tapping that line opens
 //          the chord palette for a selected cell and the bars-and-sections sheet for a bar-level
 //          selection; a chord chosen in the palette is applied through the
 //          operation log and redrawn, and undo and redo move that same log back and forth. With ink
 //          on, a contact the palm rule admits is drawn into a stroke and appended to the same log,
-//          and a contact it refuses still selects.
+//          and a contact it refuses still selects. An app-bar action opens the words sheet for the
+//          selected bar, where `To Coda`, `D.C. al Fine`, `Solo` and the like are written, changed,
+//          moved and removed — also through that same log.
 // KEYWORDS: viewer, ireal, reader, editor, screen, page-view, transposition, scene-bar, page-modes,
 //           chord-palette, ink-mode, ink-layer, op-log, undo, redo, chart-file, save, open,
-//           song-form, bars, sections, widget-test-seam, platform-seam, verification
+//           song-form, bars, sections, text-cue, words, widget-test-seam, platform-seam,
+//           verification
 //
 // WHERE THE INK LIVES. A stroke reaches the document through the same door a chord does: the ink
 // layer assembles it and calls `EditSession.apply`, and nothing else writes to the document. What
@@ -85,6 +89,7 @@ import 'key_grid.dart';
 import 'scene_bar.dart';
 import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
+import 'text_cue_sheet.dart';
 
 /// Turns a reference into the library it holds.
 ///
@@ -432,6 +437,25 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       'flutters': layer.inputReport,
       'raw': probe?.report() ?? const <String, Object?>{},
       'rule': layer.ruleReport,
+      // --- TEXT CUES (the words written on the chart) ----------------------------------------
+      // Reported beside the strokes for the same reason the strokes are: a browser-driving tool
+      // cannot reach a Dart object, and "the cue is still on the bar it was put on" is a claim only
+      // the document can settle. Each cue is reported with the ADDRESS it is anchored to and the
+      // offset it stores, which are the two things a FIT or a transposition must not change.
+      // This block, the `viewer-text-cue` app-bar action, `_openTextCueSheet`, `_resolveCues` and
+      // the cue painter inside `_layeredPage` are the whole of the text-cue feature in this file.
+      'cues': <Object?>[
+        for (final TextCue cue in session.document.textCues)
+          <String, Object?>{
+            'id': cue.id,
+            'text': cue.text,
+            'sec': cue.place.anchor.sectionId,
+            'bar': cue.place.anchor.bar,
+            'beat': cue.place.anchor.beat,
+            'dx': cue.place.offsetX,
+            'dy': cue.place.offsetY,
+          },
+      ],
       'strokes': <Object?>[
         for (final InkStroke stroke in session.document.strokes)
           <String, Object?>{
@@ -781,6 +805,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                 ? null
                 : () => _openSongForm(context, session),
           ),
+          // --- WORDS ON THE CHART (text cues, `textcue.*`) --------------------------------------
+          // Placed beside the form action because both act on the bar the page's hit test named,
+          // and disabled under the same condition: a cue is anchored to an address, so there is
+          // nothing to write on until a bar is selected. It opens a sheet that holds its own
+          // address cursor, so a musician can move to another bar and write there without leaving.
+          // Its icon is a speech mark rather than a pencil, because the pencil is what the ink
+          // switch already means and two controls named "write" would be one too many.
+          IconButton(
+            key: const ValueKey<String>('viewer-text-cue'),
+            icon: const Icon(Icons.format_quote),
+            tooltip: 'Words on the chart (To Coda, Solo, 4×)',
+            onPressed: session == null || _selection == null
+                ? null
+                : () => _openTextCueSheet(context, session),
+          ),
           // The chart document itself can be named and moved, on every platform: where a path
           // exists the field holds it, and in a browser it holds the name offered to the browser's
           // chooser and download. It lives in the app bar because a control in the body takes height
@@ -1087,6 +1126,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // the ink together without either being transformed.
     final InkCaptureLayer layer = _inkFor(entry);
     final List<InkStroke> strokes = session.document.strokes;
+    // The cues come from the same document and are placed the same way: by address, against the
+    // page on screen, so a transposition moves the music and the words together. They are read
+    // here rather than inside the painter for the same reason the strokes are.
+    final List<TextCue> textCues = session.document.textCues;
     // The mode follows the PANE the chart is drawn in, not the window. The song list takes a fixed
     // slice off the left, so a window the mode would call a tablet can leave a chart area narrower
     // than the default assumes — on the owner's tablet that is 824 logical pixels of window against
@@ -1172,7 +1215,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             const SizedBox(height: 6),
             _buildSelectionLine(context, displayed),
             Expanded(
-              child: _buildPages(entry, displayed, mode, layer, strokes),
+              child: _buildPages(
+                entry,
+                displayed,
+                mode,
+                layer,
+                strokes,
+                textCues,
+              ),
             ),
           ],
         );
@@ -1225,6 +1275,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     Song song,
     InkCaptureLayer layer,
     List<InkStroke> strokes,
+    List<TextCue> textCues,
   ) => RawPointerCapture(
     layer: layer,
     page: page,
@@ -1238,7 +1289,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         onTapDown: (TapDownDetails details) => _onPageTapDown(layer, details),
         onTapUp: (TapUpDetails details) => _onPageTapUp(page, details),
         onTapCancel: _onPageTapCancel,
-        child: _layeredPage(page, song, layer, strokes),
+        child: _layeredPage(page, song, layer, strokes, textCues),
       ),
     ),
   );
@@ -1256,17 +1307,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     }
   }
 
-  // PURPOSE: Stack the chart and the ink, with both painters positioned by the same page transform.
-  // INPUTS: page, song and the two stroke sources, as in [_tappablePage].
-  // OUTPUTS: The page widget. The ink layer is drawn AFTER the chart so a mark lies over the music
-  //          it annotates, and both are given the page's own scale, which is what keeps them in one
-  //          coordinate system rather than two that agree until the page is fitted.
-  // KEYWORDS: painter-stack, ink-over-chart, shared-scale, one-coordinate-system
+  // PURPOSE: Stack the chart, the words written on it and the ink, with all three positioned by the
+  //          same page transform.
+  // INPUTS: page, song, layer, strokes and textCues, as in [_tappablePage].
+  // OUTPUTS: The page widget. The cue layer is drawn AFTER the chart, so a remark lies over the
+  //          music it annotates, and BEFORE the ink, so the ink stays the topmost layer and the
+  //          ordering this file already documents for it (see [_tappablePage] and A37) is left
+  //          exactly as it was. Each layer is given the page's own scale, which is what keeps them
+  //          in one coordinate system rather than three that agree until the page is fitted.
+  // KEYWORDS: painter-stack, cues-over-chart, ink-stays-on-top, shared-scale, one-coordinate-system
   Widget _layeredPage(
     PageLayout page,
     Song song,
     InkCaptureLayer layer,
     List<InkStroke> strokes,
+    List<TextCue> textCues,
   ) {
     final List<ResolvedInkStroke> committed = _resolveStrokes(page, strokes);
     final List<ResolvedInkStroke> live = layer.liveStrokes
@@ -1285,6 +1340,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           child: const SizedBox.expand(),
         ),
         CustomPaint(
+          painter: TextCuePainter(
+            cues: _resolveCues(page, textCues),
+            pageScale: page.scale,
+          ),
+          child: const SizedBox.expand(),
+        ),
+        CustomPaint(
           painter: InkPainter(
             strokes: <ResolvedInkStroke>[...committed, ...live],
             pageScale: page.scale,
@@ -1293,6 +1355,36 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ),
       ],
     );
+  }
+
+  // PURPOSE: Turn every cue of the document into the pair the cue painter needs, skipping the ones
+  //          this page cannot place.
+  //
+  //          THE ANCHOR IS RESOLVED HERE, ONCE PER REBUILD, BY THE SAME FUNCTION THE INK LAYER
+  //          USES, and that is the whole reason a cue stays on the bar it was written on: the
+  //          stored offset is measured from the anchor's own corner, so adding the corner's
+  //          position on THIS page moves the words with the music. A transposition re-engraves the
+  //          bars, the anchor resolves to the bar's new rectangle, and the cue's own offset is
+  //          untouched. A cue whose address is on another page of a paginated document is simply
+  //          not drawn here.
+  // INPUTS: page — the page being drawn. cues — every cue of the document, in render order.
+  // OUTPUTS: The cues that resolved, with the anchor's origin, in the document's own order — so two
+  //          cues on one bar are drawn in the order they were written, the later one over the
+  //          earlier one.
+  // KEYWORDS: cue-anchor-resolution, page-filter, render-order, fit-survival, transposition-survival
+  List<ResolvedTextCue> _resolveCues(PageLayout page, List<TextCue> cues) {
+    final List<ResolvedTextCue> resolved = <ResolvedTextCue>[];
+    for (final TextCue cue in cues) {
+      final InkPlacement? placement = resolveEventAnchor(
+        page,
+        cue.place.anchor,
+      );
+      if (placement == null) {
+        continue;
+      }
+      resolved.add(ResolvedTextCue(cue: cue, origin: placement.origin));
+    }
+    return resolved;
   }
 
   // PURPOSE: Turn every committed stroke into the pair a painter needs, skipping the ones this page
@@ -1521,6 +1613,51 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
+  // PURPOSE: Open the words sheet for the bar the musician selected, which is where a remark a band
+  //          reads — `To Coda`, `D.C. al Fine`, `Solo`, `Vamp`, `4×` — is written, changed, moved
+  //          and removed, all through the operation log.
+  // INPUTS: context — where to open the sheet. session — the session of the song on screen, reached
+  //         from the app bar, which has no song entry of its own.
+  // OUTPUTS: Nothing. Does nothing when no bar is selected, or when the selection's address no
+  //          longer names a bar — which a form edit made in the other sheet can produce. The
+  //          selected CELL decides where a new cue is anchored: a touch that named a cell gives a
+  //          cue about that beat, and a touch in a bar's padding gives one about the whole bar.
+  //          The page rebuilds after every applied edit but the SELECTION IS KEPT, unlike a form
+  //          edit: a cue changes neither the address the selection names nor the geometry that
+  //          produced it, so the highlight is still true and dropping it would make the musician
+  //          re-aim at a bar that never moved.
+  // KEYWORDS: text-cue-entry, app-bar, address-from-selection, cell-or-bar, rebuild-on-apply,
+  //           selection-kept, structured-log
+  void _openTextCueSheet(BuildContext context, EditSession session) {
+    final ChartHit? hit = _selection;
+    if (hit == null) {
+      debugPrint('viewer.textcue.open.skipped reason=no-selection');
+      return;
+    }
+    if (session.song.barAt(hit.sectionId, hit.barIndex) == null) {
+      debugPrint(
+        'viewer.textcue.open.skipped reason=stale-address '
+        'section=${hit.sectionId} bar=${hit.barIndex}',
+      );
+      return;
+    }
+    final int? beat = hit.beat;
+    debugPrint(
+      'viewer.textcue.open section=${hit.sectionId} bar=${hit.barIndex} '
+      'beat=${beat ?? 'bar'} cues=${session.document.textCues.length}',
+    );
+    unawaited(
+      showTextCueSheet(
+        context,
+        session: session,
+        sectionId: hit.sectionId,
+        barIndex: hit.barIndex,
+        beat: beat,
+        onChanged: () => setState(() {}),
+      ),
+    );
+  }
+
   // PURPOSE: Open the song-info sheet, which is where the song's own four facts — title, composer,
   //          style and tempo — are edited.
   // INPUTS: context — where to open the sheet. session — the session of the song on screen. focus —
@@ -1675,19 +1812,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //         key. mode — FIT or PAGES. layer — the ink layer of the song on screen, which decides
   //         what a contact on a page means. strokes — the committed strokes of the WRITTEN document,
   //         which are placed by address and so are unaffected by the transposition on screen.
+  //         textCues — the cues of the same document, placed by address for the same reason.
   // OUTPUTS: The chart. PAGES is the layout engine's ordinary pagination in a [PageView]. FIT is
   //          one scaled page, or a message saying the song would have to be shrunk below the
   //          legible floor, which is reported on screen rather than delivered as an unreadable
   //          page. A song the layout engine produces no pages for says so instead of showing an
   //          empty page, because an empty song and a blank page must not look alike.
   // KEYWORDS: pagination, fit, page-scale, layout-call, page-view, empty-song, legibility-message,
-  //           ink-layering
+  //           ink-layering, cue-layering
   Widget _buildPages(
     IRealSong entry,
     Song displayed,
     PageMode mode,
     InkCaptureLayer layer,
     List<InkStroke> strokes,
+    List<TextCue> textCues,
   ) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -1713,7 +1852,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             return _buildNoFit(context, outcome);
           }
           _lastPageScale = page.scale;
-          return _tappablePage(page, displayed, layer, strokes);
+          return _tappablePage(page, displayed, layer, strokes, textCues);
         }
         final List<PageLayout> pages = _engine.layout(
           displayed,
@@ -1728,7 +1867,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           key: ValueKey<int>(entry.index),
           itemCount: pages.length,
           itemBuilder: (BuildContext context, int index) =>
-              _tappablePage(pages[index], displayed, layer, strokes),
+              _tappablePage(pages[index], displayed, layer, strokes, textCues),
         );
       },
     );
