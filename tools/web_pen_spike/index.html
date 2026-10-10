@@ -39,7 +39,10 @@
              user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
   footer { padding: 8px 12px; background: #12233a; display: flex; gap: 12px; flex-wrap: wrap;
-           align-items: center; max-height: 42vh; overflow: auto; }
+           align-items: flex-start; height: 30vh; overflow: auto; }
+  /* A FIXED height, not a maximum. A footer that grows with its content resizes the drawing surface
+     above it, and every resize of that surface is a resize of the canvas — which is where the ink
+     lives. The log scrolls inside this box instead of pushing the layout around. */
   button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #2e5d8a;
            background: #1b3554; color: #e6edf3; }
   button.primary { background: #2e5d8a; }
@@ -97,14 +100,64 @@ const strokeLog = [];
 let lastStylusSeenMs = -Infinity;
 
 function devicePixelRatioSafe() { return window.devicePixelRatio || 1; }
+
+// The canvas rectangle in CLIENT coordinates, refreshed whenever the layout can have changed.
+// Positions are derived from `clientX/clientY` against this rectangle rather than from
+// `offsetX/offsetY`, and that is not a style preference: `offsetX` is measured against the event's
+// TARGET, and `setPointerCapture` retargets pointer events from the canvas to the surface wrapper.
+// With the target changing mid-stroke, `offsetX` starts being measured from a different element's
+// origin, and the ink lands displaced by the constant distance between the two origins — which is
+// exactly the bug this replaced.
+let canvasRect = { left: 0, top: 0 };
+
 function resize() {
   const r = el('surface').getBoundingClientRect();
   const dpr = devicePixelRatioSafe();
-  canvas.width = Math.round(r.width * dpr);
-  canvas.height = Math.round(r.height * dpr);
+  const width = Math.round(r.width * dpr);
+  const height = Math.round(r.height * dpr);
+  canvasRect = canvas.getBoundingClientRect();
+  if (canvas.width === width && canvas.height === height) {
+    return;
+  }
+  // Assigning to canvas.width or canvas.height RESETS the bitmap, so a resize that carries no size
+  // change is skipped above and a real one copies the drawing across. Without this, every layout
+  // change wiped the page — and the layout changed on every stroke, because the log line added at
+  // the end of each stroke grew the footer and shrank the surface. The ink appeared to jump and
+  // vanish while the pen was still down.
+  const previous = document.createElement('canvas');
+  previous.width = canvas.width;
+  previous.height = canvas.height;
+  if (canvas.width > 0 && canvas.height > 0) {
+    previous.getContext('2d').drawImage(canvas, 0, 0);
+  }
+  canvas.width = width;
+  canvas.height = height;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (previous.width > 0 && previous.height > 0) {
+    // The old bitmap is in old device pixels; draw it into the new CSS-pixel space so the strokes
+    // stay where the musician put them, scaled rather than displaced.
+    ctx.drawImage(previous, 0, 0, previous.width / dpr, previous.height / dpr);
+  }
 }
+
+// The surface is a flex child between two bars, and the top bar's height changes as the counters
+// fill in and the user-agent string wraps. A `window.resize` listener never fires for that, so the
+// backing store would keep the old height while the element took a new one, the browser would scale
+// the bitmap to fit, and every stroke would be drawn at the wrong place by an amount that grows
+// with distance. A ResizeObserver is the thing that actually tracks a layout change.
+function observeSurface() {
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => resize()).observe(el('surface'));
+  }
+}
+
 window.addEventListener('resize', resize);
+window.addEventListener('scroll', resize, { passive: true });
+
+// The position of an event in the canvas's own CSS-pixel space.
+function pointOf(e) {
+  return { x: e.clientX - canvasRect.left, y: e.clientY - canvasRect.top };
+}
 
 el('ua').textContent = navigator.userAgent;
 
@@ -157,7 +210,8 @@ function beginStroke(e) {
   ctx.beginPath();
   ctx.lineWidth = 3;
   ctx.strokeStyle = e.pointerType === 'pen' ? '#102a43' : '#b04a5a';
-  ctx.moveTo(e.offsetX, e.offsetY);
+  const p = pointOf(e);
+  ctx.moveTo(p.x, p.y);
 }
 
 function addSample(e, sample) {
@@ -179,7 +233,7 @@ function addSample(e, sample) {
     if (e.pointerType === 'touch') stats.widthSeenTouch.add(width);
     else stats.widthSeenPen.add(width);
   }
-  ctx.lineTo(sample.offsetX, sample.offsetY);
+  ctx.lineTo(pointOf(sample).x, pointOf(sample).y);
 }
 
 // Palm rule, the same two conditions the Android surface uses: a wide non-stylus contact is only a
@@ -195,7 +249,10 @@ function decideAdmission(e) {
 
 el('surface').addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  el('surface').setPointerCapture?.(e.pointerId);
+  // Capture keeps a stroke alive when the pen leaves the surface. It throws for a synthetic or
+  // already-released pointer, and an exception here would abort the handler BEFORE the stroke
+  // begins — so it is guarded rather than assumed always to succeed.
+  try { el('surface').setPointerCapture?.(e.pointerId); } catch (err) { /* capture is an optimisation */ }
   const d = decideAdmission(e);
   if (e.pointerType === 'pen') { lastStylusSeenMs = e.timeStamp; stats.penSeen++; }
   if (!d.admit) { stats.palmWouldReject++; flash('rejected: ' + d.reason); return; }
@@ -235,8 +292,8 @@ el('surface').addEventListener('pointermove', (e) => {
   for (const s of samples) addSample(e, s);
   ctx.stroke();
   ctx.beginPath();
-  const last = samples[samples.length - 1];
-  ctx.moveTo(last.offsetX, last.offsetY);
+  const last = pointOf(samples[samples.length - 1]);
+  ctx.moveTo(last.x, last.y);
 
   const kind = e.pointerType === 'pen' ? 'pen' : (e.pointerType === 'touch' ? 'touch' : 'mouse');
   if (kind === 'pen') stats.penSamples += samples.length;
@@ -346,6 +403,7 @@ el('clear').addEventListener('click', () => {
 });
 
 resize();
+observeSurface();
 render();
 el('log').textContent = 'ready — draw in the white area\n';
 </script>
