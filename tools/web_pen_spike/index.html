@@ -77,25 +77,32 @@
 'use strict';
 
 // ---------------------------------------------------------------------------------------------
-// The palm rule THIS BROWSER needs, which is not the rule Android uses.
+// The palm rule. It uses TWO signals, because two runs showed that both exist and that neither is
+// enough on its own.
 //
-// Android separates a palm from a finger by CONTACT WIDTH, because its digitizer reports one: on the
-// reference tablet a fingertip measured 13-15 axis units and a palm-like contact 86-91. THE BROWSER
-// DOES NOT GIVE US THAT. Measured on the same device: every touch width landed between 1 and 8, and
-// the pen reported no width at all, so a palm and a finger are the same size here. A width rule on
-// the web would therefore never reject anything — which is exactly what happened before this
-// change: `palmWouldReject` stayed 0 and a resting palm's strokes were drawn as ink.
+// RUN 1 — a pen was in play (1263 pen samples, 215 hover events). Every touch width was between 1
+// and 8. NO wide contact reached the page at all, and this page first concluded from that run that
+// the browser reports no contact geometry and that a width rule was therefore impossible. That
+// conclusion was WRONG, and it was wrong because one run was treated as the whole truth.
 //
-// What the browser DOES give is the pen's PROXIMITY: 215 hover events in one run. So the rule is
-// proximity instead of size — while a pen is near, a non-pen contact is a palm candidate whatever
-// its width. That is stronger than the width rule rather than a fallback for it: it does not try to
-// guess the palm's size at all, it uses the fact that the pen announces itself.
+// RUN 2 — no pen at all (penSeen 0, penSamples 0). Touch widths were 2,3,4,6,7 AND 71, 87. So the
+// browser does report contact width, and a palm reports the same order of magnitude it does on
+// Android (86-91 there). The two populations are 1-8 against 71-87, which is a wide separation.
 //
-// The window is not chosen here, it is MEASURED. `penGapMs` records the gap between consecutive pen
-// events, and the summary reports its percentiles: the window must sit above the real gaps between
-// a pen's strokes, or a stroke's own pauses would open the gate in the middle of writing. Read the
-// percentiles from a real run and set the constant below from them.
+// WHAT IS STILL UNKNOWN, and must not be papered over: run 1's missing wide contacts have two
+// possible causes that these numbers CANNOT distinguish — either no palm was resting on the glass,
+// or the platform suppressed the palm while the pen was active. Settling that needs a run that
+// deliberately rests a palm WHILE the pen is drawing.
+//
+// So the rule takes both signals:
+//   * a pen seen within the window  -> ignore the touch  (the writing case, and the one the hover
+//     events make detectable);
+//   * otherwise a wide touch        -> ignore it too     (a palm with no pen in play).
+// Both thresholds and the window are named, published in the summary, and every rejection records
+// WHICH signal fired, so a future run can tell the two cases apart instead of re-deciding which one
+// the rule was really resting on.
 const STYLUS_PROXIMITY_WINDOW_MS = 1000;
+const PALM_WIDTH_PX = 40.0;
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', { desynchronized: true });
@@ -105,7 +112,7 @@ const stats = {
   strokes: 0, samples: 0, coalescedEvents: 0, rawEvents: 0,
   latencies: [], pressureValues: new Set(), tiltValues: new Set(),
   penSamples: 0, touchSamples: 0, mouseSamples: 0,
-  palmRejectedByProximity: 0, touchAdmitted: 0, touchRejected: 0,
+  palmRejectedByProximity: 0, palmRejectedByWidth: 0, touchAdmitted: 0,
   penSeen: 0, penGaps: [],
   widthsSeenTouch: new Set(), widthsSeenPen: new Set(),
   coalescedUnavailable: false, hoverSeen: 0,
@@ -250,12 +257,13 @@ function addSample(e, sample) {
   ctx.lineTo(pointOf(sample).x, pointOf(sample).y);
 }
 
-// Palm rule for the web: proximity, not size. See the long note above the constants.
+// Palm rule: two signals. See the long note above the constants.
 function decideAdmission(e) {
   if (e.pointerType !== 'touch') return { admit: true, reason: 'not-a-touch' };
   const penInPlay = (e.timeStamp - lastStylusSeenMs) <= STYLUS_PROXIMITY_WINDOW_MS;
-  if (penInPlay) return { admit: false, reason: 'pen-near-touch-ignored' };
-  return { admit: true, reason: 'no-pen-in-play' };
+  if (penInPlay) return { admit: false, reason: 'pen-near' };
+  if ((e.width || 0) >= PALM_WIDTH_PX) return { admit: false, reason: 'width-wide' };
+  return { admit: true, reason: 'finger' };
 }
 
 // The gaps between consecutive pen events. This is what the proximity window must be chosen from:
@@ -278,11 +286,15 @@ el('surface').addEventListener('pointerdown', (e) => {
   const d = decideAdmission(e);
   if (e.pointerType === 'pen') notePenEvent(e.timeStamp);
   if (!d.admit) {
-    stats.palmRejectedByProximity++;
-    flash('rejected: pen is near, a touch is treated as a palm');
+    // WHICH signal fired is recorded, not just that something was rejected. Without this the two
+    // halves of the rule are indistinguishable in the summary, and a run cannot tell whether the
+    // pen's proximity or the contact's width is what actually did the work.
+    if (d.reason === 'pen-near') stats.palmRejectedByProximity++;
+    else stats.palmRejectedByWidth++;
+    flash('rejected: ' + d.reason);
     return;
   }
-  if (e.pointerType === 'touch') stats.touchAdmitted++; else stats.touchAdmitted += 0;
+  if (e.pointerType === 'touch') stats.touchAdmitted++;
   beginStroke(e);
 }, { passive: false });
 
@@ -396,10 +408,13 @@ function summary() {
     touchWidthsSeen: touchWidths,
     penWidthsSeen: penWidths,
 
-    // The palm rule this browser actually needs, and why it is not Android's.
-    palmRule: 'proximity: a non-pen contact is ignored while a pen was seen within the window',
+    // The palm rule: two signals, and each rejection says which one fired.
+    palmRule: 'a non-pen contact is ignored when a pen was seen within the window, OR when its ' +
+      'width is at or above the palm threshold',
     stylusProximityWindowMs: STYLUS_PROXIMITY_WINDOW_MS,
+    palmWidthThresholdPx: PALM_WIDTH_PX,
     palmRejectedByProximity: stats.palmRejectedByProximity,
+    palmRejectedByWidth: stats.palmRejectedByWidth,
     touchAdmitted: stats.touchAdmitted,
     penSeen: stats.penSeen,
     // THE WINDOW MUST BE CHOSEN FROM THESE, not guessed: it has to exceed the real pause between a
@@ -409,9 +424,6 @@ function summary() {
     penGapP95Ms: pctOf(gaps, 95),
     penGapP99Ms: pctOf(gaps, 99),
     penGapMaxMs: gaps.length ? +gaps[gaps.length - 1].toFixed(1) : null,
-    widthRuleIsUsableHere:
-      'NO — every touch width in this browser was between 1 and 8, and the pen reported none, so a ' +
-      'palm and a finger cannot be told apart by size. That is why the rule is proximity.',
 
     paintLatencyP50Ms: pctOf(sorted, 50),
     paintLatencyP95Ms: pctOf(sorted, 95),
@@ -438,7 +450,7 @@ el('clear').addEventListener('click', () => {
   stats.latencies = []; stats.strokes = 0; stats.samples = 0;
   stats.rawEvents = 0; stats.coalescedEvents = 0;
   stats.penSamples = 0; stats.touchSamples = 0; stats.mouseSamples = 0;
-  stats.palmRejectedByProximity = 0; stats.touchAdmitted = 0;
+  stats.palmRejectedByProximity = 0; stats.palmRejectedByWidth = 0; stats.touchAdmitted = 0;
   stats.penSeen = 0; stats.penGaps = []; stats.hoverSeen = 0;
   stats.pressureValues = new Set(); stats.tiltValues = new Set();
   stats.widthsSeenTouch = new Set(); stats.widthsSeenPen = new Set();
