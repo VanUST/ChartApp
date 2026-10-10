@@ -7,10 +7,13 @@
 //         it; a callback that receives the document and the tail read back from a file; and,
 //         injected for a test, the two functions that move bytes. The defaults are the platform's
 //         own, selected by `chart_source.dart` at compile time.
-// OUTPUTS: An app-bar button that opens a dialog holding the path field, Save and Open, and a
-//          one-line status. Where [chartSourceIsFilePath] is false — a browser — it renders nothing
-//          at all, because there is no path to name and the functions behind the buttons are not
-//          implemented there.
+// OUTPUTS: An app-bar button that opens a dialog holding a text field, Save and Open, a sentence
+//          naming what a save on this platform actually does, and a one-line status. Where
+//          [chartSourceIsFilePath] is false — a browser — the field holds a file NAME to offer the
+//          platform's chooser rather than a path, and the sentence says whether a save re-writes the
+//          chosen file or downloads a new copy, because those are two different promises and the
+//          reader is told which one is in force. The control is shown on every platform now that
+//          both functions work on both.
 // KEYWORDS: chart-file, save, open, viewer, app-bar, dialog, d20, d19, platform-seam, status-line
 //
 // WHY THIS IS A DIALOG AND NOT A BAR ABOVE THE CHART.
@@ -84,6 +87,29 @@ String chartPathBeside(String sourcePath) {
   return '$sourcePath$chartFileExtension';
 }
 
+// PURPOSE: Derive the `.chart` file name to offer when there is no source path to sit beside, which
+//          is the browser's ordinary case: the iReal export was chosen through a chooser and left no
+//          path behind, so the dialog would otherwise open with an empty field and a reader with
+//          nothing to accept.
+// INPUTS: title — the song's own title, which may be empty, may contain characters a filesystem
+//         refuses, and may already end in `.chart`.
+// OUTPUTS: The title with every character illegal in a file name replaced by `_` and `.chart`
+//          appended, or `untitled.chart` when nothing usable is left. The extension is appended
+//          rather than sniffed: a musician who titled a tune "Ballad.chart" still gets a
+//          `Ballad.chart.chart`, because guessing that the title was meant as a name would rename
+//          their song's file after their song.
+// KEYWORDS: file-name, download, suggested-name, sanitize, empty-title, fallback
+/// Returns a usable `.chart` file name for a song called [title].
+String chartFileNameFor(String title) {
+  final String cleaned = title
+      .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1F]'), '_')
+      .trim();
+  if (cleaned.isEmpty) {
+    return 'untitled$chartFileExtension';
+  }
+  return '$cleaned$chartFileExtension';
+}
+
 /// The app-bar control that saves and opens a `.chart` document.
 class ChartFileAction extends StatelessWidget {
   /// Creates the control for [document], reporting an opened document through [onOpened].
@@ -113,7 +139,11 @@ class ChartFileAction extends StatelessWidget {
   /// Called with the document and the operation tail a `.chart` file decoded to.
   final ValueChanged<OpenedChart> onOpened;
 
-  /// The path the dialog's field starts with, normally [chartPathBeside] of the loaded export.
+  /// The text the dialog's field starts with, normally [chartPathBeside] of the loaded export.
+  ///
+  /// On a platform with a filesystem that is a path; in a browser it is empty, because the iReal
+  /// export was chosen rather than named, and the dialog then offers [chartFileNameFor] of the
+  /// song's title instead — a name the reader can accept, edit or clear before saving.
   final String initialPath;
 
   /// How the container's bytes reach the reader's disk.
@@ -124,11 +154,10 @@ class ChartFileAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!chartSourceIsFilePath) {
-      // A browser has no path to name and the functions behind the dialog are not implemented
-      // there; showing the control would offer the reader something that cannot work.
-      return const SizedBox.shrink();
-    }
+    // Shown on every platform. It used to render nothing in a browser, while the two functions
+    // behind the dialog threw; now that they work there, hiding the control would hide a feature
+    // that exists. What differs per platform is the field's MEANING — a path or a file name — and
+    // the sentence describing what a save does, and the dialog is the only place that has to know.
     return IconButton(
       icon: const Icon(Icons.description_outlined),
       tooltip: 'Save or open a .chart file',
@@ -175,16 +204,25 @@ class _ChartFileDialog extends StatefulWidget {
   State<_ChartFileDialog> createState() => _ChartFileDialogState();
 }
 
-/// The dialog's state: its path field, the last outcome, and whether an operation is running.
+/// The dialog's state: its text field, the save mechanism this platform actually has, the last
+/// outcome, and whether an operation is running.
 class _ChartFileDialogState extends State<_ChartFileDialog> {
   late final TextEditingController _controller;
+
+  /// What a save will do here, read once when the dialog opens.
+  ///
+  /// Read once rather than per build because it cannot change while the dialog is up — it is a
+  /// property of the browser, not of the document — and reading it in `build` would put a platform
+  /// probe in the middle of the widget tree.
+  late final ChartSaveMode _mode;
   String? _status;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialPath);
+    _mode = chartSourceSaveMode();
+    _controller = TextEditingController(text: _initialFieldText());
   }
 
   @override
@@ -193,13 +231,34 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
     super.dispose();
   }
 
+  // PURPOSE: Decide what the field starts with, which is a path where the platform has one and a
+  //          proposed file name where it does not.
+  // INPUTS: None; [ChartFileAction.initialPath] and the document on screen.
+  // OUTPUTS: The initial path when there is one, otherwise [chartFileNameFor] of the song's title,
+  //          and the empty string when there is neither a path nor a document to name. An empty
+  //          result is honest: there is nothing to propose, so the reader is asked to type one.
+  // KEYWORDS: initial-value, file-name, path, title-fallback, empty-state
+  String _initialFieldText() {
+    final String given = widget.initialPath.trim();
+    if (given.isNotEmpty) {
+      return given;
+    }
+    final DocumentState? document = widget.document;
+    if (document == null) {
+      return '';
+    }
+    return chartFileNameFor(document.song.title);
+  }
+
   // PURPOSE: Write the document on screen to the file the reader named, snapshot and operation tail
-  //          together.
-  // INPUTS: None; the document is [ChartFileAction.document] and the destination is the path field.
+  //          together, and say afterwards which of the three saves actually happened.
+  // INPUTS: None; the document is [ChartFileAction.document] and the destination is the text field.
   // OUTPUTS: Nothing. Sets [_busy] around the write and [_status] afterwards with the operation
-  //          count, the byte count and any D19 warning, or the failure. A missing document and an
-  //          empty path are reported in the status line rather than silently doing nothing.
-  // KEYWORDS: save, encode, chart-file, operation-tail, d19, status, error-reporting
+  //          count, the byte count, any D19 warning and what [ChartSaveMode] this platform has — so
+  //          a reader whose file was re-written and one whose file was merely downloaded do not read
+  //          the same sentence. A missing document, an empty name and a dismissed chooser are
+  //          reported in the status line rather than silently doing nothing.
+  // KEYWORDS: save, encode, chart-file, operation-tail, d19, save-mode, status, error-reporting
   Future<void> _save() async {
     final DocumentState? document = widget.document;
     if (document == null) {
@@ -215,7 +274,9 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       _busy = true;
       _status = null;
     });
-    debugPrint('viewer.chart.save.start path_chars=${path.length}');
+    debugPrint(
+      'viewer.chart.save.start mode=${_mode.name} path_chars=${path.length}',
+    );
     try {
       final ChartFile file = chartFileFor(
         document,
@@ -229,16 +290,22 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status =
-            'Saved ${encoded.bytes.length} bytes to $path'
-            ' · ${widget.events.length} operation(s).'
-            '${_warningSuffix(encoded.warnings)}';
+        _status = _savedStatus(encoded, path);
       });
       debugPrint(
-        'viewer.chart.save.ok bytes=${encoded.bytes.length} '
+        'viewer.chart.save.ok mode=${_mode.name} bytes=${encoded.bytes.length} '
         'operations=${widget.events.length} '
         'warnings=${encoded.warnings.length}',
       );
+    } on ChartFileCancelledException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _busy = false;
+        _status = error.message;
+      });
+      debugPrint('viewer.chart.save.cancelled mode=${_mode.name}');
     } catch (error) {
       if (!mounted) {
         return;
@@ -251,20 +318,70 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
     }
   }
 
+  // PURPOSE: Word the successful save so that re-writing a file and downloading a new one cannot be
+  //          mistaken for each other, which is the whole reason the save mode is carried this far.
+  // INPUTS: encoded — what the codec produced, for the byte count and the D19 warnings. path — the
+  //         path or file name the reader supplied.
+  // OUTPUTS: The status sentence: the byte count, the operation count, any warning, and the
+  //          platform's own promise about what a second save will do.
+  // KEYWORDS: status, save-mode, in-place, download, honest-reporting
+  String _savedStatus(ChartFileEncodeResult encoded, String path) {
+    final String destination = _mode == ChartSaveMode.namedPath
+        ? 'to $path'
+        : 'as $path';
+    return 'Saved ${encoded.bytes.length} bytes $destination'
+        ' · ${widget.events.length} operation(s).'
+        '${_warningSuffix(encoded.warnings)}${_saveModeSuffix()}';
+  }
+
+  // PURPOSE: Say, in the status line, what this platform's save did to the file that was already
+  //          there — which is not the same answer on Chrome, on Safari and on a desktop.
+  // INPUTS: None; [_mode].
+  // OUTPUTS: One sentence, or the empty string where the platform replaces the named file and there
+  //          is nothing surprising to say.
+  // KEYWORDS: save-mode, status-suffix, in-place, download, named-path
+  String _saveModeSuffix() => switch (_mode) {
+    ChartSaveMode.namedPath => '',
+    ChartSaveMode.rewriteInPlace => ' This browser re-writes that file in place, so the next Save updates it.',
+    ChartSaveMode.download => ' This browser cannot update a file in place, so each Save downloads a NEW copy.',
+  };
+
+  // PURPOSE: Tell the reader, before they press Save, what this platform will do to a file that
+  //          already exists — the difference between replacing their file and handing them another.
+  // INPUTS: None; [_mode].
+  // OUTPUTS: One sentence in a browser, and the empty string where a path addresses the file
+  //          directly, because there the promise is already what the field and the button say.
+  // KEYWORDS: save-hint, file-system-access, download, up-front-disclosure, save-mode
+  String _saveHint() => switch (_mode) {
+    ChartSaveMode.namedPath => '',
+    ChartSaveMode.rewriteInPlace =>
+      'This browser can re-write a chart file it has already been given. The '
+          'first Save asks where to put the file; every Save after that updates '
+          'that same file.',
+    ChartSaveMode.download =>
+      'This browser cannot re-write a file in place, so every Save downloads a '
+          'NEW copy. The browser chooses where it lands, and may rename it when a '
+          'file of that name is already there.',
+  };
+
   // PURPOSE: Read the `.chart` file the reader named and hand its document and operation tail to the
   //          viewer.
-  // INPUTS: None; the source is the path field.
+  // INPUTS: None; the source is the text field on a platform where that field is a path, and the
+  //         browser's chooser in a browser, where the field holds only a name to propose.
   // OUTPUTS: Nothing, or a call to [ChartFileAction.onOpened]. Sets [_busy] around the read and
   //          [_status] afterwards with the title and any warning. A decode failure is shown as the
   //          typed message the container produced, which is the point of the container's failure
   //          types: a truncated file says it is truncated rather than looking like an empty chart.
-  //          The document handed over is the file's REDUCED document — its snapshot with its
-  //          operation tail folded in — because that is the chart the writer saw; the tail travels
-  //          beside it so a session can continue the log rather than restart its numbering.
-  // KEYWORDS: open, read, decode, reduced-document, operation-tail, typed-failure, status
+  //          The document handed over is the file's SNAPSHOT — the state before its operation tail —
+  //          because the session folds the tail in itself; handing over the reduction as well would
+  //          apply every operation twice. The tail travels beside it so a session can continue the
+  //          log rather than restart its numbering. A chooser the reader dismisses is reported with
+  //          the [ChartFileCancelledException]'s own sentence, because changing one's mind is not a
+  //          failure.
+  // KEYWORDS: open, read, decode, snapshot, operation-tail, typed-failure, cancellation, status
   Future<void> _open() async {
     final String path = _controller.text.trim();
-    if (path.isEmpty) {
+    if (chartSourceIsFilePath && path.isEmpty) {
       setState(() => _status = 'Name a .chart file to open.');
       return;
     }
@@ -302,6 +419,15 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
         'operations=${decoded.file.events.length} '
         'warnings=${decoded.warnings.length}',
       );
+    } on ChartFileCancelledException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _busy = false;
+        _status = error.message;
+      });
+      debugPrint('viewer.chart.open.cancelled');
     } on ChartFileException catch (error) {
       if (!mounted) {
         return;
@@ -336,13 +462,25 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
           children: <Widget>[
             TextField(
               controller: _controller,
-              decoration: const InputDecoration(
-                labelText: '.chart file',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                // A label rather than a different widget, because the field is the same field: on a
+                // filesystem its contents address the file, and in a browser they are the name the
+                // chooser and the download are given. A reader who typed a path into a browser field
+                // labelled "path" would be told nothing and misled by the label.
+                labelText: chartSourceIsFilePath ? '.chart file' : 'File name',
+                border: const OutlineInputBorder(),
                 isDense: true,
               ),
               onSubmitted: (String _) => unawaited(_open()),
             ),
+            if (_saveHint().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _saveHint(),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
             if (status != null)
               Padding(
                 padding: const EdgeInsets.only(top: 12),

@@ -26,10 +26,19 @@ const root = process.argv[4]
 const types = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
+  ['.mjs', 'text/javascript; charset=utf-8'],
   ['.css', 'text/css; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'],
   ['.png', 'image/png'],
   ['.svg', 'image/svg+xml'],
+  // The built Flutter application, which the directory argument above exists to serve. `canvaskit.wasm`
+  // is fetched with WebAssembly.instantiateStreaming, and that call requires this content type: served
+  // as octet-stream Chromium refuses the streaming path, and Flutter's loader falls back to fetching the
+  // whole module a second time as an ArrayBuffer. The font types matter for the same class of reason.
+  ['.wasm', 'application/wasm'],
+  ['.otf', 'font/otf'],
+  ['.ttf', 'font/ttf'],
+  ['.woff2', 'font/woff2'],
 ]);
 
 createServer(async (request, response) => {

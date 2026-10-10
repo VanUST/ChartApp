@@ -46,12 +46,14 @@
 // [sourceIsFilePath] selects. A screen that cannot name a file must not pretend to.
 //
 // WHERE THE CHART FILE IS SAVED AND OPENED. [`ChartFileAction`] owns that, not this screen: it is
-// an app-bar action that opens a dialog holding the path field, the two buttons and the status
-// line, and it renders nothing in a browser where `.chart` save/open is not implemented. This
-// screen contributes only the WRITTEN song to save and takes the song an opened file decodes to.
-// Keeping it in the APP BAR rather than in the body is deliberate: a bar above the chart takes
-// height away from it, and D13's FIT mode refuses to shrink a chart past a legible floor, so a body
-// bar turned a 200-bar song that fitted on one page into one that did not.
+// an app-bar action that opens a dialog holding the name field, the two buttons, a sentence saying
+// what a save does on this platform and the status line. It is shown on every platform: the two
+// functions behind it work in a browser too, where the field holds a file name to offer the
+// browser's chooser rather than a path. This screen contributes only the WRITTEN song to save and
+// takes the song an opened file decodes to. Keeping it in the APP BAR rather than in the body is
+// deliberate: a bar above the chart takes height away from it, and D13's FIT mode refuses to shrink
+// a chart past a legible floor, so a body bar turned a 200-bar song that fitted on one page into one
+// that did not.
 //
 // WHICH TRANSPOSITION THIS IS. Owner decision D14 gives transposition two meanings, and this screen
 // implements the EDITOR meaning: the chart is shown in another key, its key badge changes, and every
@@ -779,11 +781,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                 ? null
                 : () => _openSongForm(context, session),
           ),
-          // Where a path exists, the chart document itself can be named and moved. The action renders
-          // nothing in a browser, so the source bar below stays the only file control there. It lives
-          // in the app bar because a control in the body takes height away from the chart, and D13's
-          // FIT mode refuses to shrink a chart past a legible floor — the bar turned a song that
-          // fitted on one page into one that did not.
+          // The chart document itself can be named and moved, on every platform: where a path
+          // exists the field holds it, and in a browser it holds the name offered to the browser's
+          // chooser and download. It lives in the app bar because a control in the body takes height
+          // away from the chart, and D13's FIT mode refuses to shrink a chart past a legible floor —
+          // the bar turned a song that fitted on one page into one that did not.
           ChartFileAction(
             document: _documentOfSelection,
             events: session?.log ?? const <ChartEvent>[],

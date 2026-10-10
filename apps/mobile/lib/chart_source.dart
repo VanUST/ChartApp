@@ -1,20 +1,26 @@
-// PURPOSE: Name the one thing about saving and opening a `.chart` file that differs between a
-//          browser and a platform with a filesystem — where the bytes come from and where they go —
-//          and let the viewer stay unaware of it. This is the second half of the same composition
-//          point `ireal_source.dart` is: it supplies the two functions and the answer to "is a
-//          reference a path at all", with the same names and a different implementation per
-//          platform.
+// PURPOSE: Name the two things about saving and opening a `.chart` file that differ between a
+//          browser and a platform with a filesystem — where the bytes come from and where they go,
+//          and what a save does to a file that already exists — and let the viewer stay unaware of
+//          it. This is the second half of the same composition point `ireal_source.dart` is: it
+//          supplies two functions and two answers about the platform, with the same names and a
+//          different implementation per platform.
 // INPUTS: None. The implementation is chosen at compile time by the conditional export below.
-// OUTPUTS: `chartSourceIsFilePath`, `saveChartFile` and `loadChartFile`, each with the same name
-//          and the same meaning on both platforms and a different answer on each:
+// OUTPUTS: `chartSourceIsFilePath`, `chartSourceSaveMode`, `saveChartFile` and `loadChartFile`,
+//          each with the same name and the same meaning on both platforms and a different answer on
+//          each:
 //
-//            | Symbol                  | Desktop / mobile            | Browser                  |
-//            |-------------------------|-----------------------------|--------------------------|
-//            | `chartSourceIsFilePath` | true                        | false                    |
-//            | `saveChartFile(path)`   | writes the file at `path`   | not implemented (throws) |
-//            | `loadChartFile(path)`   | reads the file at `path`    | not implemented (throws) |
+//            | Symbol                   | Desktop / mobile                 | Browser
+//            |--------------------------|----------------------------------|--------------------------------
+//            | `chartSourceIsFilePath`  | true                             | false
+//            | `chartSourceSaveMode()`  | namedPath                        | rewriteInPlace, else download
+//            | `saveChartFile(name)`    | writes the file at that path     | re-writes the chosen file, else downloads
+//            | `loadChartFile(path)`    | reads the file at that path      | opens the browser's chooser
 //
-// KEYWORDS: chart-file, save, open, conditional-export, platform-seam, composition-root, web, io
+//          `ChartSaveMode` and `ChartFileCancelledException`, the vocabulary both implementations
+//          must agree on, are re-exported from `chart_source_contract.dart` so a caller imports the
+//          seam once.
+// KEYWORDS: chart-file, save, open, conditional-export, platform-seam, composition-root, web, io,
+//           file-system-access, download, d20
 //
 // WHY THIS IS A SECOND SEAM AND NOT A REUSE OF THE iReal ONE. The iReal seam turns a reference into
 // a parsed LIBRARY; this one moves BYTES in both directions. Folding them together would give the
@@ -22,11 +28,18 @@
 // overwrite" in the next, and the browser implementations of the two are different pieces of work.
 // The names are deliberately parallel so that a reader who knows one knows the other.
 //
-// WHY THE BROWSER SIDE IS NOT WRITTEN YET. D20 wants the Chrome/Android path to overwrite in place
-// through the File System Access API and the Safari/iOS path to download and re-open, and both need
-// a user gesture and a browser to verify against. That work is a separate increment; what matters
-// here is that the seam exists, compiles on the web, and changes nothing about the iReal file
-// picker that already works there. `chartSourceIsFilePath` is what keeps an unimplemented function
-// from ever being called: the viewer shows no `.chart` control where the answer is false.
+// WHY THE PATH ARGUMENT STILL EXISTS ON A PLATFORM THAT HAS NO PATH. A browser page cannot name a
+// file: it can only be handed one by the reader. The argument therefore carries the file NAME to
+// offer the picker and the download, which is the only thing a page can say about a destination
+// before the reader picks one. Keeping one signature means the dialog has one save call and one open
+// call on every platform, and `chartSourceIsFilePath` is what tells it whether that argument is a
+// path to be typed or a name to be proposed — a field labelled accordingly, not a hidden control.
+//
+// WHERE THE HONESTY LIVES. `chartSourceSaveMode` is the answer to "will this replace my file or make
+// me a new one?", and it is decided by the implementation because only the implementation can see
+// the browser's own API. The dialog renders the answer and never guesses it; a platform with a
+// filesystem answers `namedPath` because it always replaces the file it was told to.
+export 'chart_source_contract.dart';
+
 export 'chart_source_io.dart'
     if (dart.library.js_interop) 'chart_source_web.dart';

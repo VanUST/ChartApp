@@ -3,20 +3,33 @@
 //          container back. It is the desktop/mobile half of the conditional export, so it is the
 //          only place in the app that moves `.chart` bytes through `dart:io`.
 // INPUTS: A path the reader typed or edited, and the bytes `ChartFileCodec` produced.
-// OUTPUTS: [chartSourceIsFilePath] is true, [saveChartFile] completes once the bytes are on disk,
-//          and [loadChartFile] answers with the file's bytes. A missing file throws a
+// OUTPUTS: [chartSourceIsFilePath] is true, [chartSourceSaveMode] always answers
+//          [ChartSaveMode.namedPath], [saveChartFile] completes once the bytes are on disk, and
+//          [loadChartFile] answers with the file's bytes. A missing file throws a
 //          [FileSystemException] and an unwritable path throws whatever `dart:io` throws; both are
 //          ordinary outcomes for a typed path and are meant to be shown, not swallowed.
-// KEYWORDS: chart-file, save, open, dart-io, conditional-import, io-implementation
+// KEYWORDS: chart-file, save, open, dart-io, conditional-import, io-implementation, save-mode
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'chart_source_contract.dart';
+
 /// Whether a reader can name a `.chart` file by a filesystem path on this platform.
 ///
-/// True here, which is what makes the viewer show the chart path field and its Save and Open
-/// buttons. False in the browser, where there is no path to type and those controls are hidden
-/// rather than offered and then refused.
+/// True here, which is what makes the chart dialog show a path field whose contents address the
+/// file directly. False in the browser, where the same field holds a file NAME to offer the
+/// chooser, because a page cannot name a file it has not been handed.
 const bool chartSourceIsFilePath = true;
+
+// PURPOSE: Report how a save reaches the reader's disk on this platform, so the chart dialog can
+//          say what pressing Save will do without knowing which platform it is running on.
+// INPUTS: None.
+// OUTPUTS: Always [ChartSaveMode.namedPath]. A filesystem has no second mechanism to choose
+//          between: the path the reader typed IS the destination, and writing it again replaces the
+//          same file, which is the property the browser has to reproduce or admit it lacks.
+// KEYWORDS: save-mode, named-path, platform-capability, no-runtime-check
+/// Whether a save here replaces the named file, which on a filesystem it always does.
+ChartSaveMode chartSourceSaveMode() => ChartSaveMode.namedPath;
 
 // PURPOSE: Write a container to the file the reader named, which is the only write the app performs
 //          on a chart document.
