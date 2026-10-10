@@ -231,6 +231,18 @@ abstract final class EventCodec {
           from: _volta(EventJson.optionalInteger(payload, 'from')),
           to: _volta(EventJson.optionalInteger(payload, 'to')),
         );
+      case 'mark.set':
+        return BarMarkSetEvent(
+          docId: docId,
+          seq: seq,
+          sectionId: EventJson.string(payload, 'sectionId'),
+          barIndex: EventJson.integer(payload, 'bar'),
+          from: ModelJson.decodeBarMarks(
+            EventJson.array(payload, 'from'),
+            'from',
+          ),
+          to: ModelJson.decodeBarMarks(EventJson.array(payload, 'to'), 'to'),
+        );
       case 'key.transpose':
         return KeyTransposeEvent(
           docId: docId,

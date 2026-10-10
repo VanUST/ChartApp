@@ -115,6 +115,11 @@ abstract final class DocumentReducer {
             : bar.copyWith(volta: bracket);
       }),
     ),
+    final BarMarkSetEvent e => state.copyWith(
+      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+        return bar.copyWith(marks: e.to);
+      }),
+    ),
     final KeyTransposeEvent e => state.copyWith(
       song: _transposedSong(state.song, e.semitones, e.toKey),
     ),

@@ -49,6 +49,7 @@ part 'event_json.dart';
 part 'ink.dart';
 part 'ink_events.dart';
 part 'key_events.dart';
+part 'mark_events.dart';
 part 'measure_events.dart';
 part 'model_json.dart';
 part 'note_events.dart';

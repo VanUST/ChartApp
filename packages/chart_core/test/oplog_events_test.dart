@@ -400,6 +400,18 @@ List<ChartEvent> _chartEvents() => <ChartEvent>[
       tempo: 64,
     ),
   ),
+  // A bar that carried NO sign gains two at once, which is the case a single-mark event could not
+  // express: the `to` side is a set of two and the `from` side is the EMPTY set — the state a bar
+  // reaches when its last sign is taken off, and one an inverse must be able to name. The bar is
+  // the first of section s1, which carries no mark at all, so this changes the document.
+  const BarMarkSetEvent(
+    docId: 'doc-1',
+    seq: 29,
+    sectionId: 's1',
+    barIndex: 0,
+    from: <BarMark>{},
+    to: <BarMark>{BarMark.segno, BarMark.coda},
+  ),
 ];
 
 /// Every setlist event, applied to the setlist above.
@@ -636,6 +648,20 @@ void main() {
           ),
         ),
       ),
+      'mark.set': (
+        '{"v":1,"docId":"doc-1","seq":29,"anchor":{"sectionId":"s1","bar":0,'
+            '"beat":null,"step":0},'
+            '"type":"mark.set","payload":{"sectionId":"s1","bar":0,'
+            '"from":[],"to":["segno","coda"]}}',
+        const BarMarkSetEvent(
+          docId: 'doc-1',
+          seq: 29,
+          sectionId: 's1',
+          barIndex: 0,
+          from: <BarMark>{},
+          to: <BarMark>{BarMark.segno, BarMark.coda},
+        ),
+      ),
       'ink.stroke.add': (
         '{"v":1,"docId":"doc-1","seq":18,"anchor":{"sectionId":"doc-a",'
             '"bar":7,"beat":3,"step":1},'
@@ -868,6 +894,48 @@ void main() {
             (EventFormatException e) => e.message,
             'message',
             contains('title'),
+          ),
+        ),
+      );
+    });
+
+    test('a mark.set missing a side is reported rather than defaulted', () {
+      // The event carries the WHOLE set of signs on both sides, because its inverse is the two
+      // sets swapped: a payload naming only the side that changed would leave the inverse unable
+      // to say what the bar carried before, and a default would make a truncated event look like
+      // an edit that cleared every sign. Absent is therefore a typed failure.
+      final Map<String, Object?> json = _json(
+        '{"v":1,"docId":"doc-1","seq":29,"type":"mark.set",'
+        '"payload":{"sectionId":"s1","bar":0,"to":["segno"]}}',
+      );
+      expect(
+        () => EventCodec.decode(json),
+        throwsA(
+          isA<EventFormatException>().having(
+            (EventFormatException e) => e.message,
+            'message',
+            contains('from'),
+          ),
+        ),
+      );
+    });
+
+    test('a mark.set naming a sign this build does not have is reported, not '
+        'dropped', () {
+      // A dropped sign is a sign the musician put on the bar and the page no longer shows, which
+      // is the outcome an event log exists to make impossible.
+      final Map<String, Object?> json = _json(
+        '{"v":1,"docId":"doc-1","seq":29,"type":"mark.set",'
+        '"payload":{"sectionId":"s1","bar":0,"from":[],'
+        '"to":["segno","dalSegno"]}}',
+      );
+      expect(
+        () => EventCodec.decode(json),
+        throwsA(
+          isA<EventFormatException>().having(
+            (EventFormatException e) => e.message,
+            'message',
+            contains('dalSegno'),
           ),
         ),
       );

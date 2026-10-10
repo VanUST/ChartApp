@@ -218,7 +218,7 @@ abstract final class ModelJson {
     'repeatPrevious': bar.repeatPrevious.name,
     'slashRepeat': bar.slashRepeat,
     'noChord': bar.noChord,
-    'marks': <Object?>[for (final BarMark m in bar.marks) m.name],
+    'marks': barMarks(bar.marks),
     'staffText': <Object?>[for (final String text in bar.staffText) text],
   };
 
@@ -259,20 +259,35 @@ abstract final class ModelJson {
       ),
       slashRepeat: EventJson.boolean(json, 'slashRepeat'),
       noChord: EventJson.boolean(json, 'noChord'),
-      marks: <BarMark>{
-        for (final Object? entry in EventJson.array(json, 'marks'))
-          EventJson.enumeration(
-            BarMark.values,
-            _asString(entry, 'marks'),
-            'marks',
-          ),
-      },
+      marks: decodeBarMarks(EventJson.array(json, 'marks'), 'marks'),
       staffText: <String>[
         for (final Object? entry in EventJson.array(json, 'staffText'))
           _asString(entry, 'staffText'),
       ],
     );
   }
+
+  /// Writes a set of [BarMark]s as the list of their names.
+  ///
+  /// The SET'S OWN ITERATION ORDER is what is written, because that is the order the painter joins
+  /// the glyphs in and the order a `mark.set` carries on both sides. Writing it sorted would be a
+  /// second opinion about the order, and a bar round-tripped through JSON would then draw its signs
+  /// in a different order than the bar that was written.
+  static List<Object?> barMarks(Set<BarMark> marks) => <Object?>[
+    for (final BarMark mark in marks) mark.name,
+  ];
+
+  /// Rebuilds a set of [BarMark]s from the array [entries], naming [field] in a failure.
+  ///
+  /// Throws [EventFormatException] when an entry is not a string, or names a mark this build does
+  /// not have, rather than dropping it: a dropped sign is a sign the musician put on the bar and the
+  /// page no longer shows. A name repeated in [entries] collapses, because the model stores a set —
+  /// that is the model's own shape and not a default invented here.
+  static Set<BarMark> decodeBarMarks(List<Object?> entries, String field) =>
+      <BarMark>{
+        for (final Object? entry in entries)
+          EventJson.enumeration(BarMark.values, _asString(entry, field), field),
+      };
 
   /// Writes a [SectionLabel] as its kind and text.
   static Map<String, Object?> sectionLabel(SectionLabel label) =>

@@ -326,7 +326,16 @@ class ChartPainter extends CustomPainter {
     }
 
     if (bar.marks.isNotEmpty) {
-      final String text = bar.marks.map(_markGlyph).join(' ');
+      // SORTED BY THE ENUM'S OWN ORDER, because rendering must be a function of the VALUE and not of
+      // the order the marks happened to be inserted in. `Bar` compares its marks as a SET
+      // (`containsAll` both ways, `hashAllUnordered`), so two bars with the same signs are the same
+      // value — but a `Set` iterates in insertion order, so drawing them as iterated would render
+      // "segno coda" and "coda segno" for two bars that are `==`. A chart that redraws differently
+      // from a value it already agreed on is the kind of difference that is invisible until it is
+      // compared, which is when it is hardest to explain.
+      final List<BarMark> ordered = bar.marks.toList()
+        ..sort((BarMark a, BarMark b) => a.index.compareTo(b.index));
+      final String text = ordered.map(_markGlyph).join(' ');
       final Size size = _measureText(text, metrics.staffTextStyle);
       _paintText(
         canvas,

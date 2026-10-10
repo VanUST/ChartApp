@@ -1,7 +1,8 @@
 // PURPOSE: Offer the operations that decide the SHAPE of a tune — put a bar in, take it out, copy
-//          it; mark where it repeats and which ending each pass takes; add, rename, copy, move and
-//          remove a section — as one sheet over the chart, so a musician can build a 32-bar form, a
-//          rehearsal-letter form and a repeated form without a menu search and without a keyboard.
+//          it; mark where it repeats and which ending each pass takes; draw the signs a bar carries
+//          (segno, coda, fermata, player's stop); add, rename, copy, move and remove a section — as
+//          one sheet over the chart, so a musician can build a 32-bar form, a rehearsal-letter form
+//          and a repeated, signed form without a menu search and without a keyboard.
 //          It is the form half of the edit loop: `edit_session.dart` decides which event each
 //          operation is, and this file decides where the buttons go and what a tap does.
 // INPUTS: The session being edited, the address of the bar the musician selected (section id and
@@ -11,10 +12,11 @@
 //          The sheet keeps its own cursor — the address the NEXT operation will use — because a
 //          form edit moves the very address it was given: inserting a bar before the selection
 //          pushes the selected bar one place later, and after a delete the old index may name the
-//          bar after the one that went away. A repeat or an ending does NOT move an address, so the
-//          cursor stays where it was for those.
+//          bar after the one that went away. A repeat, an ending or a mark does NOT move an address,
+//          so the cursor stays where it was for those.
 // KEYWORDS: song-form, bars, sections, rehearsal-letter, repeat, ending, volta, percent-bar,
-//           bottom-sheet, op-log, undoable, edit-session, no-keyboard
+//           bar-mark, segno, coda, fermata, player-ending, bottom-sheet, op-log, undoable,
+//           edit-session, no-keyboard
 //
 // WHY A SHEET AND NOT A ROW OF BUTTONS ABOVE THE CHART.
 //
@@ -69,6 +71,24 @@
 // which state the bar is in — which writes the neutral `Barline.single`. A bracket is removed
 // through the ending dialog's "No bracket", which writes a null bracket, because `Volta(0)` is an
 // unnumbered bracket the page DRAWS and is not the same thing as having none.
+//
+// WHY THE MARKS ARE A GROUP OF FOUR TOGGLES AND NOT A CYCLE. A bar's marks are a SET, not a single
+// value: the painter joins every mark a bar carries into one line of glyphs, and the owner's own
+// setlist carries several on one bar. A cycle through one button would therefore be a control that
+// could only ever express one mark per bar — it would have to take two signs off to put a third on
+// — which is a shape the model does not have and the corpus does not ask for. One toggle per sign
+// matches the model: each sign is independently present or absent, the button's `active` state
+// shows which signs the bar carries right now, and a bar with two keeps both while a third is
+// toggled on. The group is deliberately ordered as the model declares `BarMark` (segno, coda,
+// fermata, player ending) so the buttons are in one fixed order rather than in the order the
+// musician happened to press them. The ORDER of the glyphs on the page is not decided here: the
+// painter draws the bar's set in its own iteration order, and toggling a sign on never reorders the
+// signs already there.
+//
+// MARKS ARE NOT CHECKED HERE EITHER, AND FOR A DIFFERENT REASON THAN REPEATS. `derivePlayOrder`
+// does not read a segno, a coda, a fermata or a player's stop — nothing in the model interprets
+// them as navigation yet — so there is no reader whose verdict this sheet could disagree with. The
+// control writes exactly the sign the musician asked for and says so on the status line.
 import 'package:chart_core/chart_core.dart';
 // Flutter's own `Key` (widget identity) collides with the domain's musical Key, and this file names
 // the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
@@ -160,6 +180,33 @@ String voltaText(Volta? volta) {
   }
   return volta.number == 0 ? 'unnumbered' : '${volta.number}.';
 }
+
+// PURPOSE: Word one of the signs a bar can carry, so the sheet's button and the text a verification
+//          quotes name the same sign the same way — and so the four signs are labelled in one place
+//          rather than in a switch at each call site.
+// INPUTS: mark — the sign, one of [BarMark]'s four values.
+// OUTPUTS: The words for that sign: `Segno`, `Coda`, `Fermata` or `Player end`. Total over the
+//          enum: there is no null case, because a bar-level control only ever names a sign it can
+//          set, and "the bar does not carry it" is what the button's `active` state says.
+// KEYWORDS: bar-mark, segno, coda, fermata, player-ending, label, shared-wording
+/// Returns the words that name [mark] on the sheet's button.
+String barMarkText(BarMark mark) => switch (mark) {
+  BarMark.segno => 'Segno',
+  BarMark.coda => 'Coda',
+  BarMark.fermata => 'Fermata',
+  BarMark.playerEnding => 'Player end',
+};
+
+// The glyph beside each mark button, in one switch rather than four literals at the call site, so
+// a sign and its icon cannot drift apart. The choices are stand-ins for shapes the app has no font
+// for: a target for the segno's crossed circle, a centre focus for the coda's, a pause disc for the
+// fermata's held note, and a stop disc for the player's stop.
+IconData _markIcon(BarMark mark) => switch (mark) {
+  BarMark.segno => Icons.gps_fixed,
+  BarMark.coda => Icons.filter_center_focus,
+  BarMark.fermata => Icons.pause_circle_outline,
+  BarMark.playerEnding => Icons.stop_circle_outlined,
+};
 
 /// The form sheet itself: the bar group, the section group and the address both act on.
 class SongFormSheet extends StatefulWidget {
@@ -449,6 +496,40 @@ class _SongFormSheetState extends State<SongFormSheet> {
     );
   }
 
+  // PURPOSE: Switch one of the four signs the painter draws on a bar — the segno, the coda, the
+  //          fermata or the player's stop — on or off on the cursor's bar, which is the whole of the
+  //          control for a mark.
+  // INPUTS: mark — which sign the pressed button stands for; the sheet builds one button per
+  //         [BarMark] value.
+  // OUTPUTS: Nothing. The button is a TOGGLE rather than a pair of buttons because a sign is either
+  //          present or absent, and the button's `active` state is what shows which state the bar
+  //          is in. A bar that already carries two signs keeps both; pressing a third's button adds
+  //          the third and leaves the other two exactly where they were, which is the model's own
+  //          set semantics and the reason the controls are four toggles and not a cycle. The status
+  //          line names the sign and what happened to it, because the page is behind the sheet.
+  // KEYWORDS: bar-mark, segno, coda, fermata, player-ending, toggle, set-semantics, op-log,
+  //           rebuild-on-apply, no-keyboard
+  void _toggleMark(BarMark mark) {
+    final Bar? bar = _bar;
+    if (bar == null) {
+      return;
+    }
+    final bool present = !bar.marks.contains(mark);
+    final bool applied = widget.session.setBarMark(
+      sectionId: _sectionId,
+      barIndex: _barIndex,
+      mark: mark,
+      present: present,
+    );
+    _report(
+      applied,
+      '${barMarkText(mark)} ${present ? 'set' : 'cleared'}.',
+      refusal: present
+          ? 'Nothing changed: the bar already carries that sign.'
+          : 'Nothing changed: the bar does not carry that sign.',
+    );
+  }
+
   // PURPOSE: Add a new one-bar section on the chosen side of the cursor's section.
   // INPUTS: before — true to put the new section in front of the cursor's, false behind it.
   // OUTPUTS: Nothing. The cursor moves into the new section's first bar, because an operation on a
@@ -654,6 +735,21 @@ class _SongFormSheetState extends State<SongFormSheet> {
                   active: bar?.volta != null,
                   onTap: hasBar ? () => _chooseVolta() : null,
                 ),
+              ]),
+              const SizedBox(height: 14),
+              // The signs drawn ON the bar rather than around it: the segno, the coda, the fermata
+              // and the player's stop. Every one is an independent toggle over the bar's own set of
+              // marks, so the buttons show what the bar carries now and a bar may carry several at
+              // once — see the header note on why this is a group and not a cycle.
+              _buildGroup('MARKS', <Widget>[
+                for (final BarMark mark in BarMark.values)
+                  SheetButton(
+                    buttonKey: 'song-form-mark-${mark.name}',
+                    icon: _markIcon(mark),
+                    label: barMarkText(mark),
+                    active: bar?.marks.contains(mark) ?? false,
+                    onTap: hasBar ? () => _toggleMark(mark) : null,
+                  ),
               ]),
               const SizedBox(height: 14),
               _buildGroup('SECTION', <Widget>[

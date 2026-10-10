@@ -819,6 +819,80 @@ class EditSession {
     return true;
   }
 
+  // --- The signs drawn on a bar ----------------------------------------------------------------
+  //
+  // `BarMark` — the segno, the coda, the fermata and the player's stop — has been drawn by
+  // `chart_painter.dart` since the painter was written, and the owner's own setlist carries 31 of
+  // them, but until this method existed NOTHING wrote one: they were the one mark on a bar with no
+  // control (A48). The catalogue had no event for them either, so `mark.set` was added beside
+  // `repeat.set` and `volta.set` for the same reason `song.update` was added beside the form
+  // operations (A38): an operation a musician needs had no event to carry it.
+  //
+  // WHY THE WHOLE SET IS CARRIED AND NOT A SINGLE MARK. A bar may carry several marks at once and
+  // the painter joins them into one line of glyphs, so "add the coda" and "remove the fermata" are
+  // deltas against a set that a later edit, an undo or another device can change in between. The
+  // event therefore records the set on both sides, read from the bar here, and its inverse is a
+  // swap rather than a reconstruction.
+  //
+  // WHY CLEARING REMOVES A MEMBER RATHER THAN WRITING A NEUTRAL VALUE. A repeat barline has a
+  // neutral value (`Barline.single`) because a barline is always there; a mark has none, because a
+  // bar either carries the sign or it does not. `BarMark` is an enum with no "none" member, so
+  // taking the last mark off a bar produces an EMPTY set — a real value the model holds, and one
+  // the event can therefore carry as its `to` side (see `BarMarkSetEvent`).
+
+  // PURPOSE: Put one of the four signs the painter draws on a bar onto the selected bar, or take it
+  //          off — the operation that makes the 31 segnos, codas, fermatas and player stops in the
+  //          owner's own setlist reachable from the application.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. mark — which of the four
+  //         signs to change. present — true to put the sign on the bar, false to take it off.
+  // OUTPUTS: True when the signs changed, false when the address names no bar, and false when the
+  //          bar already carries exactly the state asked for. The second refusal is the rule every
+  //          other edit here follows (see [setVolta], [updateSong]): an event whose two sides are
+  //          equal is a log row that changed nothing and an offer to undo an edit that did not
+  //          happen. The event carries the COMPLETE set of signs on both sides, read from the bar
+  //          here, so its inverse restores the bar exactly — including the other marks the caller
+  //          did not name, and the order they were drawn in.
+  // KEYWORDS: bar-mark, segno, coda, fermata, player-ending, toggle, whole-value, no-op-refusal,
+  //           order-preserving, undoable
+  /// Sets or clears [mark] on the bar at ([sectionId], [barIndex]), reporting whether it changed.
+  bool setBarMark({
+    required String sectionId,
+    required int barIndex,
+    required BarMark mark,
+    required bool present,
+  }) {
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null) {
+      return false;
+    }
+    final Set<BarMark> from = bar.marks;
+    if (from.contains(mark) == present) {
+      return false;
+    }
+    // A COPY, because the bar's own set may be unmodifiable (the iReal parser wraps its marks in
+    // `Set.unmodifiable`) and because the `from` half must keep naming the state before the edit
+    // rather than the state a later mutation produced. The copy preserves the order of the marks
+    // already on the bar; a mark that is being added lands at the end, which is the order the
+    // painter draws it in.
+    final Set<BarMark> to = Set<BarMark>.of(from);
+    if (present) {
+      to.add(mark);
+    } else {
+      to.remove(mark);
+    }
+    apply(
+      BarMarkSetEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        from: from,
+        to: to,
+      ),
+    );
+    return true;
+  }
+
   // --- Text cues: the words a musician writes on the chart -------------------------------------
   //
   // `textcue.insert`, `textcue.edit`, `textcue.move` and `textcue.delete` have been in the
