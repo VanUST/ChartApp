@@ -1,13 +1,16 @@
-// PURPOSE: Start the ChartApp application and establish the two facts the rest of the widget
-//          tree relies on: the Flutter binding exists, and the ink platform accessor resolves
-//          on every target. Without the second step, opening the editor on a desktop build
-//          would throw from a getter the UI has no reasonable way to guard.
-// INPUTS: None.
-// OUTPUTS: Runs the application. The shell it shows is a Phase 0 placeholder: it reports
-//          whether ink is available and otherwise states that the editor arrives in Phase 2.
-// KEYWORDS: entrypoint, bootstrap, ink-fallback, composition-root, phase-0
+// PURPOSE: Start the ChartApp application and establish the two facts the rest of the widget tree
+//          relies on: the Flutter binding exists, and the ink platform accessor resolves on every
+//          target. The screen it shows is the iReal reader, which draws an imported chart so the
+//          importer can be checked against the application the file came from.
+// INPUTS: An optional [IRealLibraryLoader] and starting path, so a test can compose the application
+//         with a synthetic payload instead of the owner's file.
+// OUTPUTS: Runs the application. The home screen is [IRealViewerScreen].
+// KEYWORDS: entrypoint, bootstrap, ink-fallback, composition-root, ireal-reader, viewer
 import 'package:flutter/material.dart';
 import 'package:ink_native/ink_native.dart';
+
+import 'ireal_library.dart';
+import 'viewer_screen.dart';
 
 /// Whether the running build has a native ink surface.
 ///
@@ -25,7 +28,20 @@ void main() {
 /// The application root.
 class ChartApp extends StatelessWidget {
   /// Creates the application root.
-  const ChartApp({super.key});
+  ///
+  /// [loader] and [initialPath] are injected so a widget test can boot the real shell against a
+  /// synthetic library; the defaults are the reader's own file.
+  const ChartApp({
+    super.key,
+    this.loader = loadIRealLibraryFromFile,
+    this.initialPath = defaultIRealPath,
+  });
+
+  /// How the viewer turns a path into a library.
+  final IRealLibraryLoader loader;
+
+  /// The path the viewer's text field starts with.
+  final String initialPath;
 
   @override
   Widget build(BuildContext context) {
@@ -34,33 +50,7 @@ class ChartApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E5D8A)),
       ),
-      home: const EditorPlaceholder(),
-    );
-  }
-}
-
-/// The Phase 0 editor shell.
-class EditorPlaceholder extends StatelessWidget {
-  /// Creates the placeholder shell.
-  const EditorPlaceholder({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('ChartApp')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(
-              inkIsAvailable ? 'Ink: available' : 'Ink: unavailable',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            const Text('Editor arrives in Phase 2'),
-          ],
-        ),
-      ),
+      home: IRealViewerScreen(loader: loader, initialPath: initialPath),
     );
   }
 }
