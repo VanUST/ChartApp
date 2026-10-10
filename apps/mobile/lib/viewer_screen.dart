@@ -416,62 +416,70 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final IRealSong entry = library.songs[songIndex];
     final int semitones = _semitonesBySong[entry.index] ?? 0;
     final Song displayed = _displayedSong(entry, semitones);
-    final PageMode mode = _pageModeFor(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  entry.title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+    // The mode follows the PANE the chart is drawn in, not the window. The song list takes a fixed
+    // slice off the left, so a window the mode would call a tablet can leave a chart area narrower
+    // than the default assumes — on the owner's tablet that is 824 logical pixels of window against
+    // 564 of pane, either side of the 600 threshold. Measuring the pane rather than deriving it
+    // from the window is what keeps the two from drifting apart when the pane's width changes.
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final PageMode mode = _pageModeFor(constraints.maxWidth);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      entry.title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text('${entry.song.writtenBarCount} bar(s)'),
+                  if (entry.issues.isNotEmpty) ...<Widget>[
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => unawaited(_showIssues(context, entry)),
+                      child: Text('${entry.issues.length} issue(s)'),
+                    ),
+                  ],
+                ],
               ),
-              Text('${entry.song.writtenBarCount} bar(s)'),
-              if (entry.issues.isNotEmpty) ...<Widget>[
-                const SizedBox(width: 8),
-                TextButton(
-                  onPressed: () => unawaited(_showIssues(context, entry)),
-                  child: Text('${entry.issues.length} issue(s)'),
-                ),
-              ],
-            ],
-          ),
-        ),
-        SceneBar(
-          position: songIndex + 1,
-          songCount: library.songs.length,
-          song: displayed,
-          semitones: semitones,
-          pageMode: mode,
-          onOpenKeyGrid: () => unawaited(_chooseKey(entry)),
-          onPageModeChanged: (PageMode picked) =>
-              setState(() => _chosenPageMode = picked),
-        ),
-        const SizedBox(height: 6),
-        Expanded(child: _buildPages(entry, displayed, mode)),
-      ],
+            ),
+            SceneBar(
+              position: songIndex + 1,
+              songCount: library.songs.length,
+              song: displayed,
+              semitones: semitones,
+              pageMode: mode,
+              onOpenKeyGrid: () => unawaited(_chooseKey(entry)),
+              onPageModeChanged: (PageMode picked) =>
+                  setState(() => _chosenPageMode = picked),
+            ),
+            const SizedBox(height: 6),
+            Expanded(child: _buildPages(entry, displayed, mode)),
+          ],
+        );
+      },
     );
   }
 
   // PURPOSE: Decide which page mode is in force, so the default follows the surface and a choice
   //          the musician made survives.
-  // INPUTS: context — the build context, read for the window's width.
-  // OUTPUTS: The mode the musician chose, or — before they have chosen — FIT on a surface at least
-  //          [sceneBarTabletWidth] logical pixels wide and PAGES on anything narrower. That is
-  //          owner decision D13's "tablet edit = FIT" expressed against the window the chart is
-  //          actually drawn in rather than the device's label.
-  // KEYWORDS: page-mode, default, tablet, fit, pages, responsive
-  PageMode _pageModeFor(BuildContext context) =>
+  // INPUTS: paneWidth — the width of the space the chart itself is drawn in, which is the window
+  //         MINUS the song list, not the window.
+  // OUTPUTS: The mode the musician chose, or — before they have chosen — FIT on a chart pane at
+  //          least [sceneBarTabletWidth] logical pixels wide and PAGES on anything narrower. That
+  //          is owner decision D13's "tablet edit = FIT" expressed against the surface the chart
+  //          is actually drawn on rather than the device's label.
+  // KEYWORDS: page-mode, default, tablet, fit, pages, responsive, pane-width
+  PageMode _pageModeFor(double paneWidth) =>
       _chosenPageMode ??
-      (MediaQuery.sizeOf(context).width >= sceneBarTabletWidth
-          ? PageMode.fit
-          : PageMode.pages);
+      (paneWidth >= sceneBarTabletWidth ? PageMode.fit : PageMode.pages);
 
   // PURPOSE: Lay the displayed song out at the size the window gives it and show it as one fitted
   //          page or as a page at a time.
