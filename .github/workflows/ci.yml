@@ -1,0 +1,119 @@
+# PURPOSE: Run the acceptance gate on every push and pull request, so that no change reaches
+#          main without passing the same lint, format and test sequence a developer runs
+#          locally. It also proves the Android and iOS toolchains still build, which is the only
+#          part of the pipeline this project cannot check without a runner.
+# INPUTS: Triggered by push to main, any pull request, or manual dispatch.
+# OUTPUTS: A pass/fail check per job. Failure of any job blocks the merge.
+# KEYWORDS: ci, github-actions, gate, android, ios, build-only, melos, flutter-pin
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded run on the same ref has no value; cancel it rather than paying for both.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must equal the "flutter" field in .fvmrc. bootstrap.ps1 and bootstrap.sh fail a developer
+  # whose SDK disagrees with it, so CI and a local run are held to the same version.
+  FLUTTER_VERSION: 3.47.7
+
+jobs:
+  verify:
+    name: Analyze, format and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install the pinned Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Point Melos at the pinned SDK
+        # The root pubspec sets `sdkPath: .fvm/flutter_sdk` so that a local run cannot use the
+        # wrong Flutter. CI does not use FVM, so the same path is satisfied by a symlink to the
+        # SDK that flutter-action installed. MELOS_SDK_PATH is also exported because it takes
+        # precedence over sdkPath and keeps the intent explicit.
+        run: |
+          root=$(flutter --version --machine | python3 -c 'import json,sys; print(json.load(sys.stdin)["flutterRoot"])')
+          mkdir -p .fvm
+          ln -sfn "$root" .fvm/flutter_sdk
+          echo "MELOS_SDK_PATH=$root" >> "$GITHUB_ENV"
+
+      - name: Resolve the workspace
+        run: flutter pub get
+
+      # `dart run melos` uses the version pinned in the root pubspec dev_dependencies, so CI and
+      # a developer resolve the identical Melos. There is no global install to drift.
+      - name: Run the acceptance gate
+        run: dart run melos run verify
+
+  android:
+    name: Android debug build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install the pinned Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve the workspace
+        run: flutter pub get
+
+      - name: Build the debug APK
+        # This is the check that proves the Android toolchain, the Gradle setup and the plugin
+        # registration still work. It is deliberately a build and not an emulator run: no
+        # integration test exists yet, and an emulator that runs no assertions costs minutes and
+        # proves less. When the first integration test lands under
+        # apps/mobile/integration_test, add a `reactivecircus/android-emulator-runner` step here
+        # with api-level 34 and `flutter test integration_test`.
+        working-directory: apps/mobile
+        run: flutter build apk --debug
+
+  ios-build-only:
+    name: iOS build only
+    runs-on: macos-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install the pinned Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve the workspace
+        run: flutter pub get
+
+      - name: Build for iOS without signing
+        # No developer certificate is configured, and the point of this job is that the project
+        # compiles for iOS at all. A signed archive and a TestFlight upload are later work.
+        working-directory: apps/mobile
+        run: flutter build ios --debug --no-codesign
+
+      - name: Run the analysis and tests
+        # The macOS runner also carries the whole workspace, so running the gate here catches a
+        # change that passes on Linux but not on the platform the iOS tooling assumes.
+        run: dart run melos run verify

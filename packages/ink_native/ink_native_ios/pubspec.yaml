@@ -1,0 +1,48 @@
+# PURPOSE: Declare ink_native_ios — the iOS half of the federated ink plugin, carrying the
+#          Swift/PencilKit native scaffolding that will draw strokes at stylus latency.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: A Flutter plugin whose native class InkNativeIosPlugin is registered on iOS.
+#          IMPORTANT: the Dart side of the ink contract is not implemented yet, so this package
+#          does NOT satisfy InkNativePlatform and is not declared an implementation of ink_native.
+# KEYWORDS: ink-native, ios, pencilkit, swift, plugin, spike-s2, not-yet-implemented
+name: ink_native_ios
+description: >-
+  iOS ink implementation scaffolding backed by PencilKit. Native class registered; the Dart
+  contract implementation lands with spike S2.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ink_native_platform_interface: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: InkNativeIosPlugin
+
+# Wiring note. To become a real federated implementation this package needs three things in one
+# change, and until all three are true it must not be advertised as one:
+#
+#   1. `implements: ink_native` under flutter.plugin, so the app-facing package can route to it
+#      by default on iOS;
+#   2. `dartPluginClass: InkNativeIos` plus a Dart class extending InkNativePlatform that talks
+#      to the Swift side over a MethodChannel and an EventChannel;
+#   3. `ink_native_ios: any` in the app-facing package's dependencies.
+#
+# That change is spike S2, which measures touch-to-present latency against the 30 ms p95
+# threshold before the wiring is frozen. Declaring it earlier would assert a contract this
+# package does not yet keep.

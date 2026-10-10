@@ -1,0 +1,30 @@
+# PURPOSE: Declare chart_ui — the design system and interaction layer shared by the app: dock
+#          widgets, the focus ribbon, gesture arbitration and the visual tokens. It depends on
+#          chart_core for the domain but owns no domain logic itself, so a layout rule can be
+#          changed without touching the model and vice versa.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: A Flutter package. It is separate from apps/mobile so that widgets can be widget-
+#          tested without booting the application shell.
+# KEYWORDS: chart-ui, design-system, docks, gestures, riverpod, widget-tests, phase-0
+name: chart_ui
+description: >-
+  ChartApp design system and interaction layer: dock widgets, focus ribbon, gesture
+  arbitration and visual tokens. Depends on chart_core; contains no domain logic.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
+
+resolution: workspace
+
+dependencies:
+  chart_core: any
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0

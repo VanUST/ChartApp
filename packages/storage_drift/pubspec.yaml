@@ -1,0 +1,57 @@
+# PURPOSE: Declare storage_drift — the persistence boundary. It owns the SQLite schema, the
+#          drift table classes, the repositories and the migrations, and it is the only package
+#          allowed to open a database, so the rest of the system can be tested against
+#          in-memory repositories instead of a real file.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: A Flutter package exposing drift-backed repositories.
+# KEYWORDS: storage, drift, sqlite, repositories, migrations, op-log, phase-0
+name: storage_drift
+description: >-
+  SQLite persistence for ChartApp via drift: schema, repositories and migrations for
+  documents, the event log, ink blobs, setlists and metadata.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
+
+resolution: workspace
+
+dependencies:
+  chart_core: any
+  drift: ^2.35.2
+  flutter:
+    sdk: flutter
+  path: ^1.9.1
+
+dev_dependencies:
+  # Pinned exactly, and NOT the newest release. Three packages in this workspace constrain the
+  # analyzer, and only one window satisfies all of them:
+  #
+  #   test 1.31.1    -> test_core 0.6.18 -> analyzer >=8.0.0 <14.0.0   (pinned; see below)
+  #   build_runner   -> analyzer >=8.0.0 <14.0.0 for 2.15.1; 2.16.2 demands ^14.3.0
+  #   drift_dev      -> analyzer >=13.0.0 <15.0.0
+  #
+  # The intersection is analyzer 13.x. build_runner 2.16.2 forces analyzer 14, which the test
+  # pin cannot accept, so 2.15.1 is the newest build_runner this workspace can resolve.
+  # Revisit when the Flutter pin moves and test 1.31.1's constraint is lifted.
+  build_runner: 2.15.1
+  drift_dev: ^2.35.1
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+# NOTE — native SQLite bundling is deliberately NOT declared here.
+#
+# The obvious package, sqlite3_flutter_libs, is end-of-life: pub.dev serves 0.6.0+eol whose own
+# description reads "Not used anymore, update to version 3.x of package:sqlite3 instead", and
+# drift 2.35.2 already depends on sqlite3 ^3.4.0. sqlite3 3.7.0 bundles the native library
+# through Dart build hooks (it depends on hooks, code_assets and native_toolchain_c) rather
+# than through a per-platform lib package. drift_flutter 0.3.1 still pulls the EOL packages
+# transitively, so adopting it would reintroduce a dependency the ecosystem has retired.
+#
+# Which opener to use — drift_flutter, a hand-written NativeDatabase opener over sqlite3, or a
+# platform-specific setup — is decided by spike S5, which measures cold-open at p95 against
+# the 1000 ms threshold. Until that measurement exists, this package declares the schema layer
+# only and no opener.

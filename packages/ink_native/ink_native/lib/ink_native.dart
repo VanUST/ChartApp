@@ -1,0 +1,30 @@
+// PURPOSE: Give the app one import for ink and guarantee that the platform accessor is always
+//          usable, so a desktop build renders the editor without a pen surface rather than
+//          throwing from a getter the UI cannot reasonably guard.
+// INPUTS: None.
+// OUTPUTS: The ink contract types re-exported from the platform interface, plus the fallback
+//          implementation and the function that installs it.
+// KEYWORDS: ink-native, app-facing, fallback-registration, desktop, graceful-degradation
+library;
+
+import 'package:ink_native_platform_interface/ink_native_platform_interface.dart';
+
+import 'src/unsupported_ink_platform.dart';
+
+export 'package:ink_native_platform_interface/ink_native_platform_interface.dart';
+
+export 'src/unsupported_ink_platform.dart';
+
+// PURPOSE: Ensure `InkNativePlatform.instance` resolves on a platform with no native ink
+//          surface, so the editor can query ink support without first catching an exception.
+// INPUTS: None.
+// OUTPUTS: Nothing. Registers [UnsupportedInkPlatform] if, and only if, nothing is registered
+//          yet, so a real platform implementation is never overwritten. Safe to call more than
+//          once. Call it before the first ink call, after `WidgetsFlutterBinding.ensureInitialized`.
+// KEYWORDS: registration, fallback, idempotent, bootstrap
+/// Installs the no-op ink implementation when no platform implementation claimed the slot.
+void registerInkFallback() {
+  if (!InkNativePlatform.isRegistered) {
+    InkNativePlatform.instance = UnsupportedInkPlatform();
+  }
+}

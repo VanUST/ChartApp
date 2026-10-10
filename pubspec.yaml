@@ -1,0 +1,128 @@
+# PURPOSE: Declare the ChartApp workspace — which directories are packages, which toolchain
+#          version builds them, and the named scripts that constitute the verification gate.
+# INPUTS: None. Read by `dart pub get` (shared workspace resolution) and by `melos`.
+# OUTPUTS: One pubspec.lock and one .dart_tool/package_config.json shared by every member
+#          package; no per-package lockfile exists. Also publishes the `melos run <script>`
+#          entry points, of which `verify` is the acceptance gate.
+# KEYWORDS: monorepo, pub-workspace, melos, bootstrap, verify, toolchain-pin, chartapp
+#
+# Melos 8 does not read a `melos.yaml` file. The `melos:` section below IS the entire Melos
+# configuration, and package discovery is delegated to the Dart `workspace` field.
+
+name: chartapp_workspace
+publish_to: none
+
+environment:
+  # Dart 3.11 is the floor for glob patterns in the `workspace` field below.
+  # Flutter 3.47.7 ships Dart 3.13.5, which is what .fvmrc pins.
+  sdk: ^3.13.0
+
+# Every matched directory that contains a pubspec.yaml becomes a workspace member, and each
+# member must declare `resolution: workspace` in its own pubspec. Directories with no
+# pubspec are filtered out by pub, which is why packages/ink_native/* is listed separately
+# from packages/*: ink_native/ is a container for a federated plugin, not a package itself.
+workspace:
+  - apps/*
+  - packages/*
+  - packages/ink_native/*
+  - tools/*
+
+dev_dependencies:
+  lints: ^6.1.0
+  melos: ^8.9.0
+
+melos:
+  repository: https://github.com/VanUST/ChartApp
+
+  # Local development resolves the SDK through FVM's stable symlink, so a developer cannot
+  # accidentally build the pinned workspace with an unrelated Flutter on PATH. CI does not
+  # use FVM: it installs the pinned version with flutter-action and exports MELOS_SDK_PATH,
+  # which takes precedence over this setting.
+  sdkPath: .fvm/flutter_sdk
+
+  categories:
+    app:
+      - apps/**
+    core:
+      - packages/chart_core
+      - packages/storage_drift
+      - packages/telemetry
+    ui:
+      - packages/chart_ui
+    ink:
+      - packages/ink_native/**
+    tools:
+      - tools/**
+
+  command:
+    bootstrap:
+      runPubGetInParallel: true
+    exec:
+      concurrency: 4
+    analyze:
+      concurrency: 4
+      fatalWarnings: true
+    test:
+      concurrency: 4
+
+  scripts:
+    # -------------------------------------------------------------------------
+    # Verification gate.
+    #
+    # `verify` is the single command whose exit code decides whether a change is
+    # acceptable. CI runs these same three steps, so a green local run predicts a green
+    # CI run for everything that does not need a device.
+    # -------------------------------------------------------------------------
+    lint:
+      description: >-
+        Analyze every package in one pass. The shared pub workspace means a single
+        `dart analyze` at the root covers all members, so this is deliberately a
+        root-level run rather than a per-package `melos exec`.
+      run: dart analyze
+
+    format-check:
+      description: >-
+        Fail if any file is not dart-format clean, without rewriting anything.
+        Prerequisite for a clean diff review and for the pre-commit hook.
+      run: dart format --output=none --set-exit-if-changed .
+
+    format-fix:
+      description: Rewrite every Dart file into dart-format shape.
+      run: dart format .
+
+    test-dart:
+      description: >-
+        Unit tests of packages that need no Flutter SDK. The `flutter: false` filter is what
+        keeps this off apps/mobile and the Flutter packages, where `dart test` cannot resolve
+        dart:ui and fails while loading the suite. Both scripts also require a `test/`
+        directory, so a package with no tests yet is skipped rather than reported as failing.
+      exec:
+        command: dart test
+        concurrency: 4
+      packageFilters:
+        dirExists:
+          - test
+        flutter: false
+
+    test-flutter:
+      description: >-
+        Widget and golden tests of packages that need the Flutter SDK. Run with
+        concurrency 1 because Flutter tests share a engine/shim environment and interleave
+        poorly in parallel.
+      exec:
+        command: flutter test
+        concurrency: 1
+      packageFilters:
+        dirExists:
+          - test
+        flutter: true
+
+    verify:
+      description: >-
+        The acceptance gate for a change: analysis, formatting, and tests of both the pure
+        Dart and the Flutter packages.
+      dependsOn:
+        - lint
+        - format-check
+        - test-dart
+        - test-flutter

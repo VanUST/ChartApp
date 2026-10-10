@@ -1,0 +1,31 @@
+# PURPOSE: Declare ink_native_platform_interface — the single contract that every native ink
+#          implementation must satisfy. It exists so the app depends on one abstraction that is
+#          identical on iOS, Android and desktop, instead of on three divergent plugin APIs
+#          that drift apart as each platform's implementation matures.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: A pure-interface package: types plus an abstract class, no platform code and no
+#          MethodChannel. Implementations live in ink_native_ios and ink_native_android.
+# KEYWORDS: federated-plugin, platform-interface, ink-native, contract, pencilkit, inkview,
+#           plugin-platform-interface
+name: ink_native_platform_interface
+description: >-
+  The contract implemented by every ink_native platform: tool selection, view transform,
+  stroke blobs and the stroke-committed stream. No platform code.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.1.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0

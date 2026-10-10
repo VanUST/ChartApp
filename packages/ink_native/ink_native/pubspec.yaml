@@ -1,0 +1,38 @@
+# PURPOSE: Declare ink_native — the app-facing half of the federated ink plugin. The app
+#          imports this package and never a platform package, so which native engine draws a
+#          stroke stays an implementation detail and the app builds unchanged on every target.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: A Flutter package that re-exports the platform contract and installs a no-op
+#          implementation on platforms with no native ink surface.
+# KEYWORDS: federated-plugin, app-facing, ink-native, desktop-fallback, graceful-degradation
+name: ink_native
+description: >-
+  App-facing ink plugin. Re-exports the platform contract and installs a no-op implementation
+  where no native ink surface exists, so a desktop build degrades instead of crashing.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ink_native_platform_interface: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+# The platform packages ink_native_ios and ink_native_android are deliberately NOT dependencies
+# yet. A federated implementation is declared through `implements:` and a `default_package`
+# entry, which promises that the package actually satisfies the contract. Neither one does: both
+# currently carry only the native scaffolding that `flutter create` produced. The dependency is
+# added in spike S2, in the same change that makes the claim true.
+#
+# The consequence is stated plainly so it is not mistaken for a bug: on iOS and Android this
+# package currently resolves to the same no-op used on desktop.

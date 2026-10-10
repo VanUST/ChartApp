@@ -1,0 +1,66 @@
+# PURPOSE: Normalise line endings and binary detection so one repository checked out on both
+#          Windows and Linux produces byte-identical text files and reproducible test/golden
+#          results regardless of the developer's operating system.
+# INPUTS: None. Git reads this file on every checkout, add and diff.
+# OUTPUTS: LF in the working tree for all text files on every platform; explicit binary
+#          classification for the asset types listed below.
+# KEYWORDS: line-endings, crlf, cross-platform, golden-tests, repository-hygiene
+#
+# Text is normalised to LF in the working tree on every platform. Without this, a Windows
+# checkout produces CRLF and a Linux checkout LF, which changes file hashes, breaks
+# golden/PNG comparisons and creates whole-file diffs on every cross-platform commit.
+* text=auto eol=lf
+
+# --- Explicit text types (kept LF even where a tool might prefer otherwise) ---
+*.dart      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.jsonl     text eol=lf
+*.md        text eol=lf
+*.sh        text eol=lf
+*.ps1       text eol=lf
+*.gradle    text eol=lf
+*.kt        text eol=lf
+*.swift     text eol=lf
+*.plist     text eol=lf
+*.xml       text eol=lf
+*.properties text eol=lf
+
+# Shell scripts must never be checked out with CRLF: a `#!/usr/bin/env sh` line ending in
+# CRLF fails on Linux with "bad interpreter".
+*.sh        text eol=lf
+bootstrap   text eol=lf
+
+# --- Binary types: never normalise, never diff as text ---
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.ico       binary
+*.ttf       binary
+*.otf       binary
+*.woff      binary
+*.woff2     binary
+*.zip       binary
+*.jar       binary
+*.so        binary
+*.dylib     binary
+*.dll       binary
+*.a         binary
+*.bin       binary
+*.keystore  binary
+*.jks       binary
+*.xcuserstate binary
+
+# Golden-image outputs are compared byte-for-byte by `flutter test`; a diff driver would
+# corrupt that comparison.
+*.png       -diff
+*.jpg       -diff
+*.jpeg      -diff
+
+# Vendored/generated trees are noise in `git log -p`.
+.dart_tool/** linguist-generated=true
+**/*.g.dart   linguist-generated=true
+**/*.freezed.dart linguist-generated=true

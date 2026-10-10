@@ -1,0 +1,281 @@
+# System Design Document (SDD) v0.1 — «ChartApp»
+
+> **Статус:** принят как основание для Phase 0. Это единственный документ решений в
+> репозитории: ADR не ведутся (решение владельца проекта), поэтому D1–D7 и все последующие
+> решения фиксируются здесь разделом «Журнал решений».
+>
+> Документ описывает **почему** система устроена так, а не **что** реализовано. Контракты
+> отдельных модулей живут inline, рядом с кодом, в блоках PURPOSE/INPUTS/OUTPUTS/KEYWORDS;
+> этот файл их не дублирует.
+
+База: решения D1–D7 (touch-parity, structured reflow + object-anchored annotations, Flutter +
+native ink, local-first event-sourced, iReal-импорт в v1, бесплатно для базы тестеров).
+
+---
+
+## 1. High-level architecture
+
+```
+┌──────────────────────────── CLIENT (Flutter app) ────────────────────────────┐
+│  Presentation:  Library │ Editor(canvas+docks+outline) │ Scene │ Setlists    │
+│  State:         Riverpod-контроллеры, ToolStateMachine, GestureArbiter       │
+│  Application:   UseCases (ImportIReal, TransposeSong, BuildSetlist, Share…)  │
+│  ┌─────────────────────────── chart_core (pure Dart) ─────────────────────┐  │
+│  │ Song-модель │ ChordGrammar │ Transposer │ LayoutEngine │ IRealCodec │  │
+│  │ OpLog (event-sourcing) │ SpellingTable │ SetlistModel │ FileFormats │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│  Infrastructure:  storage_drift (SQLite) │ ink_native (federated plugin) │   │
+│                   pdf_export │ telemetry (LDD sinks) │ share_service        │
+│  Native modules:  ink_native_ios (PencilKit) │ ink_native_android (InkView) │
+└──────────────────────────────────────────────────────────────────────────────┘
+        │ v1: НЕТ сервера (local-first, шеринг файлами .chart/.setlist)
+        │ v1.5: SyncService (контракт зафиксирован сейчас, реализация позже)
+┌───────▼──────────────────────── BACKEND (v1.5, контракт сейчас) ─────────────┐
+│  Sync API: pushEvents/pullEvents/getSnapshot/createShareLink (append-only)   │
+│  Postgres (docs, events, blobs) + auth magic-link; за интерфейсом SyncService │
+│  Telemetry ingestion: POST /v1/events (batch jsonl); v1 = LocalFileSink       │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Ключевое:** весь домен живёт в `chart_core` без зависимостей от Flutter/SQLite → тестируется
+на ПК без устройств, переиспользуется сервером в v1.5 для валидации событий.
+
+---
+
+## 2. Репозиторий (monorepo)
+
+Раскладка соответствует SDD; отличия от первой редакции зафиксированы в журнале решений.
+
+```
+ChartApp/
+├─ apps/mobile/                     # Flutter-приложение (android, ios, linux, windows)
+├─ packages/
+│  ├─ chart_core/                   # модели, транспозер, layout, codec, op-log
+│  ├─ chart_ui/                     # дизайн-система, docks, жесты, focus-ribbon
+│  ├─ ink_native/                   # federated plugin
+│  │  ├─ ink_native/                #   app-facing пакет
+│  │  ├─ ink_native_platform_interface/
+│  │  ├─ ink_native_ios/            #   Swift + PencilKit
+│  │  └─ ink_native_android/        #   Kotlin InkView
+│  ├─ storage_drift/                # схемы SQLite, репозитории, миграции
+│  └─ telemetry/                    # LDD: схемы событий, батчинг, sinks
+├─ tools/
+│  ├─ spike_harness/                # исполняемые спайки S1–S5
+│  └─ logview/                      # CLI-анализатор JSONL (агрегаты, p50/p95)
+├─ docs/
+│  ├─ sdd.md                        # этот документ
+│  ├─ ux/                           # легенда жестов, tap-бюджеты, экраны, протокол тестов
+│  └─ fixtures/                     # РУЧНАЯ транскрипция 3 эскизов в JSON-фикстуры
+├─ bootstrap.ps1 / bootstrap.sh     # настройка окружения (Windows / Linux)
+├─ lefthook.yml                     # pre-commit
+└─ .github/workflows/               # CI
+```
+
+**Правило для агентов:** фикстуры эскизов («Бумажный змей», «Иностранные слова»,
+«Cm-медлей») транскрибируются в JSON вручную в Phase 0 — они становятся источником истины для
+golden-тестов рендера и ожиданий транспозера/кодека.
+
+---
+
+## 3. Данные: схемы и форматы
+
+### 3.1 Op-log (ядро event-sourcing, D6)
+
+```json
+{"v":1,"seq":42,"deviceId":"…","ts":"…","type":"chord.insert",
+ "anchor":{"sectionId":"s1","bar":3,"beat":1.0},
+ "payload":{"root":"C","quality":"m7","alt":[],"slash":null,"paren":false},
+ "inverse":"chord.delete"}
+```
+
+- Undo/redo = append inverse-события (аудит бесплатно); redo-стек в памяти.
+- Snapshot = свёртка событий до `seq N`; хранение: snapshot + хвост событий.
+
+### 3.2 SQLite (drift)
+
+`documents(id,title,key,bpm,updated_at,snapshot_json,snapshot_seq)` ·
+`document_events(doc_id,seq,device_id,ts,type,json) idx(doc_id,seq)` ·
+`ink_blobs(id,doc_id,anchor_json,format,path)` · `setlists(id,title)` ·
+`setlist_items(setlist_id,pos,doc_id,transpose_sem,notes)` · `meta(k,v)`.
+
+### 3.3 Файлы шеринга
+
+`.chart` / `.setlist` = ZIP: `manifest.json` (format, v) + `snapshot.json` +
+`events.jsonl` (хвост) + `ink/*.bin`. Импорт = merge событий; конфликт версий формата →
+явная ошибка с логами, не молчаливая порча.
+
+### 3.4 Anchors (D3)
+
+Аннотация = `{anchor:{sectionId,bar,beat,step?}, offsetLocal, kind:ink|stamp|cue, payload}`.
+Координаты вычисляются LayoutEngine-ом из bbox цели → переживают транспозицию/reflow/reorder.
+
+---
+
+## 4. Frontend: пайплайны рендера и ввода
+
+**Layout:** `Song → SectionPlanner (play-order для сцены; edit показывает структуру со знаками) →
+BarLayout (ширины по контенту) → SystemBuilder → PageBuilder → PageLayout`. Кэш: layout секции
+keyed by `(sectionId, contentHash, widthBucket)`; рендер страницы = `ui.Picture`-кэш,
+инвалидация по событиям, затронувшим страницу. Цель S4: < 16 мс/страница.
+
+**Editor state:** `ToolStateMachine {SELECT, INPUT(chord|note|structure|stamp),
+INK(pen|hl|eraser)}` + `GestureArbiter` (pen→ink, 1 палец SELECT→pan, 2 пальца→zoom/pan всегда)
++ курсор вставки с auto-advance + sticky-параметры (D2).
+
+**Ink overlay:** PlatformView внутри того же transform-узла, что и canvas (единая Matrix4
+scroll/zoom; Android — Hybrid Composition).
+
+Контракт плагина зафиксирован в `ink_native_platform_interface`:
+`initialize/setTool/setTransform/loadStrokes/exportStrokes` + поток
+`onStrokeCommitted(blobId, bboxCenter)` → app вычисляет anchor от bboxCenter. Штрихи хранятся в
+anchor-local координатах.
+
+**State management:** Riverpod (code-gen, тестируемость). Решение D8.
+
+---
+
+## 5. Backend: v1 = интерфейс, v1.5 = реализация
+
+- `SyncService` (interface в application layer): `pushEvents(docId,fromSeq,events[])`,
+  `pullEvents(docId,afterSeq)`, `getSnapshot`, `createShareLink`. v1-имплементации:
+  `NullSyncService`, `FileShareService` (.chart через системный share-sheet).
+- v1.5: Postgres-append-only логов + magic-link auth; рекомендация — Supabase-совместимая схема
+  за интерфейсом (возможен self-host). Конфликты: per-doc «чужие события поверх», UI-merge позже.
+- **Telemetry (LDD):** `TelemetrySink` interface; v1 = `LocalFileSink` (rotating jsonl, батч при
+  сохранении, sampling в bench-режимах) + отключаемый `HttpSink`. Никакой персональной
+  информации: только события редактора и метрики.
+
+---
+
+## 6. Пайплайн тестирования
+
+| Уровень | Что | Инструмент | Gate |
+|---|---|---|---|
+| L0 unit | chart_core: транспозер (property: round-trip 12 ключей), chord-grammar, codec-fuzz, op-log merge | dart test | coverage core ≥ 90%, CI-block |
+| L1 golden | рендер фикстур 3 эскизов → PNG | flutter golden | pixel-diff = 0 (шрифт pinned) |
+| L2 widget/integration | **tap-бюджеты как тесты**: «диатонический аккорд = 1 тап», «нота = 1 тап», вольта = ≤2 | flutter_test + patrol | fail при превышении бюджета |
+| L3 device bench | ink p50/p95 (touch→present timestamps), fps, cold-open | harness `--bench` на Tab S8+/телефоне → JSONL → logview | пороги ниже |
+| L4 usability | 5 музыкантов, задачи T1–T5, SUS, телеметрия тапов | протокол docs/ux/test-protocol.md | SUS ≥ 80, время сборки эскиза ≤ 5 мин |
+
+**Пороги приёмки:** ink iOS PencilKit p95 ≤ 30 мс; Android S Pen p95 ≤ 45 мс; finger ≤ 60 мс;
+layout < 16 мс/стр; cold-open p95 < 1000 мс; codec: структура 100%, аккорды ≥ 99%.
+
+**CI:** `lint+format+test` (ubuntu, включая flutter-тесты) → android **debug APK build** →
+ios **build-only + gate** (macos-runner; Xcode на ПК нет) → bench-джоба `workflow_dispatch /
+device-required` с загрузкой логов артефактом.
+
+**Матрица устройств:** ПК (dart test / flutter test / golden, плюс desktop-таргеты для
+живого отклика) · Android-телефон (touch-UX) · **Galaxy Tab S8+** (S Pen, 120 Hz — эталон
+ink-бенчей; включить 120 Гц в настройках) · iPhone знакомых (TestFlight-сборки с CI
+mac-runner, после регистрации Apple Dev).
+
+> Расхождение с первой редакцией: полноценный эмуляторный прогон на API 34 в CI заменён на
+> сборку debug APK, потому что интеграционных тестов пока не существует и эмулятор без
+> проверок стоит минуты, ничего не доказывая. Шаг с `android-emulator-runner` возвращается в
+> тот же workflow, когда появится первый тест в `apps/mobile/integration_test`.
+
+---
+
+## 7. Developer environment
+
+`bootstrap.ps1` (Windows) и `bootstrap.sh` (Linux/macOS) выполняют одни и те же шаги в одном
+порядке и печатают `KEY=VALUE`, поэтому упавший bootstrap называет конкретный шаг:
+
+```
+GIT=2.51.2.windows.1
+FLUTTER=3.47.7 (fvm-link)
+DART=3.13.5
+JDK=17
+ANDROID_SDK=ok (C:\src\android-sdk)
+WORKSPACE=ok
+VERIFY=pass
+BOOTSTRAP=ok
+```
+
+Шаги: Git (+`core.longpaths` на Windows) → Flutter пинованной версии из `.fvmrc` → Dart (идёт в
+SDK) → JDK 17 → Android SDK → резолв workspace → `melos run verify`.
+
+Скрипты **ничего не скачивают**: установка SDK — намеренное действие, поэтому bootstrap
+сообщает, чего не хватает, и печатает команду исправления. Идемпотентны.
+
+**Команды:**
+
+| Команда | Что делает |
+|---|---|
+| `melos run verify` | Приёмочный gate: lint + format-check + тесты |
+| `melos run lint` | Только статический анализ |
+| `melos run format-fix` | Привести файлы к форме `dart format` |
+| `melos run test-dart` | Тесты пакетов, которым Flutter не нужен |
+| `melos run test-flutter` | Widget/golden-тесты Flutter-пакетов |
+| `dart run logview <file.jsonl> --metric <path> --agg p50,p95` | Отчёт по bench-логу |
+
+Конвенция коммитов: `feat(core-transposer): …`; ветки `feat|fix|spike/<pkg>-<task>`.
+
+**DoD агента:** `melos run verify` зелёный + логи приложены + inline-контракт обновлён тем же
+изменением + ADR не требуется (см. журнал решений).
+
+---
+
+## 8. Work breakdown
+
+- **Phase 0:** скелет monorepo, CI, bootstrap, logview, контракт ink-плагина. **ADR не ведутся.**
+  Фикстуры 3 эскизов — блокированы до получения эскизов от владельца.
+- **Phase 1 (спайки):** S1 iReal codec · S3 transposer · S4 layout (core, без устройств) →
+  S2 ink (Tab S8+) → S5 storage cold-open. Решения по логам.
+- **Phase 2:** вертикальный срез: Library → Editor (chord-input, курсор, docks) → Scene pager.
+- **Phase 3:** ink-интеграция, штампы/cue, outline-структура, мелодия (staff/name), сет-листы,
+  PDF, iReal-import UI, share .chart.
+- **Phase 4:** hardening, usability L4, бета (Play internal + TestFlight).
+
+---
+
+## 9. Журнал решений
+
+Заменяет ADR. Каждая запись — дата, решение, причина. Новые записи добавляются сюда.
+
+### D1–D7 (базовые, из постановки)
+
+touch-parity · structured reflow + object-anchored annotations · Flutter + native ink ·
+local-first event-sourced · iReal-импорт в v1 · бесплатно для базы тестеров.
+
+### D8 — Riverpod как state management
+
+Принято: Riverpod. Причина: code-gen, тестируемость без widget-дерева, отсутствие зависимости
+от `BuildContext` в контроллерах.
+
+### D9 — ADR не ведутся
+
+Решение владельца проекта. Записи решений переносятся в раздел 9 этого документа. Причина:
+церемония на каждое решение не окупается на текущем размере команды.
+
+### D10 — `melos.yaml` заменён на секцию `melos:` в корневом `pubspec.yaml`
+
+Вынужденное: Melos 8 не читает `melos.yaml` вообще. Пакеты обнаруживаются полем `workspace:`
+(Dart pub workspaces), каждый участник объявляет `resolution: workspace`.
+
+### D11 — версия Flutter пинована в `.fvmrc` (3.47.7 / Dart 3.13.5)
+
+Причина: воспроизводимость golden-тестов и layout-бенчей. Локально SDK резолвится через
+`sdkPath: .fvm/flutter_sdk`; CI ставит ту же версию и экспортирует `MELOS_SDK_PATH`.
+
+### D12 — `test` пинован в 1.31.1
+
+Вынужденное: `flutter_test` в Flutter 3.47.7 требует `test_api 0.7.12` **точно**, и только
+`test 1.31.1` объявляет тот же пин. Дополнительно из-за этого `build_runner` пинован в 2.15.1:
+версия 2.16.2 требует `analyzer ^14.3.0`, а `test 1.31.1` — `analyzer <14`. Пересматривать при
+каждом обновлении Flutter.
+
+### D13 — `storage_drift` без `sqlite3_flutter_libs`
+
+Причина: пакет снят с развития — pub.dev отдаёт `0.6.0+eol` с описанием «Not used anymore,
+update to version 3.x of package:sqlite3 instead», а `drift 2.35.2` уже зависит от `sqlite3
+^3.4.0`, который собирает нативную библиотеку через Dart build hooks. `drift_flutter` всё ещё
+тянет EOL-пакеты транзитивно, поэтому выбор opener-а отложен до спайка S5, который измеряет
+cold-open против порога 1000 мс.
+
+### D14 — desktop-таргеты (Windows и Linux) в `apps/mobile`
+
+Причина: S4 требует отклика < 16 мс/страницу, и живой отклик на ПК ускоряет итерацию по layout
+без эмулятора. Ограничение: `PlatformView`-ink на десктопе не работает; app-facing пакет
+`ink_native` регистрирует no-op реализацию, а редактор читает `supportsInk` и не предлагает
+ink-инструменты.

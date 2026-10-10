@@ -1,0 +1,36 @@
+# PURPOSE: Declare chart_core — the pure-Dart domain package that holds the song model, chord
+#          grammar, transposition, layout engine and file codecs with no dependency on
+#          Flutter, SQLite or any platform channel, so the whole domain is testable on a
+#          desktop with `dart test` and reusable server-side for event validation.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: A package with no runtime dependencies, for the reasons stated below.
+# KEYWORDS: chart-core, pure-dart, domain, zero-dependencies, testability, phase-0
+name: chart_core
+description: >-
+  Pure Dart chart domain: song model, chord grammar, transposition, layout engine, op-log and
+  file codecs. No Flutter, no platform channels, no database.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+# Deliberately empty. The value of this package rests on it staying importable from a plain
+# `dart test` and from a future server process; the first runtime dependency added here is a
+# decision, not a convenience.
+dependencies: {}
+
+dev_dependencies:
+  lints: ^6.1.0
+  # Pinned exactly, not a range. This workspace resolves in one pass across Flutter and pure
+  # Dart packages, and Flutter 3.47.7's flutter_test depends on test_api 0.7.12 EXACTLY. The
+  # test package pins test_api the same way: 1.31.1 -> 0.7.12, 1.31.2 -> 0.7.13, 1.33.0 ->
+  # 0.7.15. Only 1.31.1 can coexist with this Flutter version; a caret range resolves upward to
+  # 1.33.0 and fails the whole workspace with "version solving failed".
+  #
+  # Revisit on every Flutter upgrade. The current pin is readable at
+  # <flutter>/packages/flutter_test/pubspec.yaml, and the matching test version is found by
+  # scanning pub.dev for the release whose test_api constraint equals that pin.
+  test: 1.31.1

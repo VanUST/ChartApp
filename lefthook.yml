@@ -1,0 +1,23 @@
+# PURPOSE: Stop a change that breaks analysis, formatting or the tests from being committed at
+#          all, so the failure is reported in seconds on the developer's machine rather than
+#          minutes later in CI.
+# INPUTS: Run by lefthook on the staged files.
+# OUTPUTS: A non-zero exit from any command aborts the commit.
+# KEYWORDS: pre-commit, lefthook, fast-feedback, format, analyze
+#
+# Install the hook once per checkout with: lefthook install
+# The hook is intentionally a subset of `melos run verify`: it checks only what a commit can
+# plausibly have broken and what can run in a few seconds. The full gate still runs in CI.
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: '*.dart'
+      # Checks only the staged Dart files. `--set-exit-if-changed` reports rather than rewrites,
+      # because a hook that silently edits the index makes the commit hard to reason about.
+      run: dart format --output=none --set-exit-if-changed {staged_files}
+    analyze:
+      glob: '*.dart'
+      # Analysis is whole-workspace: the shared pub workspace means one run covers every package,
+      # and a per-file run would miss a type error caused by the change.
+      run: dart analyze

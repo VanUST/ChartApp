@@ -1,0 +1,31 @@
+# PURPOSE: Declare the logview tool — the command line analyser that reduces ChartApp's JSONL
+#          bench logs to order statistics, so latency acceptance thresholds are evaluated
+#          against recorded data instead of against a subjective impression of a run.
+# INPUTS: None. Resolved by `dart pub get` as a member of the root workspace.
+# OUTPUTS: The `logview` executable, exposed through `dart run logview` inside this package
+#          and as a workspace script from the repository root.
+# KEYWORDS: logview, bench, jsonl, percentile, cli, telemetry-analysis, phase-0
+name: logview
+description: >-
+  Command line analyser for ChartApp JSONL bench logs. Groups measurements by any field and
+  reports count, min, max, mean and percentiles, as a table or as JSON.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+# Member of the root pub workspace: shares one dependency resolution with every other package.
+resolution: workspace
+
+dependencies:
+  args: ^2.7.0
+
+dev_dependencies:
+  lints: ^6.1.0
+  # Pinned exactly; see the longer note in packages/chart_core/pubspec.yaml. flutter_test in
+  # Flutter 3.47.7 requires test_api 0.7.12 exactly, and only test 1.31.1 declares that same pin.
+  test: 1.31.1
+
+executables:
+  logview: logview

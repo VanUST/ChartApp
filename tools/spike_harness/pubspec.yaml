@@ -1,0 +1,30 @@
+# PURPOSE: Declare tools/spike_harness — the executable spikes S1-S5 that answer the open
+#          questions of the design with a measurement instead of an opinion. Each spike is a
+#          throwaway program whose result is a logged verdict, not a production module.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: An executable `spike` that dispatches to the individual spike programs.
+# KEYWORDS: spike, harness, s1-ireal, s3-transposer, s4-layout, s5-storage, evidence
+name: spike_harness
+description: >-
+  Executable spikes S1-S5. Each spike answers one design question by measurement and records
+  its verdict as structured log lines.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+dependencies:
+  args: ^2.7.0
+  chart_core: any
+
+dev_dependencies:
+  lints: ^6.1.0
+  # Pinned exactly; see the longer note in packages/chart_core/pubspec.yaml. flutter_test in
+  # Flutter 3.47.7 requires test_api 0.7.12 exactly, and only test 1.31.1 declares that same pin.
+  test: 1.31.1
+
+executables:
+  spike: spike

@@ -1,0 +1,69 @@
+# PURPOSE: Collect the device measurements that cannot run on a hosted runner — ink latency,
+#          sustained frame rate and cold-open — and publish the raw JSON Lines log as an
+#          artifact so tools/logview can reduce it to the p50/p95 numbers the acceptance
+#          thresholds are written in.
+# INPUTS: Manual dispatch only, with the device label recorded in the artifact name. The job is
+#         not triggered by a push because it requires a physical Galaxy Tab S8+ (S Pen, 120 Hz)
+#         or a comparison phone that no hosted runner provides.
+# OUTPUTS: A `bench-<device>-<run>` artifact containing the raw .jsonl log, plus a summary table
+#          printed into the run log. The job fails when the measured p95 breaches a threshold.
+# KEYWORDS: bench, manual, device-required, artifact, p50, p95, ink-latency, cold-open
+name: Device bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Device label recorded in the artifact name, e.g. tab-s8-plus'
+        required: true
+        default: 'tab-s8-plus'
+      note:
+        description: 'Free-text note about this run (build, stylus, conditions)'
+        required: false
+        default: ''
+
+jobs:
+  bench:
+    name: Bench on ${{ github.event.inputs.device }}
+    # A self-hosted runner with the device attached. Replace with the label your device host
+    # registers; the job must never fall back to a hosted runner, where no stylus exists.
+    runs-on: [self-hosted, chartapp-bench]
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Record the device under test
+        run: |
+          echo "device=${{ github.event.inputs.device }}"
+          echo "note=${{ github.event.inputs.note }}"
+          echo "commit=${{ github.sha }}"
+
+      - name: Capture the bench log
+        # The harness is Phase 1 work (spikes S2, S4, S5). Until it exists this step reports the
+        # gap instead of fabricating a log: a bench artifact with invented numbers would be
+        # worse than no artifact, because it would satisfy a threshold on paper.
+        run: |
+          if [ ! -d tools/spike_harness/lib ]; then
+            echo "::error::The bench harness does not exist yet. Spikes S2/S4/S5 are Phase 1 work."
+            exit 1
+          fi
+          echo "::warning::Bench capture is not implemented. See docs/ux/test-protocol.md."
+          exit 1
+
+      - name: Upload the raw log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ github.event.inputs.device }}-${{ github.run_number }}
+          path: bench-out/*.jsonl
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Summarise with logview
+        if: always()
+        run: |
+          # tools/logview is implemented and tested; this is how the raw log becomes the p50/p95
+          # numbers the thresholds are expressed in.
+          dart run logview bench-out/ --metric touchToPresentMs --group-by pointerType \
+            --agg count,p50,p95,max || true

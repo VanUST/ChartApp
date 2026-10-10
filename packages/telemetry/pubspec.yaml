@@ -1,0 +1,28 @@
+# PURPOSE: Declare telemetry — the structured logging layer. Every package in this workspace
+#          records what it did as machine-readable events through this package, which is what
+#          makes a claim about a run verifiable from its log instead of from a recollection.
+# INPUTS: None. Resolved as a member of the root pub workspace.
+# OUTPUTS: A pure-Dart package: no Flutter, no platform channels, so the same event schema can
+#          be reused by a future server-side ingestion endpoint.
+# KEYWORDS: telemetry, structured-logging, ldd, jsonl, sinks, sampling, phase-0
+name: telemetry
+description: >-
+  Structured event schemas, batching and sinks for ChartApp. Emits JSON Lines so that runs are
+  analysable after the fact, and so tools/logview can read them.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+# Empty on purpose. The file sink uses dart:io and needs nothing else; an HTTP sink would add
+# an http dependency, and that dependency is added when the sink lands rather than in advance.
+dependencies: {}
+
+dev_dependencies:
+  lints: ^6.1.0
+  # Pinned exactly; see the longer note in packages/chart_core/pubspec.yaml. flutter_test in
+  # Flutter 3.47.7 requires test_api 0.7.12 exactly, and only test 1.31.1 declares that same pin.
+  test: 1.31.1
