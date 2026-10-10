@@ -30,6 +30,7 @@ import '../spelling_table.dart';
 import 'geometry.dart';
 import 'layout_style.dart';
 import 'page_layout.dart';
+import 'staff_text_display.dart';
 import 'text_metrics.dart';
 
 /// Engraves a song into pages.
@@ -183,16 +184,99 @@ class LayoutEngine {
   // INPUTS: bar — the bar to measure. key — the key its chords are spelled in, which affects the
   //         width because `Bb` and `A#` are different strings.
   // OUTPUTS: The bar's natural width, never less than the style's minimum bar width. A bar with
-  //          no chords measures to the minimum, because an empty cell still reserves room.
-  // KEYWORDS: bar-measurement, natural-width, minimum-width, key-dependent-width
+  //          no chords measures to the minimum, because an empty cell still reserves room. A bar
+  //          whose staff text is wider than its cells widens to hold that text as DISPLAYED — the
+  //          `*NN` prefix and the exporter's padding are gone (see `displayStaffText`), so the
+  //          layout does not reserve room for words it will not draw.
+  // KEYWORDS: bar-measurement, natural-width, minimum-width, key-dependent-width, staff-text
   /// Returns the width [bar] needs when its chords are spelled in [key].
-  double measureBar(Bar bar, Key key) {
+  double measureBar(Bar bar, Key key) =>
+      _barWidth(bar, key, _measureStaffText(bar));
+
+  // PURPOSE: Answer the width a bar needs, given its already-measured staff-text lines, so that the
+  //          width reserved for the words and the box the words are placed in come from ONE
+  //          measurement rather than two calls that happen to agree.
+  // INPUTS: bar — the bar. key — the key its chords are spelled in. staffLines — the bar's staff
+  //         text in display form with its measured sizes, from [_measureStaffText].
+  // OUTPUTS: The bar's width: the larger of its cell content plus padding, and its widest staff
+  //          line plus the line's left inset and the bar's right padding, floored at the style's
+  //          minimum bar width. Never less than [LayoutStyle.barMinWidth].
+  // KEYWORDS: bar-width, staff-text-room, single-measurement, minimum-width
+  double _barWidth(Bar bar, Key key, List<_MeasuredStaffText> staffLines) {
     double content = 0;
     for (final double cellWidth in _cellWidths(bar, key)) {
       content += cellWidth;
     }
     final double natural = content + 2 * style.barPadding;
-    return natural < style.barMinWidth ? style.barMinWidth : natural;
+    double widest = 0;
+    for (final _MeasuredStaffText line in staffLines) {
+      if (line.size.width > widest) {
+        widest = line.size.width;
+      }
+    }
+    final double withStaffText = widest == 0
+        ? 0
+        : widest + style.staffTextInset + style.barPadding;
+    final double sized = natural > withStaffText ? natural : withStaffText;
+    return sized < style.barMinWidth ? style.barMinWidth : sized;
+  }
+
+  // PURPOSE: Read a bar's stored staff text into the lines it shows, measuring each line once so
+  //          that the room reserved for it and the box it is placed in are the same number.
+  // INPUTS: bar — the bar whose `Bar.staffText` to read.
+  // OUTPUTS: One entry per stored line that has words to show, in model order, carrying the display
+  //          string and the size it measured to. A stored entry whose display form is empty (a bare
+  //          `*NN`, or whitespace alone) is skipped: it names a position and says nothing, and
+  //          placing a zero-width line would reserve a line height for nothing. An empty input
+  //          yields an empty list.
+  // KEYWORDS: staff-text, display-form, measurement, empty-skip, single-source
+  List<_MeasuredStaffText> _measureStaffText(Bar bar) {
+    final List<_MeasuredStaffText> lines = <_MeasuredStaffText>[];
+    for (final String stored in bar.staffText) {
+      final String text = displayStaffText(stored);
+      if (text.isEmpty) {
+        continue;
+      }
+      lines.add(
+        _MeasuredStaffText(
+          text: text,
+          size: style.textMetrics.measure(text, ChartTextRole.staffText),
+        ),
+      );
+    }
+    return lines;
+  }
+
+  // PURPOSE: Turn a bar's measured staff-text lines into placed boxes, stacked upward from the
+  //          bar's bottom edge so several phrases stay inside the bar instead of running past the
+  //          system below. The painter draws these boxes and nothing else, which is what makes the
+  //          drawn width and the measured width the same value.
+  // INPUTS: lines — the bar's measured lines, from [_measureStaffText]. bounds — where the bar sits.
+  // OUTPUTS: One placed line per measured line, in the same order, each with the display words and
+  //          its box. The first sits [LayoutStyle.staffTextBottomInset] above the bar's bottom and
+  //          each later one is stacked above it. An empty input yields an empty list.
+  // KEYWORDS: staff-text, placement, stacking, display-form, painter-contract
+  List<PlacedStaffText> _placeStaffText(
+    List<_MeasuredStaffText> lines,
+    LayoutRect bounds,
+  ) {
+    final List<PlacedStaffText> placed = <PlacedStaffText>[];
+    double y = bounds.bottom - style.staffTextBottomInset;
+    for (final _MeasuredStaffText line in lines) {
+      y -= line.size.height;
+      placed.add(
+        PlacedStaffText(
+          text: line.text,
+          bounds: LayoutRect.fromLTWH(
+            bounds.left + style.staffTextInset,
+            y,
+            line.size.width,
+            line.size.height,
+          ),
+        ),
+      );
+    }
+    return placed;
   }
 
   // PURPOSE: Give each cell of a bar an extent, so that measuring a bar and placing chords inside
@@ -274,13 +358,18 @@ class LayoutEngine {
     for (final section in song.sections) {
       for (int index = 0; index < section.bars.length; index++) {
         final Bar bar = section.bars[index];
+        // The staff text is measured once here and handed to both the width that reserves room for
+        // it and the placement that draws it, so the bar cannot be sized for one string and drawn
+        // with another.
+        final List<_MeasuredStaffText> staffText = _measureStaffText(bar);
         measured.add(
           _MeasuredBar(
             sectionId: section.id,
             barIndex: index,
             bar: bar,
             key: song.key,
-            width: measureBar(bar, song.key),
+            width: _barWidth(bar, song.key, staffText),
+            staffText: staffText,
             startsSection: index == 0,
             sectionLabel: index == 0 ? section.label.toString() : null,
           ),
@@ -417,6 +506,7 @@ class LayoutEngine {
           bounds: bounds,
           cells: _placeCells(offsets, bounds),
           chords: _placeChords(measured, bounds, offsets),
+          staffText: _placeStaffText(measured.staffText, bounds),
         ),
       );
       x += measured.width;
@@ -559,6 +649,7 @@ class _MeasuredBar {
     required this.bar,
     required this.key,
     required this.width,
+    required this.staffText,
     required this.startsSection,
     required this.sectionLabel,
   });
@@ -571,8 +662,23 @@ class _MeasuredBar {
   /// the same spelling and a bar cannot be measured as `Bb` and drawn as `A#`.
   final Key key;
   final double width;
+
+  /// The bar's staff text in display form, with the size each line measured to. Measured once and
+  /// carried so that the width reserved for it and the box it is placed in are the same value.
+  final List<_MeasuredStaffText> staffText;
   final bool startsSection;
   final String? sectionLabel;
+}
+
+/// One line of a bar's staff text in display form, with the size it measured to.
+class _MeasuredStaffText {
+  const _MeasuredStaffText({required this.text, required this.size});
+
+  /// The words to draw, with the `*NN` prefix and padding already removed.
+  final String text;
+
+  /// The box the line occupies, from the style's text metrics.
+  final LayoutSize size;
 }
 
 /// A planned system: the bars it holds and the section heading above it, if any.

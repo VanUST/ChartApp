@@ -55,6 +55,7 @@ export 'src/layout/hit_test.dart';
 export 'src/layout/layout_engine.dart';
 export 'src/layout/layout_style.dart';
 export 'src/layout/page_layout.dart';
+export 'src/layout/staff_text_display.dart';
 export 'src/layout/text_metrics.dart';
 export 'src/oplog/oplog.dart';
 export 'src/pitch.dart';

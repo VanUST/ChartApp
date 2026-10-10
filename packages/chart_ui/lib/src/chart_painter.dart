@@ -4,7 +4,9 @@
 //          model carries over matching iReal Pro's spacing or glyph shapes.
 // INPUTS: song — the model the page was laid out from. It is needed because [PageLayout] carries
 //         addresses (`sectionId`, `barIndex`) rather than the bars themselves, and the barlines,
-//         repeat marks, voltas and staff text live on the [Bar]. page — the [PageLayout] to draw.
+//         repeat marks and voltas live on the [Bar]. Staff text is the exception: the layout
+//         publishes its display form and measured box on [PlacedBar], so the painter draws those
+//         and never reads `Bar.staffText`. page — the [PageLayout] to draw.
 //         metrics — the same [FlutterTextMetrics] the layout was measured with, so drawn text
 //         lands in the box the engine reserved. selection — the bar and cell a musician touched, or
 //         null; it is what makes an interaction visible rather than only logged.
@@ -257,7 +259,7 @@ class ChartPainter extends CustomPainter {
     if (bar == null) {
       return;
     }
-    _paintBarSigns(canvas, bar, bounds);
+    _paintBarSigns(canvas, bar, placed);
     for (final PlacedChord placedChord in placed.chords) {
       _paintChord(canvas, bar, placedChord);
     }
@@ -285,12 +287,14 @@ class ChartPainter extends CustomPainter {
 
   // PURPOSE: Draw every sign the bar model carries that is not a chord: the repeat-previous
   //          symbol, the slash repeat, N.C., the volta bracket, the marks and the staff text.
-  // INPUTS: canvas — the target. bar — the bar whose signs to draw. bounds — where the bar sits.
+  // INPUTS: canvas — the target. bar — the bar whose signs to draw. placed — the bar's layout,
+  //         which carries the staff-text lines already in display form and already measured.
   // OUTPUTS: Nothing. Signs are placed in the bands above and below the chord line so they cannot
   //          cover a chord, which is the room LayoutStyle.barHeight leaves around the centred
   //          chord text.
   // KEYWORDS: repeat-previous, slash-repeat, no-chord, volta, marks, staff-text, glyph
-  void _paintBarSigns(Canvas canvas, Bar bar, LayoutRect bounds) {
+  void _paintBarSigns(Canvas canvas, Bar bar, PlacedBar placed) {
+    final LayoutRect bounds = placed.bounds;
     switch (bar.repeatPrevious) {
       case RepeatPrevious.oneBar:
         _paintCentered(canvas, '%', bounds, metrics.chordStyle);
@@ -328,16 +332,16 @@ class ChartPainter extends CustomPainter {
       );
     }
 
-    // Staff text is stacked upward from the bar's bottom edge, so several phrases on one bar stay
-    // inside it instead of running past the system below.
-    double y = bounds.bottom - 2;
-    for (final String text in bar.staffText) {
-      final Size size = _measureText(text, metrics.staffTextStyle);
-      y -= size.height;
+    // Staff text is drawn in the boxes the layout published. Those boxes already hold the DISPLAY
+    // form — the `*NN` position prefix and the exporter's padding removed by `displayStaffText` —
+    // and were measured with the same metrics the page was laid out with. The painter therefore
+    // does not strip the prefix and does not measure the string a second time: a second derivation
+    // here is exactly the drift that would let a bar reserve room for `*69` while drawing `Куплет`.
+    for (final PlacedStaffText line in placed.staffText) {
       _paintText(
         canvas,
-        text,
-        Offset(bounds.left + 2, y),
+        line.text,
+        Offset(line.bounds.left, line.bounds.top),
         metrics.staffTextStyle,
       );
     }

@@ -81,6 +81,38 @@ class PlacedCell {
   String toString() => 'PlacedCell($beat) at $bounds';
 }
 
+/// One line of the words a bar carries, placed where it is drawn.
+///
+/// The bar model stores staff text as the chart wrote it — with the `*NN` layout prefix and the
+/// exporter's padding — because that is what makes the stored form round-trip. What is drawn is the
+/// DISPLAY form, which the engine derives once through `displayStaffText`. Carrying the derived
+/// words and their box here, rather than leaving the painter to strip and measure the stored string
+/// again, is what makes the room the engine reserved and the text the painter puts on the page the
+/// same value by construction instead of two code paths that happen to agree.
+class PlacedStaffText {
+  /// Creates a placed line for [text] with the given [bounds].
+  const PlacedStaffText({required this.text, required this.bounds});
+
+  /// The words to draw, with the position prefix and padding already removed.
+  ///
+  /// Never empty: the engine does not place a stored entry that has nothing to say, so a consumer
+  /// need not test this before drawing.
+  final String text;
+
+  /// Where the line is drawn, in page coordinates. Its width is the width the line was measured at.
+  final LayoutRect bounds;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedStaffText && other.text == text && other.bounds == bounds;
+
+  @override
+  int get hashCode => Object.hash(text, bounds);
+
+  @override
+  String toString() => 'PlacedStaffText("$text") at $bounds';
+}
+
 /// A bar drawn at a position, together with its cells and the chords inside it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
@@ -90,6 +122,7 @@ class PlacedBar {
     required this.bounds,
     required this.cells,
     required this.chords,
+    this.staffText = const <PlacedStaffText>[],
   });
 
   /// The section the bar belongs to.
@@ -115,6 +148,13 @@ class PlacedBar {
   /// The chords inside the bar, ordered by cell and then by step.
   final List<PlacedChord> chords;
 
+  /// The staff-text lines the bar draws, stacked upward from its bottom edge in model order.
+  ///
+  /// The words are the display form, so a reader never meets the `*NN` prefix; an entry whose
+  /// display form is empty is absent rather than placed empty. Empty for a bar whose model carries
+  /// no staff text, which is the common case.
+  final List<PlacedStaffText> staffText;
+
   @override
   bool operator ==(Object other) {
     if (other is! PlacedBar ||
@@ -122,7 +162,8 @@ class PlacedBar {
         other.barIndex != barIndex ||
         other.bounds != bounds ||
         other.cells.length != cells.length ||
-        other.chords.length != chords.length) {
+        other.chords.length != chords.length ||
+        other.staffText.length != staffText.length) {
       return false;
     }
     for (int index = 0; index < cells.length; index++) {
@@ -132,6 +173,11 @@ class PlacedBar {
     }
     for (int index = 0; index < chords.length; index++) {
       if (other.chords[index] != chords[index]) {
+        return false;
+      }
+    }
+    for (int index = 0; index < staffText.length; index++) {
+      if (other.staffText[index] != staffText[index]) {
         return false;
       }
     }
@@ -145,6 +191,7 @@ class PlacedBar {
     bounds,
     Object.hashAll(cells),
     Object.hashAll(chords),
+    Object.hashAll(staffText),
   );
 
   @override

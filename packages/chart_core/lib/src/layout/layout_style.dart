@@ -19,6 +19,8 @@ class LayoutStyle {
     this.barPadding = 8,
     this.chordSpacing = 10,
     this.minCellWidth = 14,
+    this.staffTextInset = 2,
+    this.staffTextBottomInset = 2,
     this.barHeight = 44,
     this.systemSpacing = 12,
     this.sectionLabelHeight = 22,
@@ -46,6 +48,19 @@ class LayoutStyle {
   /// is drawn, and letting empty cells collapse would pack the chords of a bar into a width that
   /// no longer says anything about where in the bar they fall.
   final double minCellWidth;
+
+  /// Horizontal inset of a staff-text line from the bar's left edge.
+  ///
+  /// It exists so the placement the engine publishes and the width it reserves for the words are
+  /// the same arithmetic: the line's box starts here, so the room a bar needs for its widest line
+  /// is this inset plus the measured width plus the right [barPadding].
+  final double staffTextInset;
+
+  /// Vertical inset of the bottom-most staff-text line from the bar's bottom edge.
+  ///
+  /// Lines are stacked upward from here, so several phrases on one bar stay inside it instead of
+  /// running past the system below.
+  final double staffTextBottomInset;
 
   /// Vertical extent of one stave, before any section label above it.
   final double barHeight;
