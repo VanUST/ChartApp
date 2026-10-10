@@ -134,27 +134,31 @@ class ChartPainter extends CustomPainter {
       oldDelegate.selectionFillColor != selectionFillColor ||
       oldDelegate.selectionStrokeColor != selectionStrokeColor;
 
-  // PURPOSE: Draw the section heading a system starts, in the band the engine reserved above the
-  //          stave, so the heading is never drawn over a chord.
+  // PURPOSE: Draw the section heading a system starts, in the band the engine reserved for it above
+  //          the stave, so the heading is never drawn over a chord.
   // INPUTS: canvas — the target. system — the system whose label to draw.
-  // OUTPUTS: Nothing when [PlacedSystem.sectionLabel] is null. The band height is derived from the
-  //          geometry (first bar top minus system top) rather than from LayoutStyle, so the label
-  //          is placed from the layout that was actually produced.
-  // KEYWORDS: section-label, heading, band, geometry-derived, null-safe
+  // OUTPUTS: Nothing when [PlacedSystem.sectionLabel] is null or its [PlacedSystem.labelBand] is
+  //          absent. The band comes from the layout rather than from this painter's arithmetic, so
+  //          the heading keeps its own room at the top of the system: a system's band above the
+  //          stave also holds the cue rows of the bars on it, and a label centred in the whole band
+  //          would be drawn among them, where a cue plate could cover the letter that names the
+  //          section. On a system with no cue the band is exactly the label's own height, so the
+  //          heading lands where it always did.
+  // KEYWORDS: section-label, heading, published-band, cue-rows, geometry-derived, null-safe
   void _paintSectionLabel(Canvas canvas, PlacedSystem system) {
     final String? label = system.sectionLabel;
-    if (label == null || label.isEmpty || system.bars.isEmpty) {
+    final LayoutRect? band = system.labelBand;
+    if (label == null || label.isEmpty || band == null) {
       return;
     }
-    final double bandHeight = system.bars.first.bounds.top - system.bounds.top;
     final Size textSize = _measureText(label, metrics.sectionLabelStyle);
-    final double top = bandHeight > textSize.height
-        ? system.bounds.top + (bandHeight - textSize.height) / 2
-        : system.bounds.top;
+    final double top = band.size.height > textSize.height
+        ? band.top + (band.size.height - textSize.height) / 2
+        : band.top;
     _paintText(
       canvas,
       label,
-      Offset(system.bounds.left, top),
+      Offset(band.left, top),
       metrics.sectionLabelStyle,
     );
   }

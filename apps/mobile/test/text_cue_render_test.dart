@@ -152,6 +152,15 @@ FlutterTextMetrics _metricsFor(String family) => FlutterTextMetrics(
     fontSize: 10,
     color: const Color(0xFF486581),
   ),
+  // The cue is measured with the style it is drawn with, so the row the layout reserves above a
+  // bar and the plate drawn in it are the same box. The family matches the painter's style, which
+  // this instrument passes to `TextCuePainter`.
+  textCueStyle: TextStyle(
+    fontFamily: family,
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+    color: const Color(0xFF102A43),
+  ),
 );
 
 /// The engine this instrument lays the chart out with — the viewer's own constants.
@@ -169,21 +178,29 @@ LayoutEngine _engineFor(FlutterTextMetrics metrics) => LayoutEngine(
   ),
 );
 
-// PURPOSE: Resolve every cue against one page exactly as the viewer's `_resolveCues` does, through
-//          the same `resolveEventAnchor` the ink layer uses, so the instrument measures the product's
-//          own placement and not a second implementation of it.
+// PURPOSE: Resolve every cue against one page exactly as the viewer's `_resolveCues` does — by
+//          reading the row the LAYOUT placed it in — so the instrument measures the product's own
+//          placement and not a second implementation of it.
 // INPUTS: page — the layout to resolve against. document — the state holding the cues.
-// OUTPUTS: The cues this page can place, with the anchor's origin in the page's engraved
+// OUTPUTS: The cues this page has a row for, with the row's origin and box in the page's engraved
 //          coordinates, in the document's render order.
-// KEYWORDS: cue-anchor-resolution, viewer-parity, single-implementation, render-order
+// KEYWORDS: cue-row-lookup, viewer-parity, single-implementation, render-order
 List<ResolvedTextCue> _resolveCues(PageLayout page, DocumentState document) {
+  final Map<String, PlacedTextCue> placedById = <String, PlacedTextCue>{};
+  for (final PlacedBar bar in page.bars) {
+    for (final PlacedTextCue placed in bar.textCues) {
+      placedById[placed.id] = placed;
+    }
+  }
   final List<ResolvedTextCue> resolved = <ResolvedTextCue>[];
   for (final TextCue cue in document.textCues) {
-    final InkPlacement? placement = resolveEventAnchor(page, cue.place.anchor);
-    if (placement == null) {
+    final PlacedTextCue? placed = placedById[cue.id];
+    if (placed == null) {
       continue;
     }
-    resolved.add(ResolvedTextCue(cue: cue, origin: placement.origin));
+    resolved.add(
+      ResolvedTextCue(cue: cue, origin: placed.origin, size: placed.size),
+    );
   }
   return resolved;
 }
@@ -251,15 +268,18 @@ String _fingerprint(File file) {
 }
 
 // PURPOSE: Render one case — the ordinary page and, separately, the fitted one — and print the
-//          address, the anchor's origin, the position the cue is drawn at and the image's
-//          fingerprint, so the PNG and the report describe the same page.
+//          address, the row the layout reserved for the cue, the box it occupies and the chord
+//          bounds of the same bar, so the PNG and the report describe the same page and the
+//          reservation is a pair of numbers rather than an impression.
 // INPUTS: engine — the layout engine. song — the music. metrics — the measured styles. document —
-//         the state to draw. name — the case's name, which becomes the file name. outDir — where to
-//         write. fitted — true to lay the page out through `fitToPage` instead of `layout`.
+//         the state to draw, whose cues are handed to the engine. name — the case's name, which
+//         becomes the file name. outDir — where to write. fitted — true to lay the page out through
+//         `fitToPage` instead of `layout`.
 // OUTPUTS: The written file for the ordinary case, and one `cue.case` line plus one `cue.wrote`
-//          line per render. Prints the cue it drew and the bar it resolved to, which is the claim
-//          the image is being read to check.
-// KEYWORDS: case-render, ordinary-and-fitted, report, fingerprint, resolved-bar, evidence
+//          line per render, and one `cue.reserve` line per placed cue carrying the cue's surface
+//          box, the top of the lowest chord of the same bar and the overlap between them. The
+//          overlap line is the claim the image is being read to check.
+// KEYWORDS: case-render, ordinary-and-fitted, report, fingerprint, reservation-numbers, evidence
 Future<File> _renderCase({
   required LayoutEngine engine,
   required Song song,
@@ -276,6 +296,7 @@ Future<File> _renderCase({
       song,
       pageWidth: cueFitWidth,
       pageHeight: cueFitHeight,
+      cues: document.textCues,
     );
     expect(
       outcome.page,
@@ -290,6 +311,7 @@ Future<File> _renderCase({
       song,
       pageWidth: cuePageWidth,
       pageHeight: cuePageHeight,
+      cues: document.textCues,
     );
     expect(pages, hasLength(1), reason: 'the fixture is meant to be one page');
   }
@@ -318,6 +340,8 @@ Future<File> _renderCase({
     final TextCue cue = placed.cue;
     final double left = (placed.origin.x + cue.place.offsetX) * scale;
     final double top = (placed.origin.y + cue.place.offsetY) * scale;
+    final double right = left + placed.size.width * scale;
+    final double bottom = top + placed.size.height * scale;
     final PlacedBar bar = page.bars.firstWhere(
       (PlacedBar candidate) =>
           candidate.sectionId == cue.place.anchor.sectionId &&
@@ -333,9 +357,35 @@ Future<File> _renderCase({
       'offset=(${cue.place.offsetX},${cue.place.offsetY}) '
       'origin_engraved=(${placed.origin.x.toStringAsFixed(2)},'
       '${placed.origin.y.toStringAsFixed(2)}) '
+      'box_engraved=(${placed.size.width.toStringAsFixed(2)}x'
+      '${placed.size.height.toStringAsFixed(2)}) '
       'drawn_surface=(${left.toStringAsFixed(2)},${top.toStringAsFixed(2)}) '
       'bar_engraved=(${bar.bounds.left.toStringAsFixed(2)},'
       '${bar.bounds.top.toStringAsFixed(2)})',
+    );
+    // The reservation, in the coordinates the reader sees: the cue's plate on the surface and the
+    // bounds of the lowest chord of the same bar on the same surface. The plate must end above the
+    // chord's top; a negative clearance would be the plate lying on a glyph.
+    PlacedChord? highest;
+    for (final PlacedChord chord in bar.chords) {
+      if (highest == null || chord.bounds.top < highest.bounds.top) {
+        highest = chord;
+      }
+    }
+    final String clearance = highest == null
+        ? 'no chord on this bar'
+        : 'clearance_surface='
+              '${(highest.bounds.top * scale - bottom).toStringAsFixed(2)} '
+              'plate_bottom_surface=${bottom.toStringAsFixed(2)} '
+              'chord_surface=(${(highest.bounds.left * scale).toStringAsFixed(2)},'
+              '${(highest.bounds.top * scale).toStringAsFixed(2)})..'
+              '(${(highest.bounds.right * scale).toStringAsFixed(2)},'
+              '${(highest.bounds.bottom * scale).toStringAsFixed(2)})';
+    stdout.writeln(
+      'cue.reserve id=${cue.id} '
+      'plate_surface=(${left.toStringAsFixed(2)},${top.toStringAsFixed(2)})..'
+      '(${right.toStringAsFixed(2)},${bottom.toStringAsFixed(2)}) '
+      '$clearance',
     );
   }
   stdout.writeln(
@@ -595,6 +645,7 @@ void main() {
       written,
       pageWidth: cueFitWidth,
       pageHeight: cueFitHeight,
+      cues: session.document.textCues,
     );
     final PageLayout fitted = fit.page!;
     final ResolvedTextCue fittedCue = _resolveCues(
@@ -646,6 +697,7 @@ void main() {
       transposed,
       pageWidth: cuePageWidth,
       pageHeight: cuePageHeight,
+      cues: session.document.textCues,
     );
     final ResolvedTextCue transposedCue = _resolveCues(
       transposedPages.first,

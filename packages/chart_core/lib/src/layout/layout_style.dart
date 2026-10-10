@@ -8,6 +8,31 @@
 // KEYWORDS: layout-style, spacing, engraving-constants, configuration, chart-proportions
 import 'text_metrics.dart';
 
+/// The smallest fraction of its own size a text cue's letters may be drawn at, whatever the page
+/// does.
+///
+/// A SEPARATE, HIGHER FLOOR from `LayoutEngine.minLegibleScale` (0.5) on purpose: 0.8 of a 16-pixel
+/// cue is 12.8 surface logical pixels, which is still larger than the fitted chord it annotates.
+/// It lives here rather than in the painter because the reservation and the drawing are two halves
+/// of one number: below a page scale of 0.8 the letters stop shrinking while the music keeps
+/// going, so the row a cue occupies is `letterHeight / pageScale` pixels tall in the page's own
+/// coordinates and GROWS as the page shrinks. `TextCuePainter` reads this constant, and that is
+/// what stops the row the layout reserved and the box the painter draws from being two values.
+const double textCueMinLegibleScale = 0.8;
+
+/// Horizontal room the cue plate keeps between its edge and the words, in surface logical pixels.
+///
+/// Part of the room a cue takes: the layout reserves a plate, not a string.
+const double textCuePlateInsetX = 3;
+
+/// Vertical room the cue plate keeps between its edge and the words, in surface logical pixels.
+///
+/// Part of the room a cue takes: the layout reserves a PLATE, not a string, so one cue's row is the
+/// whole line height of the cue style — a value the font stack answers, not a font size — plus twice
+/// this. Reserving the words' own box instead would let the plate's edge, which the painter draws,
+/// fall that much further onto the chord below.
+const double textCuePlateInsetY = 1;
+
 /// The spacing constants and the metrics model the layout engine uses.
 class LayoutStyle {
   /// Creates a style. Only [textMetrics] has no sensible default in production; the fixed model

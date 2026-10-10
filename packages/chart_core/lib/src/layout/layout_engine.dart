@@ -2,19 +2,24 @@
 //          the bars, measure each one from its content, pack bars into systems, pack systems into
 //          pages — implemented as pure functions over the song model so that a page can be
 //          engraved, and its cost measured, without a device and without a rendering stack.
-// INPUTS: A Song, a page size in logical pixels, and a LayoutStyle carrying the spacing constants
-//         and the text metrics.
-// OUTPUTS: A list of PageLayout values with every bar and chord positioned. An empty song yields
-//          an empty list rather than a blank page, so a caller cannot mistake "nothing to draw"
-//          for "a page that came out empty".
+// INPUTS: A Song, a page size in logical pixels, a LayoutStyle carrying the spacing constants and
+//         the text metrics, and — optionally — the document's text cues. The cues are the one
+//         input that is not part of the song: a remark a musician writes on a chart belongs to the
+//         DOCUMENT, and no song carries it. They arrive here because the engine is the only thing
+//         that can give a cue the vertical room it needs, exactly as it already does for a bar's
+//         own staff text, and they default to none so that a caller with no document gets the same
+//         pages it always did.
+// OUTPUTS: A list of PageLayout values with every bar, chord and text cue positioned. An empty
+//          song yields an empty list rather than a blank page, so a caller cannot mistake "nothing
+//          to draw" for "a page that came out empty".
 // KEYWORDS: layout-engine, engraving, system-building, pagination, measure, pure-function,
-//           spike-s4
+//           text-cue, spike-s4
 //
 // Two properties of this pipeline are load-bearing for the rest of the system:
 //
-//   1. It is PURE. Same song, same style, same page size gives the same geometry on every machine
-//      and every run. That is what makes a layout assertion exact, and it is why the engine takes
-//      text metrics as an input rather than reaching for a font.
+//   1. It is PURE. Same song, same style, same page size, same cues gives the same geometry on
+//      every machine and every run. That is what makes a layout assertion exact, and it is why the
+//      engine takes text metrics as an input rather than reaching for a font.
 //   2. It is ADDRESSABLE. Every placed bar carries the (sectionId, barIndex) that names it in the
 //      song, and every placed chord carries its (beat, step). An annotation anchored in the song
 //      model can therefore be drawn at the right place without either side knowing the other's
@@ -24,6 +29,7 @@
 // first two belong to the renderer, and the third is not yet written (see the song model notes in
 // docs/sdd.md). The engine lays out the bars as WRITTEN, which is the edit view.
 import '../key.dart';
+import '../oplog/oplog.dart';
 import '../song/bar.dart';
 import '../song/song.dart';
 import '../spelling_table.dart';
@@ -49,27 +55,67 @@ class LayoutEngine {
 
   // PURPOSE: Lay a song out into as many pages as it needs.
   // INPUTS: song — the chart, in its written form. pageWidth and pageHeight — the page extent in
-  //         logical pixels, including the margins the style reserves.
-  // OUTPUTS: The pages, in reading order, each with its systems and bars positioned. An empty
-  //          song yields an empty list.
+  //         logical pixels, including the margins the style reserves. cues — the text cues the
+  //         document holds, already addressed by section and bar. They are an input rather than
+  //         something the engine reaches for, because the song does not carry them: a cue is a
+  //         remark a musician wrote in the DOCUMENT, and the engine is a pure function of the
+  //         chart. Passing them in is what keeps the engine pure while still letting it reserve
+  //         the vertical room the remarks need — the duty A44 already performs for a bar's own
+  //         staff text.
+  // OUTPUTS: The pages, in reading order, each with its systems and bars positioned, and with the
+  //          cues of every bar placed in the rows reserved above it. An empty song yields an empty
+  //          list. A cue naming a bar the song does not have is simply not placed, because there
+  //          is no bar to reserve a row above.
   //
   //          If a single bar is wider than the content width it still forms a system of its own
   //          and overflows the page rather than being dropped or shrinking to nothing. That is a
   //          deliberate failure mode: a chord that runs off the edge is visible and reported, and
-  //          a layout that silently omitted it would look correct while losing music.
-  // KEYWORDS: pagination, system-building, overflow-behaviour, reading-order
+  //          a layout that silently omitted it would look correct while losing music. A system
+  //          whose cue rows make it taller than the page overflows the BOTTOM on the same terms:
+  //          the rows are reserved first and the page's edge is what gives way, because a cue that
+  //          was dropped or drawn over a chord would be an invisible loss.
+  // KEYWORDS: pagination, system-building, overflow-behaviour, reading-order, text-cue, cue-row
   /// Returns the pages [song] is engraved into.
   List<PageLayout> layout(
     Song song, {
     required double pageWidth,
     required double pageHeight,
+    List<TextCue> cues = const <TextCue>[],
+  }) => _engrave(
+    song,
+    pageWidth: pageWidth,
+    pageHeight: pageHeight,
+    cues: cues,
+    drawScale: 1,
+  );
+
+  // PURPOSE: Engrave a song for a surface it will later be shrunk onto, which is the one place the
+  //          page scale reaches the geometry.
+  // INPUTS: song, the page extent in the ENGRAVED coordinate system, the cues, and drawScale — the
+  //         factor the finished page will be multiplied by to reach the surface the musician sees.
+  // OUTPUTS: The pages, with every rectangle in engraved coordinates and `PageLayout.scale` set to
+  //          [drawScale] so one multiplication bridges the two systems.
+  //
+  //          WHY THE SCALE IS AN INPUT AND NOT ALWAYS 1. A cue's letters have a legibility floor
+  //          of their own (`textCueMinLegibleScale`), so below a page scale of 0.8 they stop
+  //          shrinking while the music keeps going: the row a cue needs is
+  //          `letters / drawScale` pixels tall in the engraved system, and the reservation is
+  //          therefore scale-aware. Engraving for a scale of 1 and then shrinking would reserve a
+  //          row that is too short at exactly the scales where the defect was measured.
+  // KEYWORDS: engraving, fit-scale, cue-row, scale-aware-reservation, pure-function
+  List<PageLayout> _engrave(
+    Song song, {
+    required double pageWidth,
+    required double pageHeight,
+    required List<TextCue> cues,
+    required double drawScale,
   }) {
     if (song.sections.isEmpty) {
       return const <PageLayout>[];
     }
     final double contentWidth = pageWidth - 2 * style.pageMargin;
     final double contentHeight = pageHeight - 2 * style.pageMargin;
-    final List<_MeasuredBar> measured = _measureBars(song);
+    final List<_MeasuredBar> measured = _measureBars(song, cues);
     final List<_SystemPlan> systems = _buildSystems(measured, contentWidth);
     return _buildPages(
       systems,
@@ -77,6 +123,7 @@ class LayoutEngine {
       contentHeight,
       pageWidth,
       pageHeight,
+      drawScale,
     );
   }
 
@@ -93,7 +140,8 @@ class LayoutEngine {
   //          musician reading a chart on stage asks for when the tune is short enough.
   // INPUTS: song — the chart. pageWidth and pageHeight — the surface the single page must fit
   //         inside, in logical pixels. minScale — the smallest scale that counts as legible; the
-  //         default is [minLegibleScale].
+  //         default is [minLegibleScale]. cues — the document's text cues, for the same reason
+  //         [layout] takes them: the rows they need are part of the height that has to fit.
   // OUTPUTS: A [FitOutcome]. It fits when the whole song lands on one page at a scale of at least
   //          [minScale], and the outcome then carries that page and its scale. It does not fit
   //          when even [minScale] leaves more than one page, and the outcome then carries no page
@@ -107,14 +155,17 @@ class LayoutEngine {
   //          That is why the scale lives on [PageLayout] as one factor between engraved
   //          coordinates and the surface, instead of the engine emitting pre-multiplied geometry
   //          that no longer matches the page it was laid out for. The largest workable scale is
-  //          found by a fixed-count bisection, so the result is the same on every run.
-  // KEYWORDS: fit-page, one-page, auto-scale, bisection, legibility-floor, page-mode
+  //          found by a fixed-count bisection, so the result is the same on every run. Each trial
+  //          is engraved AT the scale it is testing, so a cue's row is sized by the letters the
+  //          page will really show and the search sees the same height the reader will.
+  // KEYWORDS: fit-page, one-page, auto-scale, bisection, legibility-floor, page-mode, cue-row
   /// Returns the single page [song] fits on, or why it does not.
   FitOutcome fitToPage(
     Song song, {
     required double pageWidth,
     required double pageHeight,
     double minScale = minLegibleScale,
+    List<TextCue> cues = const <TextCue>[],
   }) {
     if (song.sections.isEmpty || minScale <= 0 || minScale > 1) {
       return const FitOutcome(page: null, scale: 1, fits: false);
@@ -123,6 +174,7 @@ class LayoutEngine {
       song,
       pageWidth: pageWidth,
       pageHeight: pageHeight,
+      cues: cues,
     );
     if (asRequested.length == 1) {
       // Already one page at full size, so no shrinking is needed and none is done: a chart is
@@ -130,51 +182,48 @@ class LayoutEngine {
       return FitOutcome(page: asRequested.single, scale: 1, fits: true);
     }
     if (asRequested.isEmpty ||
-        !_fitsOnOnePage(song, pageWidth, pageHeight, minScale)) {
+        !_fitsOnOnePage(song, pageWidth, pageHeight, minScale, cues)) {
       return FitOutcome(page: null, scale: minScale, fits: false);
     }
     double low = minScale;
     double high = 1;
     for (int step = 0; step < 24; step++) {
       final double mid = (low + high) / 2;
-      if (_fitsOnOnePage(song, pageWidth, pageHeight, mid)) {
+      if (_fitsOnOnePage(song, pageWidth, pageHeight, mid, cues)) {
         low = mid;
       } else {
         high = mid;
       }
     }
-    final PageLayout raw = layout(
+    final PageLayout raw = _engrave(
       song,
       pageWidth: pageWidth / low,
       pageHeight: pageHeight / low,
+      cues: cues,
+      drawScale: low,
     ).single;
-    return FitOutcome(
-      page: PageLayout(
-        index: raw.index,
-        size: raw.size,
-        systems: raw.systems,
-        scale: low,
-      ),
-      scale: low,
-      fits: true,
-    );
+    return FitOutcome(page: raw, scale: low, fits: true);
   }
 
   // PURPOSE: Answer whether the song would be one page if it were engraved at [scale] and shrunk
   //          back onto the caller's surface.
-  // INPUTS: song, the surface size and the scale to test.
+  // INPUTS: song, the surface size, the scale to test, and the cues — which are engraved at that
+  //         scale too, because a cue's row is taller in engraved pixels the smaller the scale.
   // OUTPUTS: True when the enlarged page needs no more than one page.
-  // KEYWORDS: fit-test, virtual-page, single-page
+  // KEYWORDS: fit-test, virtual-page, single-page, scale-aware-cue-row
   bool _fitsOnOnePage(
     Song song,
     double pageWidth,
     double pageHeight,
     double scale,
+    List<TextCue> cues,
   ) =>
-      layout(
+      _engrave(
         song,
         pageWidth: pageWidth / scale,
         pageHeight: pageHeight / scale,
+        cues: cues,
+        drawScale: scale,
       ).length ==
       1;
 
@@ -353,7 +402,8 @@ class LayoutEngine {
     return offsets;
   }
 
-  List<_MeasuredBar> _measureBars(Song song) {
+  List<_MeasuredBar> _measureBars(Song song, List<TextCue> cues) {
+    final Map<String, List<TextCue>> cuesByBar = _cuesByBar(cues);
     final List<_MeasuredBar> measured = <_MeasuredBar>[];
     for (final section in song.sections) {
       for (int index = 0; index < section.bars.length; index++) {
@@ -370,6 +420,9 @@ class LayoutEngine {
             key: song.key,
             width: _barWidth(bar, song.key, staffText),
             staffText: staffText,
+            textCues: _measureTextCues(
+              cuesByBar[_barKey(section.id, index)] ?? const <TextCue>[],
+            ),
             startsSection: index == 0,
             sectionLabel: index == 0 ? section.label.toString() : null,
           ),
@@ -378,6 +431,52 @@ class LayoutEngine {
     }
     return measured;
   }
+
+  // PURPOSE: Group the document's cues by the bar they are anchored to, so laying a bar out can
+  //          ask for its own remarks without scanning the whole document once per bar.
+  // INPUTS: cues — every cue of the document, in document order.
+  // OUTPUTS: The cues that have words, keyed by [LayoutEngine._barKey], each list in document
+  //          order. A cue with empty words is DROPPED: it is the state the model documents as
+  //          "inserted and not yet typed into", it draws nothing, and reserving a row for it would
+  //          spend the page's height on a remark that is not there.
+  // KEYWORDS: cue-grouping, bar-key, document-order, empty-skip, single-scan
+  Map<String, List<TextCue>> _cuesByBar(List<TextCue> cues) {
+    final Map<String, List<TextCue>> byBar = <String, List<TextCue>>{};
+    for (final TextCue cue in cues) {
+      if (cue.text.isEmpty) {
+        continue;
+      }
+      final String key = _barKey(
+        cue.place.anchor.sectionId,
+        cue.place.anchor.bar,
+      );
+      (byBar[key] ??= <TextCue>[]).add(cue);
+    }
+    return byBar;
+  }
+
+  /// The key a cue and a bar meet on: the section identity and the bar index inside it.
+  static String _barKey(String sectionId, int barIndex) =>
+      '$sectionId\u0000$barIndex';
+
+  // PURPOSE: Read a bar's cues into the rows it must reserve for them, measuring each one once so
+  //          that the room reserved and the box drawn come from the same measurement — the rule
+  //          [_measureStaffText] follows for the words a bar carries itself.
+  // INPUTS: cues — this bar's cues, in document order, with their words already known non-empty.
+  // OUTPUTS: One entry per cue, in the same order, carrying the words, the address it hangs on, the
+  //          identity the document gave it and the size the words measured to at a page scale of 1.
+  //          An empty input yields an empty list.
+  // KEYWORDS: cue-measurement, text-cue-role, document-order, single-measurement
+  List<_MeasuredTextCue> _measureTextCues(List<TextCue> cues) =>
+      <_MeasuredTextCue>[
+        for (final TextCue cue in cues)
+          _MeasuredTextCue(
+            id: cue.id,
+            anchor: cue.place.anchor,
+            text: cue.text,
+            size: style.textMetrics.measure(cue.text, ChartTextRole.textCue),
+          ),
+      ];
 
   // PURPOSE: Pack bars into systems, starting a new system at every section boundary and
   //          otherwise breaking only when the next bar would not fit.
@@ -432,6 +531,7 @@ class LayoutEngine {
     double contentHeight,
     double pageWidth,
     double pageHeight,
+    double drawScale,
   ) {
     final List<PageLayout> pages = <PageLayout>[];
     List<PlacedSystem> currentSystems = <PlacedSystem>[];
@@ -448,6 +548,7 @@ class LayoutEngine {
           index: pageIndex,
           size: LayoutSize(pageWidth, pageHeight),
           systems: currentSystems,
+          scale: drawScale,
         ),
       );
       pageIndex++;
@@ -457,14 +558,26 @@ class LayoutEngine {
     }
 
     for (final _SystemPlan plan in systems) {
-      final double height = _systemHeight(plan);
+      final double height = _systemHeight(plan, drawScale);
       final double spacing = firstOnPage ? 0 : style.systemSpacing;
+      // A system that does not fit this page, and a page that already holds one, means a new page.
       if (!firstOnPage &&
           y + spacing + height > style.pageMargin + contentHeight) {
         flushPage();
       }
-      final double top = firstOnPage ? y : y + spacing;
-      currentSystems.add(_placeSystem(plan, top));
+      // A system taller than a whole page cannot be made to fit by pagination, because a page is
+      // the most there is. It is then placed with its STAVE's bottom on the content box's bottom, so
+      // the overflow comes off its TOP — its section label and its cue rows — and the music stays on
+      // the page. That is the same priority the whole feature rests on: a cue is a remark that gives
+      // way to the chart, never the other way round. A page too short for even one stave is the one
+      // case this cannot help, and there the system keeps its ordinary place and overflows the
+      // bottom, as it did before cues existed.
+      final bool overflowsPage =
+          height > contentHeight && style.barHeight <= contentHeight;
+      final double top = overflowsPage
+          ? style.pageMargin + contentHeight - height
+          : (firstOnPage ? y : y + spacing);
+      currentSystems.add(_placeSystem(plan, top, drawScale));
       y = top + height;
       firstOnPage = false;
     }
@@ -472,15 +585,79 @@ class LayoutEngine {
     return pages;
   }
 
-  double _systemHeight(_SystemPlan plan) =>
+  // PURPOSE: Report how tall a system is, which is the band reserved for its cues plus its heading
+  //          plus one stave.
+  // INPUTS: plan — the system. drawScale — the page scale the engraved coordinates will be
+  //         multiplied by, which is what turns a cue's surface-sized letters into engraved room.
+  // OUTPUTS: The system's height. A system with no cue and no heading is exactly the style's stave
+  //          height, which is what keeps every cue-free page laid out as it was before cues
+  //          existed.
+  // KEYWORDS: system-height, cue-band, section-label, stave, unchanged-when-empty
+  double _systemHeight(_SystemPlan plan, double drawScale) =>
       (plan.sectionLabel == null ? 0 : style.sectionLabelHeight) +
+      _cueBandHeight(plan, drawScale) +
       style.barHeight;
 
-  PlacedSystem _placeSystem(_SystemPlan plan, double top) {
+  // PURPOSE: Report the vertical room one system must give up for the cues of the bars on it, which
+  //          is the tallest stack any one of its bars needs.
+  // INPUTS: plan — the system. drawScale — the page scale, for the reason [_cueRowHeight] records.
+  // OUTPUTS: The band height. Zero when no bar on the system carries a cue, so a page without
+  //          remarks is engraved exactly as it was.
+  //
+  //          WHY THE MAXIMUM AND NOT THE SUM. A system's stave is one horizontal row: every bar on
+  //          it must start at the same height or the barlines would not line up. So the band is
+  //          the deepest stack any single bar needs, and each bar's own cues are stacked inside it
+  //          from the stave upward. Two cues on one bar push only that bar's stack up; a bar with
+  //          one cue is not lifted because its neighbour has three.
+  // KEYWORDS: cue-band, per-bar-stack, maximum, system-alignment, reservation
+  double _cueBandHeight(_SystemPlan plan, double drawScale) {
+    double band = 0;
+    for (final _MeasuredBar bar in plan.bars) {
+      double rows = 0;
+      for (final _MeasuredTextCue cue in bar.textCues) {
+        rows += _cueRowHeight(cue, drawScale);
+      }
+      if (rows > band) {
+        band = rows;
+      }
+    }
+    return band;
+  }
+
+  // PURPOSE: Report how much engraved height one cue's row needs.
+  // INPUTS: cue — the cue with the size its words measured to at a page scale of 1. drawScale —
+  //         the page scale the row is engraved for.
+  // OUTPUTS: The row height in the page's engraved coordinates: the words' line height and the
+  //          plate's two vertical insets, all measured at the size the cue is DRAWN, divided by
+  //          [drawScale].
+  //
+  //          THE DIVISION IS THE WHOLE POINT. The letters are drawn in surface pixels and never
+  //          below [textCueMinLegibleScale] of their size, so below a page scale of 0.8 they stop
+  //          shrinking while the music keeps going. The engraved box that lands at that surface
+  //          size is therefore `surface / drawScale`, and it grows as the page shrinks. Reserving
+  //          the undivided line height would under-reserve at exactly the fitted scales where the
+  //          plate was measured covering the chord.
+  // KEYWORDS: cue-row-height, letter-floor, surface-to-engraved, scale-aware, plate-inset
+  double _cueRowHeight(_MeasuredTextCue cue, double drawScale) =>
+      (cue.size.height * _cueLetterScale(drawScale) + 2 * textCuePlateInsetY) /
+      drawScale;
+
+  // PURPOSE: Report the factor a cue's letters are drawn at, which is the page scale with the cue's
+  //          own legibility floor under it.
+  // INPUTS: drawScale — the page scale.
+  // OUTPUTS: [drawScale], or [textCueMinLegibleScale] when the page is smaller. Never zero, for
+  //          the reason the engine's own floor is never zero: a page the engine produces carries a
+  //          scale of at least `minLegibleScale`.
+  // KEYWORDS: letter-scale, legibility-floor, cue, single-decision
+  double _cueLetterScale(double drawScale) =>
+      drawScale < textCueMinLegibleScale ? textCueMinLegibleScale : drawScale;
+
+  PlacedSystem _placeSystem(_SystemPlan plan, double top, double drawScale) {
     final double labelHeight = plan.sectionLabel == null
         ? 0
         : style.sectionLabelHeight;
-    final double staveTop = top + labelHeight;
+    final double cueBand = _cueBandHeight(plan, drawScale);
+    final double staveTop = top + labelHeight + cueBand;
     final List<PlacedBar> bars = <PlacedBar>[];
     double x = style.pageMargin;
     for (final _MeasuredBar measured in plan.bars) {
@@ -507,6 +684,16 @@ class LayoutEngine {
           cells: _placeCells(offsets, bounds),
           chords: _placeChords(measured, bounds, offsets),
           staffText: _placeStaffText(measured.staffText, bounds),
+          // A cell-anchored cue needs the cell's own left edge, which only exists once the offsets
+          // above are known, which is why the cues are placed here and not while the bars were
+          // being measured.
+          textCues: _placeTextCues(
+            measured.textCues,
+            bounds,
+            offsets,
+            staveTop,
+            drawScale,
+          ),
         ),
       );
       x += measured.width;
@@ -516,12 +703,78 @@ class LayoutEngine {
         style.pageMargin,
         top,
         x - style.pageMargin,
-        labelHeight + style.barHeight,
+        labelHeight + cueBand + style.barHeight,
       ),
       bars: bars,
       sectionId: plan.sectionId,
       sectionLabel: plan.sectionLabel,
+      // The heading's own band, published so that the painter does not have to guess how much of
+      // the room above the stave belongs to the words rather than to the label. A system with no
+      // cue has a band of exactly `sectionLabelHeight`, which is the band the painter used to infer
+      // from the geometry, so a page without remarks is drawn as it always was.
+      labelBand: plan.sectionLabel == null
+          ? null
+          : LayoutRect.fromLTWH(
+              style.pageMargin,
+              top,
+              x - style.pageMargin,
+              labelHeight,
+            ),
     );
+  }
+
+  // PURPOSE: Turn a bar's measured cues into placed rows, stacked upward from the stave so the
+  //          first cue stays closest to the bar it remarks on and none of them falls onto the
+  //          chord below. The painter draws these rows and nothing else, which is what makes the
+  //          room the page gave up and the plate the reader sees the same value.
+  // INPUTS: cues — this bar's cues in document order, with the size each measured to. bounds —
+  //         where the bar sits. offsets — the left edge of each cell relative to the bar's left
+  //         edge, from [_cellOffsets]. staveTop — the top of the stave, which is also the bottom
+  //         of the band. drawScale — the page scale the rows are engraved for.
+  // OUTPUTS: One placed cue per measured cue, in the same order, each carrying the words and the
+  //          box it occupies. The first sits directly above the stave and each later one above
+  //          that. A cue anchored to a cell of the bar starts at that cell's left edge; one
+  //          anchored to the bar itself starts at the bar's left edge; one whose beat the bar has
+  //          no cell for falls back to the bar's left edge rather than being dropped, matching the
+  //          anchor resolver the ink layer uses. An empty input yields an empty list.
+  //
+  //          The stored offset is NOT applied here. It stays the painter's, exactly as it was, so
+  //          a nudge up or down still moves the cue by the number the musician stored and the
+  //          layout does not have to interpret a value it does not own.
+  // KEYWORDS: cue-placement, stacking, cell-anchor, bar-anchor, origin-only, painter-contract
+  List<PlacedTextCue> _placeTextCues(
+    List<_MeasuredTextCue> cues,
+    LayoutRect bounds,
+    List<double> offsets,
+    double staveTop,
+    double drawScale,
+  ) {
+    if (cues.isEmpty) {
+      return const <PlacedTextCue>[];
+    }
+    final double letterScale = _cueLetterScale(drawScale);
+    final List<PlacedTextCue> placed = <PlacedTextCue>[];
+    double y = staveTop;
+    for (final _MeasuredTextCue cue in cues) {
+      final double height = _cueRowHeight(cue, drawScale);
+      y -= height;
+      final int? beat = cue.anchor.beat;
+      final double left = beat != null && beat >= 0 && beat < offsets.length
+          ? bounds.left + offsets[beat]
+          : bounds.left;
+      placed.add(
+        PlacedTextCue(
+          id: cue.id,
+          text: cue.text,
+          origin: LayoutOffset(left, y),
+          size: LayoutSize(
+            (cue.size.width * letterScale + 2 * textCuePlateInsetX) / drawScale,
+            height,
+          ),
+        ),
+      );
+    }
+    return placed;
   }
 
   // PURPOSE: Turn the cell offsets of a bar into the columns a hit test needs, so that a touch can
@@ -650,6 +903,7 @@ class _MeasuredBar {
     required this.key,
     required this.width,
     required this.staffText,
+    required this.textCues,
     required this.startsSection,
     required this.sectionLabel,
   });
@@ -666,6 +920,11 @@ class _MeasuredBar {
   /// The bar's staff text in display form, with the size each line measured to. Measured once and
   /// carried so that the width reserved for it and the box it is placed in are the same value.
   final List<_MeasuredStaffText> staffText;
+
+  /// The document's cues that hang on this bar, in document order, with their measured size.
+  /// Measured once and carried so that the row reserved above the bar and the box drawn in it are
+  /// the same value.
+  final List<_MeasuredTextCue> textCues;
   final bool startsSection;
   final String? sectionLabel;
 }
@@ -678,6 +937,29 @@ class _MeasuredStaffText {
   final String text;
 
   /// The box the line occupies, from the style's text metrics.
+  final LayoutSize size;
+}
+
+/// One text cue of the document that hangs on a bar, with the size its words measured to.
+class _MeasuredTextCue {
+  const _MeasuredTextCue({
+    required this.id,
+    required this.anchor,
+    required this.text,
+    required this.size,
+  });
+
+  /// The identity the document gave the cue, carried through to [PlacedTextCue] so the caller can
+  /// pair a placement with the cue it came from even when two cues share one anchor.
+  final String id;
+
+  /// The address the cue hangs on, which decides the column it starts at inside its bar.
+  final EventAnchor anchor;
+
+  /// The words to draw, exactly as the document stores them.
+  final String text;
+
+  /// The box the words occupy at a page scale of 1, from the style's text metrics.
   final LayoutSize size;
 }
 

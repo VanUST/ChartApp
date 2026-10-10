@@ -516,12 +516,19 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       _semitonesBySong[library.songs[index].index] ?? 0,
     );
     final PageMode mode = _lastPageMode ?? PageMode.pages;
+    // The cues belong in the calibration layout for the same reason they belong in the drawn one:
+    // the rows they reserve change where the bars sit, and a geometry probe that measured a
+    // cue-free page would aim a driving tool at a page nobody is looking at.
+    final List<TextCue> cues = _sessionFor(library.songs[index])
+        .document
+        .textCues;
     final List<PageLayout> pages;
     if (mode == PageMode.fit) {
       final FitOutcome outcome = _engine.fitToPage(
         displayed,
         pageWidth: _lastPageSurface.width,
         pageHeight: _lastPageSurface.height,
+        cues: cues,
       );
       final PageLayout? page = outcome.page;
       if (page == null) {
@@ -533,6 +540,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         displayed,
         pageWidth: _lastPageSurface.width,
         pageHeight: _lastPageSurface.height,
+        cues: cues,
       );
     }
     if (pages.isEmpty) {
@@ -1357,32 +1365,39 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
-  // PURPOSE: Turn every cue of the document into the pair the cue painter needs, skipping the ones
-  //          this page cannot place.
+  // PURPOSE: Turn every cue of the document into the triple the cue painter needs, skipping the
+  //          ones this page has no row for.
   //
-  //          THE ANCHOR IS RESOLVED HERE, ONCE PER REBUILD, BY THE SAME FUNCTION THE INK LAYER
-  //          USES, and that is the whole reason a cue stays on the bar it was written on: the
-  //          stored offset is measured from the anchor's own corner, so adding the corner's
-  //          position on THIS page moves the words with the music. A transposition re-engraves the
-  //          bars, the anchor resolves to the bar's new rectangle, and the cue's own offset is
-  //          untouched. A cue whose address is on another page of a paginated document is simply
-  //          not drawn here.
-  // INPUTS: page — the page being drawn. cues — every cue of the document, in render order.
-  // OUTPUTS: The cues that resolved, with the anchor's origin, in the document's own order — so two
-  //          cues on one bar are drawn in the order they were written, the later one over the
-  //          earlier one.
-  // KEYWORDS: cue-anchor-resolution, page-filter, render-order, fit-survival, transposition-survival
+  //          THE ROW IS READ OFF THE LAYOUT, ONCE PER REBUILD. The page was engraved WITH this
+  //          document's cues (`layout`/`fitToPage` are handed `session.document.textCues`), so the
+  //          engine already measured each cue and decided the box above the bar it hangs on. Looking
+  //          the box up here rather than re-deriving a position keeps the row the page gave up and
+  //          the plate the reader sees the same value: the address is still an `EventAnchor`, the
+  //          cue's own offset is still measured from the anchor's column, and the VERTICAL home is
+  //          the reserved row rather than the bar's top edge, which is what stops the words lying on
+  //          the chord under them. A cue whose address is on another page, or which was inserted
+  //          after the page was engraved, has no row here and is simply not drawn.
+  // INPUTS: page — the page being drawn, engraved with this document's cues. cues — every cue of the
+  //         document, in render order.
+  // OUTPUTS: The cues that have a row on this page, in the document's own order — so two cues on one
+  //          bar are drawn in the order they were written, the later one over the earlier one.
+  // KEYWORDS: cue-row-lookup, page-filter, render-order, fit-survival, transposition-survival
   List<ResolvedTextCue> _resolveCues(PageLayout page, List<TextCue> cues) {
+    final Map<String, PlacedTextCue> placedById = <String, PlacedTextCue>{};
+    for (final PlacedBar bar in page.bars) {
+      for (final PlacedTextCue placed in bar.textCues) {
+        placedById[placed.id] = placed;
+      }
+    }
     final List<ResolvedTextCue> resolved = <ResolvedTextCue>[];
     for (final TextCue cue in cues) {
-      final InkPlacement? placement = resolveEventAnchor(
-        page,
-        cue.place.anchor,
-      );
-      if (placement == null) {
+      final PlacedTextCue? placed = placedById[cue.id];
+      if (placed == null) {
         continue;
       }
-      resolved.add(ResolvedTextCue(cue: cue, origin: placement.origin));
+      resolved.add(
+        ResolvedTextCue(cue: cue, origin: placed.origin, size: placed.size),
+      );
     }
     return resolved;
   }
@@ -1846,6 +1861,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             displayed,
             pageWidth: pageWidth,
             pageHeight: pageHeight,
+            cues: textCues,
           );
           final PageLayout? page = outcome.page;
           if (page == null) {
@@ -1858,6 +1874,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           displayed,
           pageWidth: pageWidth,
           pageHeight: pageHeight,
+          cues: textCues,
         );
         if (pages.isEmpty) {
           return const Center(child: Text('This song has no bars.'));

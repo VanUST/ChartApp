@@ -28,6 +28,16 @@ enum ChartTextRole {
 
   /// Free text carried by a bar, such as a navigation phrase.
   staffText,
+
+  /// A phrase a musician writes ON the chart as a remark: `To Coda`, `D.C. al Fine`, `Solo`.
+  ///
+  /// A SEPARATE ROLE FROM [staffText], and not only because a cue is set larger. A cue is drawn
+  /// ABOVE its bar, in a row the layout reserves for it, so the height this role answers with is
+  /// not a detail of the drawing — it is the vertical room the page gives up to hold the remark.
+  /// Measuring it with [staffText] would reserve the room of a 10-pixel line for words drawn at
+  /// 16 and let the plate fall back onto the chord beneath, which is the defect this role exists
+  /// to close.
+  textCue,
 }
 
 /// Measures rendered text.
@@ -53,6 +63,7 @@ class FixedAdvanceTextMetrics implements TextMetrics {
     this.chordHeight = 18,
     this.sectionLabelHeight = 20,
     this.staffTextHeight = 16,
+    this.textCueHeight = 19,
   });
 
   /// Horizontal advance contributed by each character.
@@ -67,12 +78,17 @@ class FixedAdvanceTextMetrics implements TextMetrics {
   /// Line height of staff text.
   final double staffTextHeight;
 
+  /// Line height of a text cue, one step above [staffTextHeight] as a cue is one step above the
+  /// music it annotates.
+  final double textCueHeight;
+
   @override
   LayoutSize measure(String text, ChartTextRole role) {
     final double height = switch (role) {
       ChartTextRole.chord => chordHeight,
       ChartTextRole.sectionLabel => sectionLabelHeight,
       ChartTextRole.staffText => staffTextHeight,
+      ChartTextRole.textCue => textCueHeight,
     };
     if (text.isEmpty) {
       return LayoutSize(0, height);

@@ -113,6 +113,65 @@ class PlacedStaffText {
   String toString() => 'PlacedStaffText("$text") at $bounds';
 }
 
+/// One text cue placed above its bar, in the row the layout reserved for it.
+///
+/// A cue is NOT a [PlacedStaffText]. Staff text belongs to the song and hangs at the bottom of the
+/// bar it is stored on; a cue belongs to the document and hangs above the bar it is anchored to,
+/// in a row the page gives up out of its own height. What the two share is the reason this value
+/// exists at all: the layout measured the words and decided the box, so the painter draws the box
+/// it was handed instead of measuring a string a second time and hoping the two agree. Without a
+/// reserved row the cue's plate would fall back onto the chord beneath it, which is the defect a
+/// measured-and-published box closes.
+class PlacedTextCue {
+  /// Creates a placed cue for [text] with the given [origin] and [size].
+  const PlacedTextCue({
+    required this.id,
+    required this.text,
+    required this.origin,
+    required this.size,
+  });
+
+  /// The identity the document gave this cue.
+  ///
+  /// It travels with the placement because two cues may share one anchor — the model keeps both
+  /// rather than arbitrating — so an address cannot tell them apart and the caller needs the name.
+  final String id;
+
+  /// The words to draw, exactly as the document stores them.
+  final String text;
+
+  /// The top-left of the reserved row, in the page's engraved coordinates.
+  ///
+  /// The cue's own stored offset is measured from here, so this is the point that takes the place
+  /// of the anchor corner the painter used to resolve for itself: its x is the anchor's own left
+  /// edge, unchanged, and its y is the row the layout reserved above the stave.
+  final LayoutOffset origin;
+
+  /// The box the cue occupies, in the page's engraved coordinates.
+  ///
+  /// It is the PLATE's box, padding included, because the padding is part of how much room the cue
+  /// takes. It is expressed at the scale the page was engraved for, so multiplying it by
+  /// `PageLayout.scale` — the same one transform every other rectangle goes through — lands it on
+  /// the surface exactly. That is why a cue's row grows in engraved pixels as a fitted page
+  /// shrinks: the letters have their own legibility floor, so their box must be divided by the
+  /// page scale to stay the same size on the glass.
+  final LayoutSize size;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedTextCue &&
+      other.id == id &&
+      other.text == text &&
+      other.origin == origin &&
+      other.size == size;
+
+  @override
+  int get hashCode => Object.hash(id, text, origin, size);
+
+  @override
+  String toString() => 'PlacedTextCue($id, "$text") at $origin size $size';
+}
+
 /// A bar drawn at a position, together with its cells and the chords inside it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
@@ -123,6 +182,7 @@ class PlacedBar {
     required this.cells,
     required this.chords,
     this.staffText = const <PlacedStaffText>[],
+    this.textCues = const <PlacedTextCue>[],
   });
 
   /// The section the bar belongs to.
@@ -155,6 +215,16 @@ class PlacedBar {
   /// no staff text, which is the common case.
   final List<PlacedStaffText> staffText;
 
+  /// The text cues anchored to this bar, in document order.
+  ///
+  /// They sit in the rows the layout reserved ABOVE this bar's stave — so above [bounds], not
+  /// inside it — stacked upward from the stave so the first cue stays closest to the bar it
+  /// remarks on. The bar's own [bounds], its [cells] and its [chords] are untouched by a cue: a
+  /// remark reserves room from the page rather than moving the music. Empty for a bar no cue
+  /// names, which is the common case, and for a cue whose text is empty — a cue with nothing to
+  /// say gets no row.
+  final List<PlacedTextCue> textCues;
+
   @override
   bool operator ==(Object other) {
     if (other is! PlacedBar ||
@@ -163,7 +233,8 @@ class PlacedBar {
         other.bounds != bounds ||
         other.cells.length != cells.length ||
         other.chords.length != chords.length ||
-        other.staffText.length != staffText.length) {
+        other.staffText.length != staffText.length ||
+        other.textCues.length != textCues.length) {
       return false;
     }
     for (int index = 0; index < cells.length; index++) {
@@ -181,6 +252,11 @@ class PlacedBar {
         return false;
       }
     }
+    for (int index = 0; index < textCues.length; index++) {
+      if (other.textCues[index] != textCues[index]) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -192,6 +268,7 @@ class PlacedBar {
     Object.hashAll(cells),
     Object.hashAll(chords),
     Object.hashAll(staffText),
+    Object.hashAll(textCues),
   );
 
   @override
@@ -206,6 +283,7 @@ class PlacedSystem {
     required this.bars,
     this.sectionId,
     this.sectionLabel,
+    this.labelBand,
   });
 
   /// Where the system is drawn, including any section label above the stave.
@@ -223,12 +301,23 @@ class PlacedSystem {
   /// The label drawn above this system, or null when the system continues a section.
   final String? sectionLabel;
 
+  /// The band the section label is placed in, or null when there is no label.
+  ///
+  /// It is published rather than left to the painter to infer from the geometry because a system's
+  /// band above the stave now holds TWO things: the heading, which owns the top
+  /// `LayoutStyle.sectionLabelHeight` of it, and the cue rows, which own the rest. A painter that
+  /// centred the label in the whole band would put it among the cue rows and let a plate drawn over
+  /// them cover the letter that names the section. Publishing the band keeps the heading where it
+  /// was on every page that carries no cue, and above the words on every page that does.
+  final LayoutRect? labelBand;
+
   @override
   bool operator ==(Object other) {
     if (other is! PlacedSystem ||
         other.bounds != bounds ||
         other.sectionId != sectionId ||
         other.sectionLabel != sectionLabel ||
+        other.labelBand != labelBand ||
         other.bars.length != bars.length) {
       return false;
     }
@@ -241,8 +330,13 @@ class PlacedSystem {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(bounds, sectionId, sectionLabel, Object.hashAll(bars));
+  int get hashCode => Object.hash(
+    bounds,
+    sectionId,
+    sectionLabel,
+    labelBand,
+    Object.hashAll(bars),
+  );
 
   @override
   String toString() =>
