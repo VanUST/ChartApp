@@ -56,5 +56,6 @@ part 'section_events.dart';
 part 'setlist.dart';
 part 'setlist_events.dart';
 part 'sign_events.dart';
+part 'song_events.dart';
 part 'text_cue.dart';
 part 'textcue_events.dart';

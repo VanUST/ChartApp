@@ -9,11 +9,18 @@
 //         downloaded.
 // OUTPUTS: One line per check on stdout, the document the loop produced, and a summary line with
 //          the check and failure counts as the exit code. The comparisons that matter are stated in
-//          full: DOC_EQUAL before/after undo, ROUND_TRIP_EQUAL, and the operation types the log
-//          holds at each step. This file imports no Flutter, which is why plain `dart run` executes
-//          it.
+//          full: DOC_EQUAL before/after undo, ROUND_TRIP_DOCUMENT_EQUAL, and the operation types
+//          the log holds at each step. This file imports no Flutter, which is why plain `dart run`
+//          executes it.
+//
+//          THE ROUND TRIP IS PROVED WITH A TAIL THAT IS NOT IDEMPOTENT, BY REOPENING. The saved
+//          session carries a bar taken out, a bar put in, a style and a tempo, and a stroke; a
+//          `chord.update` would be harmless applied twice, which is how this probe was green while
+//          a real edited chart could not be reopened. The snapshot written is the session's base
+//          document, and the check that counts is REOPENED_DOCUMENT_EQUAL — a session opened from
+//          the file holds the chart that was saved.
 // KEYWORDS: probe, edit-loop, chord-palette, op-log, undo, redo, exact-restore, chart-file,
-//           round-trip, evidence, dart-io
+//           round-trip, reopen, non-idempotent, evidence, dart-io
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -235,13 +242,69 @@ Future<void> main() async {
     empty.document == DocumentState(song: probeChart()),
   );
 
-  // --- 6. THE SAVED DOCUMENT SURVIVES THE ROUND TRIP -----------------------------------------
-  // The session is at the state produced by section 4: one edit applied, redone, and a log of three
-  // operations. What is written is the document AND that log, which is what the container's format
-  // is for.
+  // --- 6. NON-IDEMPOTENT EDITS, BECAUSE AN IDEMPOTENT TAIL HIDES THE DEFECT --------------------
+  //
+  // Everything above changed a chord, and a `chord.update` applied twice replaces the chord at its
+  // address with the same value the second time — so a reader that ran the tail a second time would
+  // still produce the right chart, and this probe was green on a property it never tested. The
+  // operations below are the ones where a second application is a DIFFERENT document: a bar taken
+  // out, a bar put in, a style and a tempo, and a stroke — whose second application is refused
+  // outright, because the document already holds a stroke with that id.
+  final int barsBeforeEdits = session.song.writtenBarCount;
+  final int barsInSection = session.song.sectionById(_section)!.bars.length;
+  _same(
+    'edit.delete_bar_applied',
+    true,
+    session.deleteBar(sectionId: _section, barIndex: 0),
+  );
+  _same(
+    'edit.insert_bar_applied',
+    true,
+    session.insertBarAfter(sectionId: _section, barIndex: 0),
+  );
+  _same(
+    'edit.song_update_applied',
+    true,
+    session.updateSong(style: 'Ballad', tempo: 90),
+  );
+  session.apply(
+    InkStrokeAddEvent(
+      docId: session.docId,
+      seq: session.seq,
+      index: 0,
+      stroke: InkStroke(
+        id: 'ink-edit-probe',
+        tool: StrokeTool.pen,
+        color: '#102a43',
+        size: 3,
+        anchor: EventAnchor(sectionId: _section, bar: 0, beat: 0),
+        points: const <InkPoint>[
+          InkPoint(x: 1.5, y: 2.5, w: 0.4, t: 0),
+          InkPoint(x: 8.0, y: 4.0, w: 0.8, t: 11),
+        ],
+      ),
+    ),
+  );
   final DocumentState savedDocument = session.document;
+  stdout.writeln(
+    'edit.base_bars=${session.baseDocument.song.writtenBarCount} '
+    'bars_before=$barsBeforeEdits bars_section_before=$barsInSection '
+    'bars_after=${savedDocument.song.writtenBarCount} '
+    'section_bars_after=${savedDocument.song.sectionById(_section)!.bars.length} '
+    'strokes=${savedDocument.strokes.length} '
+    'style=${savedDocument.song.style} tempo=${savedDocument.song.tempo} '
+    'operations=${session.log.length} '
+    'types=${session.log.map((ChartEvent event) => event.type).toList()}',
+  );
+
+  // --- 6b. THE SNAPSHOT IS THE BASE, AND REOPENING IS THE PROOF --------------------------------
+  //
+  // The snapshot written is the session's BASE document — the state before its log — because the
+  // container's document is the snapshot PLUS the operations. Writing the CURRENT document here,
+  // with the log beside it, is what let this probe pass while a chart with an inserted bar and a
+  // stroke could not be reopened at all.
   final ChartFile file = chartFileFor(
-    savedDocument,
+    session.baseDocument,
     events: session.log,
     modifiedAt: DateTime.utc(2026, 10, 10, 19, 30),
   );
@@ -263,6 +326,16 @@ Future<void> main() async {
   _same('roundtrip.file_equals_the_file_that_was_saved', file, decoded.file);
   _same('no_warnings', 0, decoded.warnings.length);
   _same(
+    'roundtrip.snapshot_is_the_base_document',
+    session.baseDocument,
+    decoded.file.snapshot,
+  );
+  _same(
+    'roundtrip.tail_is_the_operations',
+    true,
+    _sameEvents(decoded.file.events, session.log),
+  );
+  _same(
     'ROUND_TRIP_DOCUMENT_EQUAL',
     true,
     savedDocument == decoded.file.reducedDocument,
@@ -274,20 +347,8 @@ Future<void> main() async {
   );
   _same(
     'ROUND_TRIP_operation_types',
-    'chord.update,chord.update,chord.update',
-    decoded.file.events.map((ChartEvent e) => e.type).join(','),
-  );
-  _same(
-    'ROUND_TRIP_edited_cell',
-    'Ebmaj7',
-    _render(
-      decoded.file.reducedDocument.song
-          .barAt(_section, _bar)
-          ?.chords
-          .firstWhere((BeatChord c) => c.beat == _beat)
-          .chord,
-      decoded.file.reducedDocument.song.key,
-    ),
+    session.log.map((ChartEvent event) => event.type).join(','),
+    decoded.file.events.map((ChartEvent event) => event.type).join(','),
   );
   _same(
     'ROUND_TRIP_bar_addresses',
@@ -295,40 +356,73 @@ Future<void> main() async {
     _addressesOf(decoded.file.reducedDocument),
   );
 
-  // --- 7. A SESSION CONTINUES THE LOG IT READ -------------------------------------------------
-  final EditSession reopened = EditSession(
-    document: decoded.file.reducedDocument,
+  // A SESSION OPENED THE WAY THE VIEWER OPENS ONE must hold the chart that was saved: same bars,
+  // same strokes, same style and tempo. This is the proof; the comparisons above are bookkeeping.
+  final EditSession reopenedSession = EditSession(
+    document: decoded.file.snapshot,
     docId: decoded.file.metadata.docId,
     seq: decoded.file.events.last.seq,
     restored: decoded.file.events,
   );
   _same(
-    'resume.log_is_the_file_tail',
-    'chord.update,chord.update,chord.update',
-    reopened.log.map((ChartEvent e) => e.type).join(','),
+    'REOPENED_DOCUMENT_EQUAL',
+    true,
+    reopenedSession.document == savedDocument,
   );
-  final bool resumed = reopened.applyChordToCell(
+  _same(
+    'REOPENED_bar_count',
+    savedDocument.song.writtenBarCount,
+    reopenedSession.song.writtenBarCount,
+  );
+  _same(
+    'REOPENED_stroke_count',
+    savedDocument.strokes.length,
+    reopenedSession.document.strokes.length,
+  );
+  _same(
+    'REOPENED_style_and_tempo',
+    '${savedDocument.song.style}/${savedDocument.song.tempo}',
+    '${reopenedSession.song.style}/${reopenedSession.song.tempo}',
+  );
+  stdout.writeln(
+    'reopened bars=${reopenedSession.song.writtenBarCount} '
+    'strokes=${reopenedSession.document.strokes.length} '
+    'style=${reopenedSession.song.style} tempo=${reopenedSession.song.tempo} '
+    'seq=${reopenedSession.seq}',
+  );
+
+  // --- 7. A SESSION CONTINUES THE LOG IT READ -------------------------------------------------
+  _same(
+    'resume.log_is_the_file_tail',
+    true,
+    _sameEvents(reopenedSession.log, session.log),
+  );
+  final bool resumed = reopenedSession.applyChordToCell(
     sectionId: _section,
     barIndex: _bar,
     beat: _beat,
     chord: chordOf(flatThree, ChordQuality.minorSeventh),
   );
   _same('resume.applied', true, resumed);
-  _same('resume.seq_continues', 4, reopened.seq);
+  _same(
+    'resume.seq_continues',
+    decoded.file.events.last.seq + 1,
+    reopenedSession.seq,
+  );
   _same(
     'resume.log_tail_is_appended',
-    'chord.update,chord.update,chord.update,chord.update',
-    reopened.log.map((ChartEvent e) => e.type).join(','),
+    session.log.length + 1,
+    reopenedSession.log.length,
   );
   final ChartFileEncodeResult resumedEncoded = ChartFileCodec.encode(
-    chartFileFor(reopened.document, events: reopened.log),
+    chartFileFor(reopenedSession.baseDocument, events: reopenedSession.log),
   );
   final ChartFile resumedDecoded = ChartFileCodec.decode(resumedEncoded.bytes)
       .file;
   _same(
     'resume.a_file_written_after_reopening_is_read_again',
     true,
-    reopened.document == resumedDecoded.reducedDocument,
+    reopenedSession.document == resumedDecoded.reducedDocument,
   );
 
   directory.deleteSync(recursive: true);
@@ -412,4 +506,20 @@ void _same(String what, Object? expected, Object? actual) {
   stdout.writeln('[FAIL] $what');
   stdout.writeln('    expected: $expected');
   stdout.writeln('    actual:   $actual');
+}
+
+/// Whether two operation tails hold equal events in the same order.
+///
+/// A `List`'s own `==` is identity, so a tail compared with it would report a difference that is not
+/// there — the same class of mistake as trusting an idempotent tail to prove a round trip.
+bool _sameEvents(List<ChartEvent> left, List<ChartEvent> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (int index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
 }

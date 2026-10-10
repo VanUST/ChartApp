@@ -61,6 +61,8 @@ class SceneBar extends StatelessWidget {
     required this.pageMode,
     required this.onOpenKeyGrid,
     required this.onPageModeChanged,
+    required this.onEditTempo,
+    required this.onEditStyle,
   });
 
   /// The displayed song's one-based position in the loaded playlist.
@@ -84,6 +86,16 @@ class SceneBar extends StatelessWidget {
   /// Called when the musician picks the other page mode.
   final ValueChanged<PageMode> onPageModeChanged;
 
+  /// Called when the BPM field is pressed, to edit the tempo where it is read.
+  ///
+  /// The tempo and the style are the two facts in this bar a musician changes while working, and
+  /// they are displayed here rather than inside a menu, so the edit belongs here too: a field that
+  /// shows a value and cannot change it is text, not a control.
+  final VoidCallback onEditTempo;
+
+  /// Called when the STYLE field is pressed, to edit the style where it is read.
+  final VoidCallback onEditStyle;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -105,12 +117,14 @@ class SceneBar extends StatelessWidget {
             fieldKey: 'scene-bar-bpm',
             caption: 'BPM',
             value: song.tempo > 0 ? '${song.tempo}' : '—',
+            onTap: onEditTempo,
           ),
           _separator(),
           _Field(
             fieldKey: 'scene-bar-style',
             caption: 'STYLE',
             value: song.style.isEmpty ? '—' : song.style,
+            onTap: onEditStyle,
           ),
           _separator(),
           _KeyBadge(
@@ -176,13 +190,18 @@ String repeatSummary(Song song) {
   return parts.isEmpty ? 'none' : parts.join(' · ');
 }
 
-/// One captioned value in the bar.
+/// One captioned value in the bar, pressable when the value it shows can be changed here.
 class _Field extends StatelessWidget {
   /// Creates a field with a [caption] above its [value], carrying [fieldKey] for tests.
+  ///
+  /// [onTap] makes the field a control: the reading is then also the handle that edits it, which is
+  /// what keeps a musician from hunting a menu for a value they can already see. A field without
+  /// one is a reading and stays plain text, so the two are told apart by whether the bar reacts.
   const _Field({
     required this.fieldKey,
     required this.caption,
     required this.value,
+    this.onTap,
   });
 
   /// The value.
@@ -194,30 +213,46 @@ class _Field extends StatelessWidget {
   /// The widget key the tests find this field by.
   final String fieldKey;
 
+  /// What a press does, or null when this value cannot be changed from the bar.
+  final VoidCallback? onTap;
+
   @override
-  Widget build(BuildContext context) => Column(
-    key: ValueKey<String>(fieldKey),
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: <Widget>[
-      Text(
-        caption,
-        style: const TextStyle(
-          color: sceneBarCaptionColor,
-          fontSize: 11,
-          letterSpacing: 1.2,
+  Widget build(BuildContext context) {
+    final Widget reading = Column(
+      key: ValueKey<String>(fieldKey),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          caption,
+          style: const TextStyle(
+            color: sceneBarCaptionColor,
+            fontSize: 11,
+            letterSpacing: 1.2,
+          ),
         ),
-      ),
-      Text(
-        value,
-        style: const TextStyle(
-          color: sceneBarTextColor,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
+        Text(
+          value,
+          style: const TextStyle(
+            color: sceneBarTextColor,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
         ),
+      ],
+    );
+    if (onTap == null) {
+      return reading;
+    }
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: reading,
       ),
-    ],
-  );
+    );
+  }
 }
 
 /// The key the chart is shown in, and the handle that opens the twelve-key grid.

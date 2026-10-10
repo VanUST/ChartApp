@@ -239,6 +239,13 @@ abstract final class EventCodec {
           fromKey: ModelJson.decodeKey(EventJson.object(payload, 'fromKey')),
           toKey: ModelJson.decodeKey(EventJson.object(payload, 'toKey')),
         );
+      case 'song.update':
+        return SongUpdateEvent(
+          docId: docId,
+          seq: seq,
+          from: ModelJson.decodeSongMetadata(EventJson.object(payload, 'from')),
+          to: ModelJson.decodeSongMetadata(EventJson.object(payload, 'to')),
+        );
       case 'ink.stroke.add':
         return InkStrokeAddEvent(
           docId: docId,

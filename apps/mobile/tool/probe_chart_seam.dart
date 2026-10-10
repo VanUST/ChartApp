@@ -3,12 +3,21 @@
 //          through the same io seam the button uses, read back through the same seam, and decoded
 //          into the song it started as. A codec round trip inside `chart_core` says nothing about
 //          whether the app wires it up; this does.
+//
+//          IT ALSO SAVES AN EDITED SESSION, WITH A TAIL THAT IS NOT IDEMPOTENT, AND REOPENS IT. That
+//          is the case a musician meets and the one this seam was blind to: the checks below the
+//          first block store a document with NO tail, and a tail of chord updates happens to be
+//          harmless when applied twice, so both said the round trip worked while a chart with an
+//          inserted bar, a deleted bar, a changed tempo and a handwritten stroke could not be
+//          reopened at all. A bar insert applied twice is two bars; a stroke applied twice is
+//          refused; those are the operations this probe now carries.
 // INPUTS: None. The fixture is a synthetic iReal payload built here, so nothing is read from the
 //         owner's machine.
 // OUTPUTS: One block per check on stdout, a summary line and an exit code: 0 when every check held,
 //          1 when one did not. Every expected failure prints the exception TYPE and MESSAGE it
 //          caught. This file imports no Flutter, which is why plain `dart run` can execute it.
-// KEYWORDS: probe, chart-file, app-seam, save, open, round-trip, dart-io, evidence
+// KEYWORDS: probe, chart-file, app-seam, save, open, round-trip, reopen, non-idempotent, dart-io,
+//           evidence
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -123,6 +132,130 @@ Future<void> main() async {
     'the file is whole again after the damage',
     true,
     _bytesEqual(valid, restored),
+  );
+
+  // --- THE APP-SHAPED ROUND TRIP, WITH A TAIL THAT IS NOT IDEMPOTENT ----------------------------
+  //
+  // The checks above save a document with NO tail, which is the one case where the writer's shape
+  // cannot be wrong. The button saves a SESSION: a base document plus the operations made since it.
+  // This section saves exactly that, with edits chosen because applying them twice gives a
+  // DIFFERENT document — a bar put in, a bar taken out, a tempo changed and a stroke added — and it
+  // proves the round trip the way a musician meets it: save, close, open, and find the same chart.
+  //
+  // Why these four and not a chord change: a `chord.update` is idempotent by address, so a reader
+  // that applied the tail twice would produce the right chart and hide the defect. That is how this
+  // seam was green while a real edited chart could not be reopened at all.
+  final String sectionId = entry.song.sections.first.id;
+  final EditSession session = EditSession(
+    document: DocumentState(song: entry.song),
+  );
+  final String insertedBar = 'ink-seam-1';
+  _same(
+    'the session inserted a bar',
+    true,
+    session.insertBarAfter(sectionId: sectionId, barIndex: 0),
+  );
+  _same(
+    'the session deleted a bar',
+    true,
+    session.deleteBar(sectionId: sectionId, barIndex: 2),
+  );
+  _same(
+    'the session changed the tempo',
+    true,
+    session.updateSong(style: 'Ballad', tempo: 90),
+  );
+  session.apply(
+    InkStrokeAddEvent(
+      docId: session.docId,
+      seq: session.seq,
+      index: 0,
+      stroke: InkStroke(
+        id: insertedBar,
+        tool: StrokeTool.pen,
+        color: '#102a43',
+        size: 3,
+        anchor: EventAnchor(sectionId: sectionId, bar: 1, beat: 0),
+        points: const <InkPoint>[
+          InkPoint(x: 2.0, y: 3.0, w: 0.4, t: 0),
+          InkPoint(x: 9.0, y: 5.0, w: 0.8, t: 12),
+        ],
+      ),
+    ),
+  );
+  final DocumentState edited = session.document;
+  stdout.writeln(
+    'edit.base_bars=${session.baseDocument.song.writtenBarCount} '
+    'edited_bars=${edited.song.writtenBarCount} '
+    'strokes=${edited.strokes.length} '
+    'style=${edited.song.style} tempo=${edited.song.tempo} '
+    'operations=${session.log.length} '
+    'types=${session.log.map((ChartEvent event) => event.type).toList()}',
+  );
+
+  final String editedPath =
+      '${directory.path}${Platform.pathSeparator}edited.chart';
+  final ChartFile editedFile = chartFileFor(
+    // THE BASE, NOT THE CURRENT DOCUMENT. The container's document is the snapshot PLUS the
+    // operations, so the snapshot has to be the state before them.
+    session.baseDocument,
+    events: session.log,
+    modifiedAt: DateTime.utc(2026, 10, 10, 19, 30),
+  );
+  await saveChartFile(editedPath, ChartFileCodec.encode(editedFile).bytes);
+  final ChartFileDecodeResult reread = await readAndDecode(editedPath);
+
+  _same(
+    'the reread snapshot is the state the session started from',
+    session.baseDocument,
+    reread.file.snapshot,
+  );
+  _same(
+    'the reread tail is the operations that were made',
+    true,
+    _sameList<ChartEvent>(reread.file.events, session.log),
+  );
+  _same(
+    'the reread document is the document that was saved',
+    edited,
+    reread.file.reducedDocument,
+  );
+
+  // THE PROOF IS REOPENING, NOT ARITHMETIC: a session opened the way the viewer opens one must hold
+  // the chart that was saved, bar for bar, stroke for stroke and style for style.
+  final EditSession reopenedSession = EditSession(
+    document: reread.file.snapshot,
+    docId: reread.file.metadata.docId,
+    seq: reread.file.events.last.seq,
+    restored: reread.file.events,
+  );
+  _same(
+    'REOPENED_DOCUMENT_EQUAL the reopened chart is the saved chart',
+    true,
+    reopenedSession.document == edited,
+  );
+  _same(
+    'the reopened chart has the same bars',
+    edited.song.writtenBarCount,
+    reopenedSession.document.song.writtenBarCount,
+  );
+  _same(
+    'the reopened chart has the same strokes',
+    edited.strokes.length,
+    reopenedSession.document.strokes.length,
+  );
+  _same(
+    'the reopened chart carries the edited style and tempo',
+    'Ballad/90',
+    '${reopenedSession.document.song.style}/'
+        '${reopenedSession.document.song.tempo}',
+  );
+  stdout.writeln(
+    'reopened bars=${reopenedSession.document.song.writtenBarCount} '
+    'strokes=${reopenedSession.document.strokes.length} '
+    'style=${reopenedSession.document.song.style} '
+    'tempo=${reopenedSession.document.song.tempo} '
+    'seq=${reopenedSession.seq}',
   );
 
   directory.deleteSync(recursive: true);

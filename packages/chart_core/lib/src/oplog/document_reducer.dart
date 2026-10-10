@@ -118,6 +118,9 @@ abstract final class DocumentReducer {
     final KeyTransposeEvent e => state.copyWith(
       song: _transposedSong(state.song, e.semitones, e.toKey),
     ),
+    final SongUpdateEvent e => state.copyWith(
+      song: state.song.withMetadata(e.to),
+    ),
     final InkStrokeAddEvent e => _withStrokeInserted(state, e.index, e.stroke),
     final InkStrokeDeleteEvent e => _withStrokeRemoved(state, e.stroke),
     final AnnotationInsertEvent e => _withAnnotationInserted(

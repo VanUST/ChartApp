@@ -381,6 +381,25 @@ List<ChartEvent> _chartEvents() => <ChartEvent>[
     from: AnchoredPlace(anchor: _atA0Beat2, offsetX: -3.5, offsetY: 2.25),
     to: AnchoredPlace(anchor: _atB1Bar, offsetX: 0.5, offsetY: 0.5),
   ),
+  // Every one of the four metadata fields differs from the song's own, so a field mapped to the
+  // wrong slot — a style written into the composer, a tempo read as the title — changes the value
+  // instead of coinciding with it.
+  const SongUpdateEvent(
+    docId: 'doc-1',
+    seq: 28,
+    from: SongMetadata(
+      title: 'Paper Kite',
+      composer: 'A. Nonymous',
+      style: 'Medium Swing',
+      tempo: 132,
+    ),
+    to: SongMetadata(
+      title: 'Paper Kite (live)',
+      composer: 'Anonymous',
+      style: 'Ballad',
+      tempo: 64,
+    ),
+  ),
 ];
 
 /// Every setlist event, applied to the setlist above.
@@ -594,6 +613,29 @@ void main() {
           toKey: Key(tonic: _d, mode: Mode.major),
         ),
       ),
+      'song.update': (
+        '{"v":1,"docId":"doc-1","seq":28,"type":"song.update",'
+            '"payload":{"from":{"title":"Paper Kite","composer":"A. Nonymous",'
+            '"style":"Medium Swing","tempo":132},'
+            '"to":{"title":"Paper Kite (live)","composer":"Anonymous",'
+            '"style":"Ballad","tempo":64}}}',
+        const SongUpdateEvent(
+          docId: 'doc-1',
+          seq: 28,
+          from: SongMetadata(
+            title: 'Paper Kite',
+            composer: 'A. Nonymous',
+            style: 'Medium Swing',
+            tempo: 132,
+          ),
+          to: SongMetadata(
+            title: 'Paper Kite (live)',
+            composer: 'Anonymous',
+            style: 'Ballad',
+            tempo: 64,
+          ),
+        ),
+      ),
       'ink.stroke.add': (
         '{"v":1,"docId":"doc-1","seq":18,"anchor":{"sectionId":"doc-a",'
             '"bar":7,"beat":3,"step":1},'
@@ -805,6 +847,29 @@ void main() {
       expect(
         () => EventCodec.decode(json),
         throwsA(isA<EventFormatException>()),
+      );
+    });
+
+    test('a song.update that names only the field being changed is reported '
+        'rather than defaulted', () {
+      // The event is whole-value on both sides, because its inverse is the same four fields
+      // swapped: a payload carrying only the changed field would leave the inverse unable to name
+      // the values it must restore, and a default would make a truncated event look like an edit
+      // that cleared a title. Absent is therefore a typed failure.
+      final Map<String, Object?> json = _json(
+        '{"v":1,"docId":"doc-1","seq":28,"type":"song.update",'
+        '"payload":{"from":{"title":"a","composer":"b","style":"c","tempo":120},'
+        '"to":{"tempo":90}}}',
+      );
+      expect(
+        () => EventCodec.decode(json),
+        throwsA(
+          isA<EventFormatException>().having(
+            (EventFormatException e) => e.message,
+            'message',
+            contains('title'),
+          ),
+        ),
       );
     });
 

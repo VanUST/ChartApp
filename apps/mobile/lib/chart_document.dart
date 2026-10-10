@@ -32,14 +32,19 @@ import 'package:chart_core/chart_core.dart';
 const String untitledDocumentId = EditSession.untitledDocumentId;
 
 // PURPOSE: Build the document a session is saved as.
-// INPUTS: document — the document to write, whose song is the WRITTEN chart and never the
-//         transposed view. events — the operations applied since the snapshot, in log order; the
-//         empty list is an ordinary document with no log rather than a special case. modifiedAt —
-//         the instant to record, or null to record none; nothing here reads a clock.
+// INPUTS: document — the state to write, whose song is the WRITTEN chart and never the transposed
+//         view. It must be the document BEFORE [events], which is `EditSession.baseDocument` for a
+//         session that has been edited; passing the session's CURRENT document instead would store
+//         every operation twice, because the container defines the document as the snapshot plus
+//         the operations. events — the operations applied since that state, in log order; the empty
+//         list is an ordinary document with no log rather than a special case. modifiedAt — the
+//         instant to record, or null to record none; nothing here reads a clock.
 // OUTPUTS: A [ChartFile] carrying that document, that tail and no attachments. The document id is
 //          the song's own id when it has one, so the operations a restored session appended — which
-//          were written under that same id — are accepted by the container's own check.
-// KEYWORDS: chart-file, snapshot, operation-tail, written-form, metadata, doc-id
+//          were written under that same id — are accepted by the container's own check. Reducing
+//          the result returns the document the musician was looking at, which is the property a
+//          round trip has to have: reopening a file must not run its own history a second time.
+// KEYWORDS: chart-file, snapshot, operation-tail, written-form, metadata, doc-id, base-document
 /// Returns the `.chart` document that represents [document] with [events] applied since it.
 ChartFile chartFileFor(
   DocumentState document, {

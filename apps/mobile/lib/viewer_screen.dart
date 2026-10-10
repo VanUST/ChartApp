@@ -1,23 +1,35 @@
 // PURPOSE: Show the songs an iReal export contains, render the selected one as a chart a musician
 //          can read — in the key they choose, with the whole tune on one page or paginated, and
-//          with the performance facts on one bar — and let them CHANGE a chord in it.
+//          with the performance facts on one bar — and let them CHANGE a chord in it or WRITE ON it
+//          with a pen.
 //          It is a reader and an editor: it shows the layout the engine produced, the issue list the
-//          import reported, and the chord palette for the cell they selected.
+//          import reported, the chord palette for the cell they selected, and the handwriting layer
+//          an ink mode turns on.
 // INPUTS: A reference the reader supplies, an [IRealLibraryLoader] that turns that reference into
 //         an [IRealLibrary], a starting reference, whether a reference is a filesystem path at all,
 //         and whether to load the starting reference on the first frame. The loader is injected so
 //         a widget test can pump this screen with a synthetic payload and never touch the
 //         filesystem, and so the web build can hand it a browser file chooser instead of a path.
-// OUTPUTS: A screen with a source bar, a chart save/open bar, undo and redo, a song list, a scene
-//          bar and the selected song's page or pages, each drawn by `ChartPainter` at the size the
-//          window gives it. A tap on a page selects the bar and cell under it, the painter
-//          highlights them, and a line above the page states the selected position in words. Tapping
-//          that line opens the chord palette for the selected cell; a chord chosen there is applied
-//          through the operation log and redrawn, and undo and redo move that same log back and
-//          forth.
+// OUTPUTS: A screen with a source bar, a chart save/open bar, an ink switch, undo and redo, a
+//          bars-and-sections switch, a song list, a scene bar and the selected song's page or pages,
+//          each drawn by `ChartPainter` at
+//          the size the window gives it and covered by an `InkPainter` carrying the document's
+//          strokes. A tap on a page selects the bar and cell under it, the painter highlights them,
+//          and a line above the page states the selected position in words. Tapping that line opens
+//          the chord palette for a selected cell and the bars-and-sections sheet for a bar-level
+//          selection; a chord chosen in the palette is applied through the
+//          operation log and redrawn, and undo and redo move that same log back and forth. With ink
+//          on, a contact the palm rule admits is drawn into a stroke and appended to the same log,
+//          and a contact it refuses still selects.
 // KEYWORDS: viewer, ireal, reader, editor, screen, page-view, transposition, scene-bar, page-modes,
-//           chord-palette, op-log, undo, redo, chart-file, save, open, widget-test-seam,
-//           platform-seam, verification
+//           chord-palette, ink-mode, ink-layer, op-log, undo, redo, chart-file, save, open,
+//           song-form, bars, sections, widget-test-seam, platform-seam, verification
+//
+// WHERE THE INK LIVES. A stroke reaches the document through the same door a chord does: the ink
+// layer assembles it and calls `EditSession.apply`, and nothing else writes to the document. What
+// the page shows is the document's own stroke list, placed by each stroke's anchor, so an undo, a
+// redo, a transposition and a save all agree about the ink for the same reason they agree about the
+// music.
 //
 // WHERE AN EDIT LIVES. Each song shown has one [EditSession], created the first time the song is
 // reached and kept until a different library is loaded. The session — not this widget's state and
@@ -51,6 +63,7 @@
 // `packages/chart_core/lib/src/transposition.dart` for the same note beside the operation itself.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
@@ -60,10 +73,16 @@ import 'package:flutter/material.dart' hide Key;
 
 import 'chart_file_bar.dart';
 import 'chord_palette_sheet.dart';
+import 'ink_capture_surface.dart';
+import 'ink_layer.dart';
+import 'ink_pointer_probe.dart';
+import 'ink_pointer_probe_contract.dart';
 import 'ireal_library.dart';
 import 'ireal_source.dart';
 import 'key_grid.dart';
 import 'scene_bar.dart';
+import 'song_form_sheet.dart';
+import 'song_metadata_sheet.dart';
 
 /// Turns a reference into the library it holds.
 ///
@@ -178,6 +197,57 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// replacement renumbers positions.
   final Map<int, EditSession> _sessions = <int, EditSession>{};
 
+  /// The ink capture layer of each loaded song, by [IRealSong.index].
+  ///
+  /// Held beside [_sessions] rather than inside it for the same reason `_selection` is held outside:
+  /// it is per-screen state about a session, not part of the document. It is recreated with its
+  /// session, because a layer that outlived the session it writes to would append strokes to a
+  /// document that no longer exists.
+  final Map<int, InkCaptureLayer> _inkLayers = <int, InkCaptureLayer>{};
+
+  /// The layer the raw pointer probe currently reports to, or null before a song is shown.
+  ///
+  /// One probe is installed for the lifetime of the screen and it must reach whichever song is on
+  /// screen; this is the wire between them, set whenever a layer is reached for.
+  InkCaptureLayer? _activeInkLayer;
+
+  /// The installed raw pointer probe, or null on a target that has no browser to observe.
+  ///
+  /// It is read by [_inkInputReport], which is the application's side of the delivery measurement:
+  /// the browser's own numbers and the framework's, taken from the same page at the same moment.
+  InkProbeControl? _inkProbe;
+
+  /// The page scale of the page last drawn, which the probe state reports.
+  ///
+  /// Kept as a field because the state is published from a pointer handler, where the painter that
+  /// produced the page is no longer in scope, and because a scale is the one layout fact a
+  /// verification of the ink transform needs to know.
+  double _lastPageScale = 1;
+
+  /// The surface the page was last laid out for, in logical pixels.
+  ///
+  /// Kept for the same reason as [_lastPageScale], and used by [_pageGeometry] to reproduce the
+  /// layout a verification is aiming at. It starts as zero, so a geometry asked for before the first
+  /// layout answers with an empty page rather than with a guess.
+  Size _lastPageSurface = Size.zero;
+
+  /// The page mode the last frame was drawn in, or null before one was.
+  ///
+  /// Read rather than re-derived, because the mode follows the pane width and only the pane's own
+  /// layout pass knows it: a guess here would report a fitted page's geometry for an ordinary one,
+  /// and the two disagree about where every cell is.
+  PageMode? _lastPageMode;
+
+  /// The last probe state published, so a rebuild that changes nothing writes nothing.
+  String? _publishedInkState;
+
+  /// Whether the contact that started the current tap was one the ink rule admitted.
+  ///
+  /// Set when the tap begins and read when it completes, because the two callbacks are the only two
+  /// moments at which the answer is known: the rule decided at the pointer's own down, and by the up
+  /// the layer has already committed the stroke and cleared the decision.
+  bool _tapWasInk = false;
+
   // PURPOSE: Return the session of one song, opening it against the song as loaded the first time
   //          the song is reached.
   // INPUTS: entry — the loaded song.
@@ -192,6 +262,41 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       docId: entry.song.id,
     ),
   );
+
+  // PURPOSE: Return the ink capture layer of one song, created against that song's session the first
+  //          time a stroke needs it and reused afterwards.
+  // INPUTS: entry — the loaded song, whose session the layer writes through.
+  // OUTPUTS: The layer, created on first use. It is keyed by the same index as the session and is
+  //          built FROM the session, so a stroke appended here lands in the log the page is drawn
+  //          from and the undo button reverses. It also becomes the layer the raw pointer probe
+  //          reports to, which is why this assignment exists at all: the probe outlives a song and
+  //          the layer does not.
+  // KEYWORDS: ink-layer, lazy-creation, per-song, session-bound, probe-target
+  InkCaptureLayer _inkFor(IRealSong entry) {
+    final InkCaptureLayer layer = _inkLayers.putIfAbsent(
+      entry.index,
+      () => InkCaptureLayer(session: _sessionFor(entry)),
+    );
+    _activeInkLayer = layer;
+    return layer;
+  }
+
+  // PURPOSE: Report whether ink is on for the song on screen, for the app-bar control.
+  // INPUTS: None; reads the library and the selected index.
+  // OUTPUTS: True when a layer exists and its mode is on. False before any layer exists, because a
+  //          song nobody has drawn on has ink off: a control that claimed otherwise would light up
+  //          for a mode the next contact would not honour.
+  // KEYWORDS: ink-mode, app-bar-state, default-off, null-when-empty
+  bool get _inkOn {
+    final IRealLibrary? library = _library;
+    if (library == null || library.songs.isEmpty) {
+      return false;
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    return _inkLayers[library.songs[index].index]?.inkMode ?? false;
+  }
 
   // PURPOSE: Return the session of the song currently selected, for the app bar, which has no song
   //          entry of its own.
@@ -216,6 +321,18 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   void initState() {
     super.initState();
     _pathController = TextEditingController(text: widget.initialPath);
+    // The probe is installed HERE, once, and not in a build method: a listener added on every build
+    // would be added a hundred times, and the browser would then call the handler a hundred times
+    // per event while the counters still looked plausible.
+    _inkProbe = InkInputProbe.install(onRawSample: _recordRawInkSample);
+    // The live reader, so an inspecting tool reads the state of THIS screen at the moment it asks.
+    // A detached callback is cleared in dispose, or a disposed state would answer a call with
+    // setState on an unmounted widget the next time anything asked.
+    inkStateReader = _inkProbeState;
+    strokeCountReader = () => (_inkProbeState()['n'] as int?) ?? 0;
+    inkInputCountersReader = () =>
+        _activeInkLayer?.inputReport ?? const <String, Object?>{};
+    pageGeometryReader = _pageGeometry;
     if (widget.autoLoad) {
       // Deferred to after the first frame so the window paints before a file read is started.
       WidgetsBinding.instance.addPostFrameCallback((Duration _) {
@@ -229,7 +346,211 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   @override
   void dispose() {
     _pathController.dispose();
+    // Cleared rather than left dangling: a reader that outlived the screen would answer an
+    // inspecting tool with the last state this screen ever held, which reads as a live chart.
+    inkStateReader = noInkStatePublished;
+    strokeCountReader = noStrokesPublished;
+    inkInputCountersReader = noInkStatePublished;
+    pageGeometryReader = noInkStatePublished;
     super.dispose();
+  }
+
+  // PURPOSE: Take one raw browser pointer sample and forward the contact width it carries to the
+  //          layer that will decide what the contact means.
+  // INPUTS: sample — one sample exactly as the browser delivered it, before Flutter mapped it.
+  // OUTPUTS: Nothing. Only the width is forwarded: the position, the pressure and the tilt reach
+  //          the layer through the framework's own event, and forwarding them twice would let the
+  //          two streams disagree about a stroke that is already being assembled from one of them.
+  //
+  //          The width is forwarded because the framework drops it — Flutter's web pointer binding
+  //          never reads the DOM event's `width`, so the framework's own contact radius arrives as
+  //          zero and the width half of the palm rule would never fire without this.
+  // KEYWORDS: raw-width-bridge, browser-to-dart, one-field-only, palm-rule-input
+  void _recordRawInkSample(InkProbeSample sample) {
+    final InkCaptureLayer? layer = _activeInkLayer;
+    if (layer == null || sample.pointerType == 'pen') {
+      return;
+    }
+    layer.recordRawContact(
+      pointerType: sample.pointerType,
+      width: sample.width,
+      browserTimeMs: sample.browserTimeMs,
+    );
+  }
+
+  // PURPOSE: Report the ink input measurement, which is the application's answer to "what does this
+  //          platform actually deliver to the pen" — taken from the two streams on the same page at
+  //          the same moment rather than from one of them.
+  // INPUTS: None; reads the installed probe and the active layer.
+  // OUTPUTS: A map with the browser's own tallies under `raw` and the framework's under `flutters`,
+  //          plus the ink state that says whether a run drew anything. On a target with no browser
+  //          the probe reports `supported: false` and both halves are empty, which is "not measured"
+  //          rather than zero.
+  // KEYWORDS: delivery-measurement, two-streams, pressure, tilt, width, honest-zero, report
+  Map<String, Object?> inkInputReport() {
+    final InkProbeControl? probe = _inkProbe;
+    final InkCaptureLayer? layer = _activeInkLayer;
+    return <String, Object?>{
+      'name': 'ink.input.report',
+      'probeSupported': probe?.supported ?? false,
+      'raw': probe?.report() ?? const <String, Object?>{},
+      'flutters': layer?.inputReport ?? const <String, Object?>{},
+      'rule': layer?.ruleReport ?? const <String, Object?>{},
+    };
+  }
+
+  // PURPOSE: Describe what a browser-driving verification needs to read: the pen's state, the two
+  //          input streams' tallies, the page transform, and every stroke with the anchor it was
+  //          stored against. Without this a headless run can draw and photograph but cannot check a
+  //          single number, because the application's Dart objects are unreachable from outside.
+  // INPUTS: None; reads the current session, page, layer and probe.
+  // OUTPUTS: A map, empty when nothing is on screen. It is built on demand and never cached: a
+  //          cached copy would be read right after input and answer with the state from before it,
+  //          which looks exactly like input that did nothing.
+  // KEYWORDS: verification-handoff, live-state, stroke-list, anchor, page-scale, no-cache
+  Map<String, Object?> _inkProbeState() {
+    final IRealLibrary? library = _library;
+    final InkCaptureLayer? layer = _activeInkLayer;
+    if (library == null || library.songs.isEmpty || layer == null) {
+      return const <String, Object?>{};
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    final EditSession session = _sessionFor(library.songs[index]);
+    final InkProbeControl? probe = _inkProbe;
+    return <String, Object?>{
+      'n': session.document.strokes.length,
+      'undo': session.undoDepth,
+      'redo': session.redoDepth,
+      'seq': session.seq,
+      'ink': layer.inkMode,
+      'scale': _lastPageScale,
+      'contact': layer.lastPointWasInk,
+      'flutters': layer.inputReport,
+      'raw': probe?.report() ?? const <String, Object?>{},
+      'rule': layer.ruleReport,
+      'strokes': <Object?>[
+        for (final InkStroke stroke in session.document.strokes)
+          <String, Object?>{
+            'id': stroke.id,
+            'sec': stroke.anchor.sectionId,
+            'bar': stroke.anchor.bar,
+            'beat': stroke.anchor.beat,
+            'step': stroke.anchor.step,
+            'pts': stroke.points.length,
+            'p0': <double>[stroke.points.first.x, stroke.points.first.y],
+            't': stroke.points.last.t,
+          },
+      ],
+    };
+  }
+
+  // PURPOSE: Describe the page on screen in the coordinates an input event arrives in, so a
+  //          verification can aim a pen at a named cell instead of estimating a pixel from a picture.
+  // INPUTS: None; reads the painter and layout of the page currently shown.
+  // OUTPUTS: A map with the page's index and scale, the surface rectangle implied by that scale, the
+  //          first cell of the first bar as an aim point, and every bar with the centre of its cells.
+  //          An empty map when no page is on screen.
+  //
+  //          THE COORDINATES ARE SURFACE logical pixels: the page's engraved rectangles multiplied by
+  //          its own scale, which is exactly the space `_onPagePointerDown` receives a contact in.
+  //          Reporting the engraved rectangles instead would be right on an ordinary page and wrong
+  //          on a fitted one, which is the same trap `pagePointOf` exists to close.
+  //
+  //          HOW A BROWSER-DRIVING TOOL MUST CLICK, MEASURED RATHER THAN ASSUMED. These numbers are
+  //          relative to the PAGE WIDGET, and the tool needs coordinates relative to the window, so
+  //          it has to add the widget's origin once. Two facts about that, both observed while
+  //          driving the built web app headlessly:
+  //
+  //          1. WITH FLUTTER WEB SEMANTICS ENABLED, A CLICK ON A TAPPABLE NODE IS DELIVERED AS A
+  //             CENTRE TAP: the framework synthesises a pointer at the middle of the semantic node
+  //             instead of using the point that was clicked, so aiming at the chart by coordinate
+  //             lands on the centre of the page whatever was clicked. Chart aiming must therefore be
+  //             done with semantics OFF and raw pointer coordinates; buttons are the opposite case
+  //             and are best clicked through their semantic node, where the centre is the target.
+  //          2. THE PAGE WIDGET'S ORIGIN IS FOUND ONCE PER LAYOUT AND ADDED TO EVERY CELL. On the
+  //             1400x900 window used for that run the song list and divider put it at x = 261, and
+  //             the rows above the chart put it at y = 311, so a cell reported at (139.3, 72.0) is
+  //             clicked at (400, 383) — which the app logged back as `surface=(139.3,72.0)`. Those
+  //             two numbers are a measurement of THAT window, not constants: recompute them if the
+  //             viewport, the theme or the rows above the chart change.
+  // KEYWORDS: verification-handoff, page-geometry, surface-coordinates, fit-scale, aim-point,
+  //           semantics-centre-tap, driving-calibration, measured-origin
+  Map<String, Object?> _pageGeometry() {
+    final IRealLibrary? library = _library;
+    if (library == null || library.songs.isEmpty) {
+      return const <String, Object?>{};
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    final Song displayed = _displayedSong(
+      library.songs[index],
+      _semitonesBySong[library.songs[index].index] ?? 0,
+    );
+    final PageMode mode = _lastPageMode ?? PageMode.pages;
+    final List<PageLayout> pages;
+    if (mode == PageMode.fit) {
+      final FitOutcome outcome = _engine.fitToPage(
+        displayed,
+        pageWidth: _lastPageSurface.width,
+        pageHeight: _lastPageSurface.height,
+      );
+      final PageLayout? page = outcome.page;
+      if (page == null) {
+        return const <String, Object?>{};
+      }
+      pages = <PageLayout>[page];
+    } else {
+      pages = _engine.layout(
+        displayed,
+        pageWidth: _lastPageSurface.width,
+        pageHeight: _lastPageSurface.height,
+      );
+    }
+    if (pages.isEmpty) {
+      return const <String, Object?>{};
+    }
+    final PageLayout page = pages.first;
+    final double scale = page.scale;
+    return <String, Object?>{
+      'page': page.index,
+      'mode': mode.name,
+      'scale': scale,
+      'surface': <double>[page.size.width * scale, page.size.height * scale],
+      'cells': <Object?>[
+        for (final PlacedBar bar in page.bars)
+          for (final PlacedCell cell in bar.cells)
+            <String, Object?>{
+              'sec': bar.sectionId,
+              'bar': bar.barIndex,
+              'beat': cell.beat,
+              'x': (cell.bounds.left + cell.bounds.size.width / 2) * scale,
+              'y': (cell.bounds.top + cell.bounds.size.height / 2) * scale,
+            },
+      ],
+    };
+  }
+
+  // PURPOSE: Publish the state, so a browser-driving tool that cannot call into Dart still has a
+  //          copy of it, and so a log line records the moment it changed.
+  // INPUTS: None.
+  // OUTPUTS: Nothing when the state is empty or unchanged. The published line is a convenience, not
+  //          the source of truth: the live reader is what a verification should call, because this
+  //          one is written during a build and is therefore as old as the last frame.
+  // KEYWORDS: verification-handoff, publish, change-guard, convenience-copy
+  void _publishInkState() {
+    final Map<String, Object?> state = _inkProbeState();
+    if (state.isEmpty) {
+      return;
+    }
+    final String line = jsonEncode(state);
+    if (line == _publishedInkState) {
+      return;
+    }
+    _publishedInkState = line;
+    publishInkProbeState(line);
   }
 
   // PURPOSE: Replace the shown library with the one the current path holds, or record why it could
@@ -257,8 +578,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         _semitonesBySong.clear();
         // An index means a different song in a new library, so every session in the old one names
         // music that is no longer loaded. Dropping them is what keeps an edit from being applied to
-        // whatever happens to sit at that index now.
+        // whatever happens to sit at that index now. The ink layers go with them for the same
+        // reason: a layer holds the session it writes through.
         _sessions.clear();
+        _inkLayers.clear();
         // A section id and a bar index from the previous library name different music here, so a
         // selection carried across a load would point at whatever happens to sit at that address.
         _selection = null;
@@ -331,14 +654,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
     if (!mounted || picked == null || !picked.available) {
       debugPrint(
-        'viewer.transpose.cancelled song="${entry.title}" '
+        'viewer.transpose.cancelled song="${_titleFor(entry)}" '
         'picked=${picked == null ? 'none' : picked.key}',
       );
       return;
     }
     setState(() => _semitonesBySong[entry.index] = picked.semitones);
     debugPrint(
-      'viewer.transpose.ok song="${entry.title}" written=${entry.song.key} '
+      'viewer.transpose.ok song="${_titleFor(entry)}" written=${entry.song.key} '
       'shown=${picked.key} semitones=${picked.semitones}',
     );
   }
@@ -375,8 +698,33 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         : transposeSong(song, semitones, toKey: _keyFor(song.key, semitones));
   }
 
+  // PURPOSE: Give the title to SHOW for one loaded song, which is the edited one once the song has
+  //          been opened — a rename has to reach every place the name is read, or one screen says
+  //          the new name and the list beside it says the old one.
+  // INPUTS: entry — the song as loaded, whose index names a session if one exists.
+  // OUTPUTS: The session's title when that song has a session, the loaded title otherwise, and
+  //          `Untitled` for an empty one — the same fallback `IRealSong.title` applies, so the two
+  //          agree before anything is edited. The session is looked up in the map and NOT created:
+  //          listing a library must not open a document for every song in it just to read a name.
+  // KEYWORDS: title, edited-metadata, session-source, untitled-fallback, no-eager-session
+  String _titleFor(IRealSong entry) {
+    final String title = _sessions[entry.index]?.song.title ?? entry.song.title;
+    return title.isEmpty ? 'Untitled' : title;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final Widget screen = _buildScreen(context);
+    // AFTER the tree is described, not before: the ink layer is created on the way down, by the pane
+    // that needs it, so a publish that ran first would always read a layer that does not exist yet.
+    // The call is a no-op on every target without a browser, and a no-op here when the line matches
+    // the last one published.
+    _publishInkState();
+    return screen;
+  }
+
+  /// Describes the screen: the app bar, the source bar, the body and the status line.
+  Widget _buildScreen(BuildContext context) {
     final String? error = _error;
     final EditSession? session = _currentSession;
     return Scaffold(
@@ -387,6 +735,18 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         // log produced. They are disabled rather than hidden when there is nothing to reverse, so
         // the pair keeps its place in the bar and a musician's hand learns where it is.
         actions: <Widget>[
+          // The ink switch stands first because it changes what a pen DOES, and a musician about to
+          // write needs it under their thumb before anything else in this bar. It is disabled when
+          // there is no chart, and its icon and tooltip state the mode in words, because a toggle
+          // whose only signal is a colour is not discoverable.
+          IconButton(
+            key: const ValueKey<String>('viewer-ink-toggle'),
+            icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
+            tooltip: _inkOn
+                ? 'Drawing: the pen draws, a finger still selects'
+                : 'Selecting: the pen and a finger both select',
+            onPressed: session == null ? null : () => _toggleInk(session),
+          ),
           IconButton(
             key: const ValueKey<String>('viewer-undo'),
             icon: const Icon(Icons.undo),
@@ -402,6 +762,22 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             onPressed: session != null && session.canRedo
                 ? () => _redo(session)
                 : null,
+          ),
+          // --- BARS AND SECTIONS (form editing, owner decision D17) -----------------------------
+          // An app-bar action rather than a row in the body: a body row costs the chart height, and
+          // D13's FIT refuses to shrink a chart past the legible floor (the `.chart` control's move
+          // into this bar, in `chart_file_bar.dart`, is that mistake measured). It is disabled until
+          // a bar is selected, because every operation in its sheet acts on the selected bar's
+          // section and index. This button, the `_openSongForm` method below `_redo`, and the
+          // bar-level branch of `_buildSelectionLine` are the whole of this feature's footprint in
+          // this file.
+          IconButton(
+            key: const ValueKey<String>('viewer-form'),
+            icon: const Icon(Icons.segment),
+            tooltip: 'Bars and sections (the form)',
+            onPressed: session == null || _selection == null
+                ? null
+                : () => _openSongForm(context, session),
           ),
           // Where a path exists, the chart document itself can be named and moved. The action renders
           // nothing in a browser, so the source bar below stays the only file control there. It lives
@@ -427,15 +803,46 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
-  // PURPOSE: Give the save/open action the document to write, which must be the WRITTEN one and not
-  //          the one on screen, together with the operation tail that produced it.
+  // PURPOSE: Turn pen drawing on or off for the song on screen, which is the whole of the mode
+  //          switch a musician needs: with it on a pen lays ink and a finger still selects, with it
+  //          off a pen selects like a finger.
+  // INPUTS: session — the session of the song on screen, from which the layer is reached.
+  // OUTPUTS: Nothing. Rebuilds the screen so the control's own state is shown. The layer is looked up
+  //          through the selected song rather than passed in, because the app bar has no song entry
+  //          of its own and the layer belongs to whichever song the body is drawing.
+  // KEYWORDS: ink-mode, toggle, pen-vs-finger, rebuild, structured-log
+  void _toggleInk(EditSession session) {
+    final IRealLibrary? library = _library;
+    if (library == null || library.songs.isEmpty) {
+      return;
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    final IRealSong entry = library.songs[index];
+    final InkCaptureLayer layer = _inkFor(entry);
+    final bool next = !layer.inkMode;
+    layer.inkMode = next;
+    setState(() {});
+    _publishInkState();
+    debugPrint(
+      'viewer.ink.toggle song="${_titleFor(entry)}" on=$next '
+      'strokes=${layer.strokeCount} session_matches=${identical(session, _sessionFor(entry))}',
+    );
+  }
+
+  // PURPOSE: Give the save/open action the state a `.chart` file must store as its snapshot, which
+  //          is the WRITTEN chart before its own operation tail rather than the chart on screen.
   // INPUTS: None; reads the library and the selection.
-  // OUTPUTS: The selected song's session document, or null when nothing is loaded. The document is
+  // OUTPUTS: The selected song's session BASE document, or null when nothing is loaded. The base and
+  //          not the current document, because the container's document is the snapshot PLUS the
+  //          operations: writing the current one with the tail beside it stores every edit twice,
+  //          and reopening then inserts every bar again and removes a second one. The document is
   //          handed over as a whole rather than as a song because a `.chart` file stores a snapshot
   //          plus a log, and the log lives on the session; a selected index outside the library —
   //          which only a library replacement can produce — is treated as the first song, the same
   //          rule [_buildBody] uses.
-  // KEYWORDS: written-form, selection, save-source, operation-tail, null-when-empty
+  // KEYWORDS: written-form, selection, save-source, base-document, operation-tail, null-when-empty
   DocumentState? get _documentOfSelection {
     final IRealLibrary? library = _library;
     if (library == null || library.songs.isEmpty) {
@@ -444,20 +851,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
         ? _selectedSong
         : 0;
-    return _sessionFor(library.songs[index]).document;
+    return _sessionFor(library.songs[index]).baseDocument;
   }
 
   // PURPOSE: Replace the shown library with the one song a `.chart` file produced, so the chart the
   //          file describes is the one on screen, and seed its session from the operation tail the
   //          file carried.
-  // INPUTS: opened — the document the container's snapshot and tail reduce to, and the tail itself.
+  // INPUTS: opened — the file's SNAPSHOT, which is the state before the tail, and the tail itself.
   // OUTPUTS: Nothing. The library becomes a single-song one, the selection returns to the first
   //          song, and every remembered transposition and the current hit selection are cleared:
   //          both are addressed by an index or a section id that names different music now. The
-  //          file's tail is carried into the session as RESTORED events, so the sequence numbers the
-  //          file recorded are not reissued: `(docId, seq)` addresses a log row, and a session that
+  //          file's tail is carried into the session as RESTORED events, which the session folds
+  //          over the snapshot so the page shows the chart the writer saw, and whose sequence
+  //          numbers are then not reissued: `(docId, seq)` addresses a log row, and a session that
   //          restarted at 1 would produce two events claiming the same position.
-  // KEYWORDS: open-chart, adopt-document, restored-log, seq-continuation, state-reset
+  // KEYWORDS: open-chart, adopt-snapshot, restored-log, seq-continuation, state-reset
   void _adoptOpenedSong(OpenedChart opened) {
     setState(() {
       _library = IRealLibrary(
@@ -474,6 +882,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           seq: _highestSeq(opened.events),
           restored: opened.events,
         );
+      // A layer holds the session it writes through, so the one belonging to the replaced library
+      // must not survive: a stroke appended through it would go to a document nothing is showing.
+      _inkLayers.clear();
       _selection = null;
       _error = null;
     });
@@ -606,8 +1017,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // INPUTS: context — the build context. library — the loaded songs.
   // OUTPUTS: A scrollable list. Each row names the song, its bar count, the key it is shown in and,
   //          when there are any, its issue count. A transposed song shows the move, so the list
-  //          says which charts are no longer in their written key.
-  // KEYWORDS: song-list, selection, issue-count, shown-key, written-key
+  //          says which charts are no longer in their written key. A song whose session exists
+  //          reports the NAME and bar count of the EDITED chart, so the row and the pane beside it
+  //          cannot disagree about a chart the musician just changed — a rename that reached the
+  //          page's own header and not this list would be two names for one song. A song nobody has
+  //          opened reports the loaded values, and no session is created just to read them.
+  // KEYWORDS: song-list, selection, issue-count, shown-key, written-key, edited-title, edited-count
   Widget _buildSongList(BuildContext context, IRealLibrary library) {
     return ListView.builder(
       itemCount: library.songs.length,
@@ -617,14 +1032,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         final String keyLabel = semitones == 0
             ? '${entry.song.key}'
             : '${entry.song.key} → ${_keyFor(entry.song.key, semitones)}';
+        final Song summarySong = _sessions[entry.index]?.song ?? entry.song;
         final String subtitle =
-            '${entry.song.writtenBarCount} bar(s) · $keyLabel'
+            '${summarySong.writtenBarCount} bar(s) · $keyLabel'
             '${entry.issues.isEmpty ? '' : ' · ${entry.issues.length} issue(s)'}';
         return ListTile(
           dense: true,
           selected: index == _selectedSong,
           title: Text(
-            entry.title,
+            _titleFor(entry),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -648,8 +1064,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          chart in the chosen key and page mode.
   // INPUTS: context — the build context. library — the loaded songs. songIndex — which one.
   // OUTPUTS: A column widget. The title stays visible above the scene bar because the song's name
-  //          is the one thing the scene bar does not repeat.
-  // KEYWORDS: song-pane, title, scene-bar, issue-button, pages
+  //          is the one thing the scene bar does not repeat, and it is also the handle that opens
+  //          the song-info sheet: the title is where a song's own facts are read, so it is where
+  //          they are edited. The bar count beside it counts the
+  //          chart the SESSION holds, not the one that was loaded: inserting or deleting a bar
+  //          changes that number, and a header still claiming the imported count would be
+  //          describing a page the musician is no longer looking at.
+  // KEYWORDS: song-pane, title, bar-count, edited-form, scene-bar, issue-button, pages
   Widget _buildSongPane(
     BuildContext context,
     IRealLibrary library,
@@ -658,6 +1079,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final IRealSong entry = library.songs[songIndex];
     final int semitones = _semitonesBySong[entry.index] ?? 0;
     final Song displayed = _displayedSong(entry, semitones);
+    final EditSession session = _sessionFor(entry);
+    // The strokes come from the document the SESSION holds, which is the written chart, and they are
+    // placed by address against the page on screen. A transposition therefore moves the music and
+    // the ink together without either being transformed.
+    final InkCaptureLayer layer = _inkFor(entry);
+    final List<InkStroke> strokes = session.document.strokes;
     // The mode follows the PANE the chart is drawn in, not the window. The song list takes a fixed
     // slice off the left, so a window the mode would call a tablet can leave a chart area narrower
     // than the default assumes — on the owner's tablet that is 824 logical pixels of window against
@@ -673,15 +1100,46 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
               child: Row(
                 children: <Widget>[
+                  // The title is where the song's own facts are read, so it is where they are
+                  // edited: tapping it opens the sheet that holds the title, the composer, the style
+                  // and the tempo. The pencil is what says so — a title that silently turns out to
+                  // be a button is not discoverable on its own.
                   Expanded(
-                    child: Text(
-                      entry.title,
-                      style: Theme.of(context).textTheme.titleMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: Tooltip(
+                      message: 'Song info: title, composer, style and tempo',
+                      child: InkWell(
+                        key: const ValueKey<String>('viewer-song-info'),
+                        onTap: () => _openSongInfo(
+                          context,
+                          session,
+                          SongMetadataField.title,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Flexible(
+                              child: Text(
+                                _titleFor(entry),
+                                style: Theme.of(context).textTheme.titleMedium,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.edit_outlined,
+                              size: 14,
+                              color: Color(0xFF486581),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  Text('${entry.song.writtenBarCount} bar(s)'),
+                  // The EDITED count, which is what the page under it is drawn from. Transposition
+                  // does not change how many bars a chart has, so `displayed` and the written
+                  // session document agree on this number and either would do; the displayed one is
+                  // already here.
+                  Text('${displayed.writtenBarCount} bar(s)'),
                   if (entry.issues.isNotEmpty) ...<Widget>[
                     const SizedBox(width: 8),
                     TextButton(
@@ -701,10 +1159,19 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               onOpenKeyGrid: () => unawaited(_chooseKey(entry)),
               onPageModeChanged: (PageMode picked) =>
                   setState(() => _chosenPageMode = picked),
+              // The tempo and the style are edited where they are shown. The sheet is one surface
+              // for all four facts and opens with the tapped field focused, so the tempo a musician
+              // pressed is the tempo the cursor is in.
+              onEditTempo: () =>
+                  _openSongInfo(context, session, SongMetadataField.tempo),
+              onEditStyle: () =>
+                  _openSongInfo(context, session, SongMetadataField.style),
             ),
             const SizedBox(height: 6),
             _buildSelectionLine(context, displayed),
-            Expanded(child: _buildPages(entry, displayed, mode)),
+            Expanded(
+              child: _buildPages(entry, displayed, mode, layer, strokes),
+            ),
           ],
         );
       },
@@ -724,27 +1191,185 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       _chosenPageMode ??
       (paneWidth >= sceneBarTabletWidth ? PageMode.fit : PageMode.pages);
 
-  // PURPOSE: One page of the chart, with the touch that turns a point on the glass into a selection.
+  // PURPOSE: One page of the chart: the music, the ink committed to this page, the stroke currently
+  //          under the pen, and the touch that turns a point on the glass into a selection.
   // INPUTS: page — the laid-out page to draw and hit-test against. song — the model it came from,
-  //         handed to the painter for the signs the layout does not carry.
-  // OUTPUTS: The page wrapped in a gesture detector that reports a completed tap. The detector is
-  //          OPAQUE because the page paints no widget over most of its area; without that, a tap on
-  //          the white space between two systems — exactly where a musician may miss — would fall
-  //          through instead of clearing the selection.
-  // KEYWORDS: page-widget, gesture-detector, tap, opaque, selection-entry
-  Widget _tappablePage(PageLayout page, Song song) => GestureDetector(
-    behavior: HitTestBehavior.opaque,
-    onTapUp: (TapUpDetails details) => _select(page, details.localPosition),
-    child: CustomPaint(
-      painter: ChartPainter(
-        song: song,
-        page: page,
-        metrics: _metrics,
-        selection: _selection,
+  //         handed to the painter for the signs the layout does not carry. layer — the ink capture
+  //         layer of the song on screen, which decides what a contact means and which strokes this
+  //         page carries. strokes — every committed stroke of the document, filtered to this page.
+  // OUTPUTS: The page as a stack of the chart painter and the ink painter, wrapped in an outer
+  //          listener that feeds the ink layer and an inner gesture detector that turns a tap into a
+  //          selection.
+  //
+  //          WHY THE INK OUTER AND THE TAP INNER, AND WHY THAT ORDER IS NOT ARBITRARY. Flutter
+  //          dispatches a pointer event to the hit-test path from the deepest target outward, so the
+  //          ink layer — being the OUTER widget — sees the lift AFTER the inner tap recogniser
+  //          requested its pointer, but a gesture is only resolved once every handler for that event
+  //          has run. That is what puts the commit before the selection decision, and it is
+  //          load-bearing: with the two the other way round, the lift handler ran before
+  //          `endStroke` had added the stroke, asked the document how many strokes it held, was told
+  //          zero, and skipped the rebuild. The stroke reached the log and not the screen, and the
+  //          undo button stayed greyed out until something unrelated happened to rebuild the page —
+  //          measured on the web target with the app's own log line reading `strokes=0 rebuild=false`
+  //          immediately before `ink.stroke.commit`.
+  //
+  //          The tap path is OPAQUE through the outer listener, so a contact on the white space
+  //          between two systems — exactly where a musician may miss — is still reported and clears
+  //          the selection.
+  // KEYWORDS: page-widget, pointer-listener, dispatch-order, ink-overlay, tap-vs-stroke,
+  //           selection-entry, commit-before-select
+  Widget _tappablePage(
+    PageLayout page,
+    Song song,
+    InkCaptureLayer layer,
+    List<InkStroke> strokes,
+  ) => RawPointerCapture(
+    layer: layer,
+    page: page,
+    child: Listener(
+      // Only the live stroke is handled here: the layer above has already been given the sample, and
+      // this listener exists so the page repaints while the pen is down. A move the layer did not
+      // take — a finger, or a pen with the mode off — rebuilds nothing.
+      onPointerMove: (PointerMoveEvent event) => _onPagePointerMove(),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (TapDownDetails details) => _onPageTapDown(layer, details),
+        onTapUp: (TapUpDetails details) => _onPageTapUp(page, details),
+        onTapCancel: _onPageTapCancel,
+        child: _layeredPage(page, song, layer, strokes),
       ),
-      child: const SizedBox.expand(),
     ),
   );
+
+  // PURPOSE: Repaint the page while a stroke is being drawn, so the musician sees their own line
+  //          before they lift the pen.
+  // INPUTS: None; the ink layer is asked whether a contact is drawing.
+  // OUTPUTS: Nothing. The rebuild happens only while a contact is actually drawing, so a finger tap
+  //          and a pen with the mode off do not rebuild on every sample.
+  // KEYWORDS: live-preview-repaint, guarded-rebuild
+  void _onPagePointerMove() {
+    if (_activeInkLayer?.isDrawingInk ?? false) {
+      setState(() {});
+      _publishInkState();
+    }
+  }
+
+  // PURPOSE: Stack the chart and the ink, with both painters positioned by the same page transform.
+  // INPUTS: page, song and the two stroke sources, as in [_tappablePage].
+  // OUTPUTS: The page widget. The ink layer is drawn AFTER the chart so a mark lies over the music
+  //          it annotates, and both are given the page's own scale, which is what keeps them in one
+  //          coordinate system rather than two that agree until the page is fitted.
+  // KEYWORDS: painter-stack, ink-over-chart, shared-scale, one-coordinate-system
+  Widget _layeredPage(
+    PageLayout page,
+    Song song,
+    InkCaptureLayer layer,
+    List<InkStroke> strokes,
+  ) {
+    final List<ResolvedInkStroke> committed = _resolveStrokes(page, strokes);
+    final List<ResolvedInkStroke> live = layer.liveStrokes
+        .where((ResolvedInkStroke resolved) => _isOnPage(page, resolved))
+        .toList();
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        CustomPaint(
+          painter: ChartPainter(
+            song: song,
+            page: page,
+            metrics: _metrics,
+            selection: _selection,
+          ),
+          child: const SizedBox.expand(),
+        ),
+        CustomPaint(
+          painter: InkPainter(
+            strokes: <ResolvedInkStroke>[...committed, ...live],
+            pageScale: page.scale,
+          ),
+          child: const SizedBox.expand(),
+        ),
+      ],
+    );
+  }
+
+  // PURPOSE: Turn every committed stroke into the pair a painter needs, skipping the ones this page
+  //          cannot place.
+  //
+  //          THE ANCHOR IS RESOLVED HERE, ONCE PER REBUILD, AGAINST THE PAGE ON SCREEN, and that is
+  //          the whole reason a stroke stays where the musician put it. The stored coordinates are
+  //          measured from the anchor's own corner, so adding the corner's position on THIS page
+  //          moves the ink with the music: a transposition re-engraves the bars, the anchor resolves
+  //          to the bar's new rectangle, and the stroke's own geometry is untouched. A stroke whose
+  //          address is on another page of a paginated document is simply not drawn here.
+  // INPUTS: page — the page being drawn. strokes — every stroke of the document, in render order.
+  // OUTPUTS: The strokes that resolved, with the anchor's origin, in the document's own order.
+  // KEYWORDS: anchor-resolution, page-filter, render-order, transposition-survival, fit-survival
+  List<ResolvedInkStroke> _resolveStrokes(
+    PageLayout page,
+    List<InkStroke> strokes,
+  ) {
+    final List<ResolvedInkStroke> resolved = <ResolvedInkStroke>[];
+    for (final InkStroke stroke in strokes) {
+      final InkPlacement? placement = resolveEventAnchor(page, stroke.anchor);
+      if (placement == null) {
+        continue;
+      }
+      resolved.add(ResolvedInkStroke(stroke: stroke, origin: placement.origin));
+    }
+    return resolved;
+  }
+
+  // PURPOSE: Report whether a live stroke belongs on the page being drawn.
+  // INPUTS: page — the page. resolved — a stroke being drawn, whose anchor is known.
+  // OUTPUTS: True when this page holds the anchor's address.
+  // KEYWORDS: live-preview-filter, page-identity, anchor-address
+  bool _isOnPage(PageLayout page, ResolvedInkStroke resolved) =>
+      resolveEventAnchor(page, resolved.stroke.anchor) != null;
+
+  // PURPOSE: Note whether the contact that is about to tap was one the ink rule admitted, so a
+  //          stroke does not also select the bar under it.
+  // INPUTS: layer — the ink layer, whose last decision is the answer. details — the tap's start.
+  // OUTPUTS: Nothing. The layer is asked rather than the event, because the rule that decided is the
+  //          layer's and evaluating it a second time here is how the two could come to disagree.
+  // KEYWORDS: tap-down, ink-suppresses-selection, single-evaluation
+  void _onPageTapDown(InkCaptureLayer layer, TapDownDetails details) {
+    _tapWasInk = layer.lastPointWasInk;
+  }
+
+  // PURPOSE: Report that a tap was refused by the gesture arena — a drag, or a second pointer — so
+  //          the flag set at its start does not leak into the next tap.
+  // INPUTS: None.
+  // OUTPUTS: Nothing.
+  // KEYWORDS: tap-cancel, flag-reset
+  void _onPageTapCancel() {
+    _tapWasInk = false;
+  }
+
+  // PURPOSE: Turn a completed tap into a selection, and do nothing for a contact that drew.
+  //
+  //          IT RUNS AFTER THE STROKE WAS COMMITTED, and that ordering is what lets it repaint: a
+  //          gesture is resolved only once every pointer handler for the lift has run, and the ink
+  //          layer's own handler is on a widget ABOVE this recogniser in the hit-test path, so
+  //          `endStroke` has already appended the stroke to the document by the time this is called.
+  // INPUTS: page — the page the tap landed on. details — the tap, whose local position is in the
+  //         page's surface.
+  // OUTPUTS: Nothing. It rebuilds when the contact drew, so the new stroke is painted and the undo
+  //          control becomes live; it selects otherwise, and clears the selection on a miss.
+  // KEYWORDS: tap-up, commit-then-repaint, selection, fit-scale, no-select-after-stroke
+  void _onPageTapUp(PageLayout page, TapUpDetails details) {
+    final bool drew = _tapWasInk;
+    _tapWasInk = false;
+    if (drew) {
+      // The contact laid ink: the document changed under this frame, so the page and the app bar are
+      // both out of date. No selection is made — the bar under a stroke is not what the musician
+      // asked for.
+      setState(() {});
+      _publishInkState();
+      return;
+    }
+    _select(page, details.localPosition);
+  }
 
   // PURPOSE: Turn a completed tap on a page into a selection, converting the surface point into the
   //          page's own coordinates first, so a fitted page is hit where it is DRAWN rather than
@@ -848,21 +1473,112 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
+  // PURPOSE: Open the bars-and-sections sheet for the bar the musician selected, which is the entry
+  //          to every operation that changes the FORM of the tune rather than the chords in it.
+  // INPUTS: context — where to open the sheet. session — the session of the song on screen, reached
+  //         from the app bar, which has no song entry of its own.
+  // OUTPUTS: Nothing. Does nothing when no bar is selected, or when the selection's address no
+  //          longer names a bar — which a form edit made earlier in the same sheet can produce.
+  //          Otherwise the sheet edits through the session and the screen rebuilds after every
+  //          applied operation.
+  //
+  //          WHY THE SELECTION IS DROPPED AND NOT MOVED. The selection is a hit-test result against
+  //          the layout on screen, and a form edit moves the very address that produced it: an
+  //          inserted bar shifts every later index by one, so the hit would go on naming its old
+  //          index and the painter would highlight the bar next door — a highlight that was right
+  //          when it was taken and is wrong now. The sheet keeps its own cursor and prints on its
+  //          own header which bar the next operation acts on, so the address is not lost; only the
+  //          highlight, which is a photograph of an older layout, is.
+  // KEYWORDS: form-entry, bars, sections, selection-drop, rebuild-on-apply, structured-log
+  void _openSongForm(BuildContext context, EditSession session) {
+    final ChartHit? hit = _selection;
+    if (hit == null) {
+      debugPrint('viewer.form.open.skipped reason=no-selection');
+      return;
+    }
+    if (session.song.barAt(hit.sectionId, hit.barIndex) == null) {
+      debugPrint(
+        'viewer.form.open.skipped reason=stale-address '
+        'section=${hit.sectionId} bar=${hit.barIndex}',
+      );
+      return;
+    }
+    final int? beat = hit.beat;
+    debugPrint(
+      'viewer.form.open section=${hit.sectionId} bar=${hit.barIndex} '
+      'beat=$beat',
+    );
+    unawaited(
+      showSongForm(
+        context,
+        session: session,
+        sectionId: hit.sectionId,
+        barIndex: hit.barIndex,
+        onChanged: () => setState(() => _selection = null),
+      ),
+    );
+  }
+
+  // PURPOSE: Open the song-info sheet, which is where the song's own four facts — title, composer,
+  //          style and tempo — are edited.
+  // INPUTS: context — where to open the sheet. session — the session of the song on screen. focus —
+  //         the field the reader pressed, so the sheet opens with the cursor already in it.
+  // OUTPUTS: Nothing. The sheet applies through `EditSession.updateSong`, and the screen rebuilds
+  //          after an applied edit so the pane header, the scene bar and the song list all show the
+  //          new values. The selection is deliberately NOT cleared, unlike a form edit: a title, a
+  //          composer, a style and a tempo move no bar and no section, so the address the selection
+  //          names still names the same music and the highlight is still true.
+  // KEYWORDS: song-info, metadata, entry-point, scene-bar, title, rebuild-on-apply, structured-log
+  void _openSongInfo(
+    BuildContext context,
+    EditSession session,
+    SongMetadataField focus,
+  ) {
+    debugPrint(
+      'viewer.song.info.open focus=${focus.name} '
+      'title_chars=${session.song.title.length} tempo=${session.song.tempo}',
+    );
+    unawaited(
+      showSongInfo(
+        context,
+        session: session,
+        focus: focus,
+        onChanged: () => setState(() {}),
+      ),
+    );
+  }
+
   // PURPOSE: State the selection in words beside the chart, because a highlight proves that
   //          SOMETHING is selected and not which thing: a screenshot cannot falsify "the bar I
-  //          touched", and a labelled number can. With a cell selected the line is also the control
-  //          that opens the chord palette, which is why it is pressable rather than a bare label.
+  //          touched", and a labelled number can. The line is also the control that reaches the
+  //          edit which fits the selection: the chord palette for a cell, the bars-and-sections
+  //          sheet for a bar.
   // INPUTS: context — the build context, for the text theme. song — the chart on screen, read to
   //         number the bar the way a musician counts it.
   // OUTPUTS: A one-line widget. With a selection it reads `selected: bar 12 cell 2`; without one it
   //          invites a tap. A bar-level selection says so instead of inventing a cell number, and it
-  //          is NOT pressable, because a bar-level selection names no cell to write a chord into.
+  //          leads to the FORM sheet rather than to the chord palette, because a bar and its
+  //          section are what the form operations act on and a bar-level selection names both.
   //          The hint beside the label states the affordance in words, since a label that changes
   //          what it is when touched is not discoverable on its own.
   // KEYWORDS: selection-label, edit-entry, falsifiable-feedback, musician-numbering, empty-state
   Widget _buildSelectionLine(BuildContext context, Song song) {
     final ChartHit? hit = _selection;
+    final EditSession? session = _currentSession;
     final bool editable = hit != null && hit.cell != null;
+    // A bar-level selection names no cell to write a chord into, but it names exactly what the form
+    // sheet acts on — a section and a bar — so the line is a control in both cases instead of being
+    // dead text whenever the touch landed on a bar's padding rather than on one of its cells.
+    final VoidCallback? onTap = hit == null
+        ? null
+        : (editable
+              ? () => _editSelection(context)
+              : (session == null
+                    ? null
+                    : () => _openSongForm(context, session)));
+    final String hint = editable
+        ? '— tap to change the chord'
+        : '— tap for bars & sections';
     final String text = hit == null
         ? 'Tap a bar to select it.'
         : _selectionLabel(song, hit);
@@ -872,17 +1588,29 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final Widget label = Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Text(
-          text,
-          key: const ValueKey<String>('viewer-selection-label'),
-          style: style,
+        // FLEXIBLE, so a narrow pane truncates the line instead of overflowing it. The row is
+        // unbounded in width — it sits in an Align — and the position it states grows with the bar
+        // number and the hint beside it, so on a phone-width pane the two together are wider than
+        // the chart: measured at 415 logical pixels of available width against 591 wanted. A label
+        // that overflows is not a cosmetic problem in a widget test, it is a red-and-black bar over
+        // the chart in the application.
+        Flexible(
+          child: Text(
+            text,
+            key: const ValueKey<String>('viewer-selection-label'),
+            style: style,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-        if (editable) ...<Widget>[
+        if (onTap != null) ...<Widget>[
           const SizedBox(width: 8),
-          Text(
-            '— tap to change the chord',
-            key: const ValueKey<String>('viewer-selection-edit-hint'),
-            style: Theme.of(context).textTheme.bodySmall,
+          Flexible(
+            child: Text(
+              hint,
+              key: const ValueKey<String>('viewer-selection-edit-hint'),
+              style: Theme.of(context).textTheme.bodySmall,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ],
@@ -891,16 +1619,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: editable
-            ? InkWell(
+        child: onTap == null
+            ? label
+            : InkWell(
                 key: const ValueKey<String>('viewer-selection-edit'),
-                onTap: () => _editSelection(context),
+                onTap: onTap,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: label,
                 ),
-              )
-            : label,
+              ),
       ),
     );
   }
@@ -942,18 +1670,29 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // PURPOSE: Lay the displayed song out at the size the window gives it and show it as one fitted
   //          page or as a page at a time.
   // INPUTS: entry — the selected song, for identity. displayed — the chart to draw, in its chosen
-  //         key. mode — FIT or PAGES.
+  //         key. mode — FIT or PAGES. layer — the ink layer of the song on screen, which decides
+  //         what a contact on a page means. strokes — the committed strokes of the WRITTEN document,
+  //         which are placed by address and so are unaffected by the transposition on screen.
   // OUTPUTS: The chart. PAGES is the layout engine's ordinary pagination in a [PageView]. FIT is
   //          one scaled page, or a message saying the song would have to be shrunk below the
   //          legible floor, which is reported on screen rather than delivered as an unreadable
   //          page. A song the layout engine produces no pages for says so instead of showing an
   //          empty page, because an empty song and a blank page must not look alike.
-  // KEYWORDS: pagination, fit, page-scale, layout-call, page-view, empty-song, legibility-message
-  Widget _buildPages(IRealSong entry, Song displayed, PageMode mode) {
+  // KEYWORDS: pagination, fit, page-scale, layout-call, page-view, empty-song, legibility-message,
+  //           ink-layering
+  Widget _buildPages(
+    IRealSong entry,
+    Song displayed,
+    PageMode mode,
+    InkCaptureLayer layer,
+    List<InkStroke> strokes,
+  ) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double pageWidth = constraints.maxWidth;
         final double pageHeight = constraints.maxHeight;
+        _lastPageSurface = Size(pageWidth, pageHeight);
+        _lastPageMode = mode;
         if (!pageWidth.isFinite ||
             !pageHeight.isFinite ||
             pageWidth <= 0 ||
@@ -971,7 +1710,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           if (page == null) {
             return _buildNoFit(context, outcome);
           }
-          return _tappablePage(page, displayed);
+          _lastPageScale = page.scale;
+          return _tappablePage(page, displayed, layer, strokes);
         }
         final List<PageLayout> pages = _engine.layout(
           displayed,
@@ -981,11 +1721,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         if (pages.isEmpty) {
           return const Center(child: Text('This song has no bars.'));
         }
+        _lastPageScale = pages.first.scale;
         return PageView.builder(
           key: ValueKey<int>(entry.index),
           itemCount: pages.length,
           itemBuilder: (BuildContext context, int index) =>
-              _tappablePage(pages[index], displayed),
+              _tappablePage(pages[index], displayed, layer, strokes),
         );
       },
     );

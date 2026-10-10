@@ -446,6 +446,35 @@ abstract final class ModelJson {
     return spec;
   }
 
+  /// Writes a [SongMetadata] as the four fields it carries.
+  ///
+  /// All four are written every time, including an empty title and a zero tempo, so that a reader
+  /// never has to decide what an absent field means. The reader below enforces the other half of
+  /// that rule: a missing field is a typed failure rather than a default, because a default would
+  /// make a truncated event look like an edit that cleared a title.
+  static Map<String, Object?> songMetadata(SongMetadata metadata) =>
+      <String, Object?>{
+        'title': metadata.title,
+        'composer': metadata.composer,
+        'style': metadata.style,
+        'tempo': metadata.tempo,
+      };
+
+  /// Rebuilds a [SongMetadata] from [json].
+  ///
+  /// Throws [EventFormatException] when any of the four fields is absent or of the wrong type. A
+  /// PARTIAL update is therefore not expressible on the wire, which is deliberate: the event's
+  /// inverse is the same four fields swapped, so a payload that carried only the field being
+  /// changed would leave the inverse unable to name the values it must restore. A caller that
+  /// wants to change one field fills the other three from the document it is editing.
+  static SongMetadata decodeSongMetadata(Map<String, Object?> json) =>
+      SongMetadata(
+        title: EventJson.string(json, 'title'),
+        composer: EventJson.string(json, 'composer'),
+        style: EventJson.string(json, 'style'),
+        tempo: EventJson.integer(json, 'tempo'),
+      );
+
   /// Writes a [Song] as its identity, its metadata and its sections in order.
   ///
   /// The whole song is written, including the empty strings and the zero tempo, because this

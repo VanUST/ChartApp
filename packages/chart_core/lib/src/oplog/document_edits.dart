@@ -81,4 +81,18 @@ extension SongEditing on Song {
     sections: sections ?? this.sections,
     staffSet: staffSet ?? this.staffSet,
   );
+
+  /// Returns a copy of this song carrying [metadata]'s four fields.
+  ///
+  /// The identity, the key, the sections and the staves are left alone: a `song.update` says what
+  /// the tune is CALLED and how it is played, not where it sits or what is written in it. Passing
+  /// an empty title or a zero tempo is therefore meaningful — they are the values the model uses
+  /// for "unnamed" and "no tempo" — which is why this takes a whole [SongMetadata] rather than
+  /// nullable fields that would have to mean two things.
+  Song withMetadata(SongMetadata metadata) => copyWith(
+    title: metadata.title,
+    composer: metadata.composer,
+    style: metadata.style,
+    tempo: metadata.tempo,
+  );
 }

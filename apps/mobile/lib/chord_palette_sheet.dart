@@ -40,23 +40,7 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 
-/// The dark panel the sheet is drawn on, matching the key grid's performance surface.
-const Color _panelColor = Color(0xFF0F1B2A);
-
-/// The colour of a root cell a musician can press.
-const Color _cellColor = Color(0xFF1C2E44);
-
-/// The colour of the root the cell currently holds.
-const Color _selectedCellColor = Color(0xFF2E5D8A);
-
-/// The accent that marks the current root and the pickable borders.
-const Color _accentColor = Color(0xFFFFC857);
-
-/// The colour of text on the dark panel.
-const Color _onPanelColor = Color(0xFFF5F8FB);
-
-/// The colour of a secondary label, such as a degree number.
-const Color _mutedColor = Color(0xFFB9C7D6);
+import 'sheet_surface.dart';
 
 // PURPOSE: Open the chord palette for one cell and resolve when the musician is finished. The sheet
 //          edits the session as choices are made, so its result is not the chosen chord but nothing:
@@ -94,7 +78,7 @@ Future<void> showChordPalette(
   }
   await showModalBottomSheet<void>(
     context: context,
-    backgroundColor: _panelColor,
+    backgroundColor: sheetPanelColor,
     isScrollControlled: true,
     builder: (BuildContext context) => ChordPaletteSheet(
       session: session,
@@ -323,14 +307,14 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
               _positionLabel,
               key: const ValueKey<String>('chord-palette-position'),
               style: const TextStyle(
-                color: _onPanelColor,
+                color: sheetOnPanelColor,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
             ),
             Text(
               'Chords in ${widget.shownKey}',
-              style: const TextStyle(color: _mutedColor, fontSize: 12),
+              style: const TextStyle(color: sheetMutedColor, fontSize: 12),
             ),
           ],
         ),
@@ -338,7 +322,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
       TextButton(
         key: const ValueKey<String>('chord-palette-done'),
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Done', style: TextStyle(color: _accentColor)),
+        child: const Text('Done', style: TextStyle(color: sheetAccentColor)),
       ),
     ],
   );
@@ -353,7 +337,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   Widget _buildPreview(Chord? preview, BeatChord? current) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
     decoration: BoxDecoration(
-      color: _cellColor,
+      color: sheetCellColor,
       borderRadius: BorderRadius.circular(10),
     ),
     child: Column(
@@ -363,7 +347,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
           preview == null ? 'Pick a root' : _render(preview),
           key: const ValueKey<String>('chord-palette-preview'),
           style: TextStyle(
-            color: preview == null ? _mutedColor : _accentColor,
+            color: preview == null ? sheetMutedColor : sheetAccentColor,
             fontSize: 26,
             fontWeight: FontWeight.w700,
           ),
@@ -372,7 +356,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
           current == null
               ? 'This cell is empty.'
               : 'Now: ${_render(current.chord)}',
-          style: const TextStyle(color: _mutedColor, fontSize: 12),
+          style: const TextStyle(color: sheetMutedColor, fontSize: 12),
         ),
       ],
     ),
@@ -439,7 +423,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
         label: const Text('Remove chord'),
         style: TextButton.styleFrom(
           foregroundColor: const Color(0xFFFF8A80),
-          disabledForegroundColor: _mutedColor,
+          disabledForegroundColor: sheetMutedColor,
         ),
       ),
     ],
@@ -466,7 +450,7 @@ class _QualityChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: selected ? _accentColor : _cellColor,
+    color: selected ? sheetAccentColor : sheetCellColor,
     borderRadius: BorderRadius.circular(8),
     child: InkWell(
       key: ValueKey<String>('chord-palette-quality-${quality.token}'),
@@ -477,7 +461,7 @@ class _QualityChip extends StatelessWidget {
         child: Text(
           quality.token,
           style: TextStyle(
-            color: selected ? _panelColor : _onPanelColor,
+            color: selected ? sheetPanelColor : sheetOnPanelColor,
             fontSize: 16,
             fontWeight: FontWeight.w700,
           ),
@@ -512,8 +496,8 @@ class _RootCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color background = isDraft
-        ? _selectedCellColor
-        : (isCurrent ? _selectedCellColor : _cellColor);
+        ? sheetSelectedCellColor
+        : (isCurrent ? sheetSelectedCellColor : sheetCellColor);
     return Material(
       color: background,
       borderRadius: BorderRadius.circular(10),
@@ -525,7 +509,7 @@ class _RootCell extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isDraft ? _accentColor : Colors.transparent,
+              color: isDraft ? sheetAccentColor : Colors.transparent,
               width: 2,
             ),
           ),
@@ -536,7 +520,7 @@ class _RootCell extends StatelessWidget {
               Text(
                 '${root.written}',
                 style: const TextStyle(
-                  color: _onPanelColor,
+                  color: sheetOnPanelColor,
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
                 ),
@@ -544,7 +528,7 @@ class _RootCell extends StatelessWidget {
               Text(
                 root.degreeLabel,
                 style: TextStyle(
-                  color: isCurrent ? _accentColor : _mutedColor,
+                  color: isCurrent ? sheetAccentColor : sheetMutedColor,
                   fontSize: 11,
                 ),
               ),

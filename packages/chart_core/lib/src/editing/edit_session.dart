@@ -66,16 +66,42 @@ class EditSession {
   /// none, because an event must name a document and a chart typed from scratch has no identity
   /// until the store assigns one. [restored] is the operations a `.chart` file carried, which this
   /// session continues from rather than reissues.
+  ///
+  /// [document] IS THE STATE BEFORE [restored], AND THIS CONSTRUCTOR APPLIES THEM. That is the
+  /// container's own contract — a file is a snapshot plus the operations AFTER it, and the document
+  /// is what the two say together — and it is the only shape in which the log can be written again
+  /// without being applied twice. A caller that has already folded the tail into its snapshot and
+  /// hands the tail over as well is asking for every operation to happen twice, which is how a form
+  /// of four sections and sixteen bars comes back as six and twenty-four.
+  ///
+  /// [seq] IS THE CALLER'S DUTY AND THIS CLASS DOES NOT SECOND-GUESS IT: it must be at least the
+  /// highest sequence number [restored] carries, or the next appended event reuses a position the
+  /// log already holds and `(docId, seq)` stops addressing one row. A caller restoring a tail takes
+  /// it from the tail's last event, which is what a file's own order guarantees. It is documented
+  /// rather than clamped because a session that quietly renumbered itself would hide a caller that
+  /// is counting from the wrong place.
   EditSession({
     required DocumentState document,
     String? docId,
     this._seq = 0,
     List<ChartEvent> restored = const <ChartEvent>[],
-  }) : _document = document,
+  }) : _base = document,
        _docId = docId ?? _defaultDocId(document.song.id),
-       _restored = List<ChartEvent>.of(restored);
+       _restored = List<ChartEvent>.of(restored),
+       _document = _reduceTail(document, restored);
 
   DocumentState _document;
+
+  /// The state this session was opened on: the document BEFORE [log].
+  ///
+  /// It is what a save writes as the container's snapshot, so that `snapshot + tail` is the chart
+  /// the musician is looking at. The alternative — writing the CURRENT document as the snapshot and
+  /// the tail beside it — stores every operation twice: the reader's contract is that the document
+  /// is the snapshot PLUS the operations, so a snapshot that already contains them is applied again
+  /// on the way back in. Inserts then double, deletes take a neighbouring bar, and a re-applied
+  /// stroke throws because a stroke with that id is already present.
+  final DocumentState _base;
+
   final String _docId;
   int _seq;
   final List<ChartEvent> _restored;
@@ -83,8 +109,36 @@ class EditSession {
   final List<UndoOp> _redo = <UndoOp>[];
   final List<ChartEvent> _appliedEvents = <ChartEvent>[];
 
+  // PURPOSE: Fold the operations a file carried into the state that file stored, so a session
+  //          opened on a `.chart` document holds the chart the writer saw rather than its snapshot
+  //          alone.
+  // INPUTS: document — the snapshot, which is the state before the tail. restored — the operations
+  //         after it, in log order.
+  // OUTPUTS: The reduced document. An empty tail returns [document] itself, which is the ordinary
+  //          case of a session that was not opened from a file. An event the reducer cannot apply
+  //          throws [DocumentReducerException] here rather than being skipped, because a tail that
+  //          does not fit its snapshot is a document nobody can reconstruct.
+  // KEYWORDS: reduce-tail, snapshot-plus-log, restore, fail-loud
+  static DocumentState _reduceTail(
+    DocumentState document,
+    List<ChartEvent> restored,
+  ) {
+    DocumentState state = document;
+    for (final ChartEvent event in restored) {
+      state = DocumentReducer.apply(state, event);
+    }
+    return state;
+  }
+
   /// The document id every event this session writes carries.
   String get docId => _docId;
+
+  /// The state this session started from: what a save writes as the container's snapshot.
+  ///
+  /// Not the same value as [document] once anything has been edited — the difference between the
+  /// two is exactly [log] — which is why a file holds this one and the tail and reopens into
+  /// [document].
+  DocumentState get baseDocument => _base;
 
   /// The document as it stands, with every applied event folded in.
   DocumentState get document => _document;
@@ -333,5 +387,398 @@ class EditSession {
       }
     }
     return found;
+  }
+
+  // --- Bars and sections: the form of the tune ------------------------------------------------
+  //
+  // The catalogue already carries every one of these operations (`measure.insert`,
+  // `measure.delete`, `measure.duplicate`, `section.insert`, `section.delete`, `section.update`,
+  // `section.duplicate`, `section.reorder`). What is here is the decision of WHAT to put in each
+  // event, which is the part a caller must not restate: a bar put into a 3/4 tune has to be 3/4,
+  // and a duplicated section has to carry an identity no other section has.
+
+  // PURPOSE: Insert one blank bar before the bar the musician is working on, which is how a form of
+  //          a chosen length gets built: a bar is added where it is needed and then written into.
+  // INPUTS: sectionId and barIndex — the bar the musician selected, in the model's own address.
+  // OUTPUTS: True when the bar was inserted, false when [sectionId] names no section or [barIndex]
+  //          is past the section's bars. The new bar takes [barIndex], so the selected bar and
+  //          every bar after it move one place later; a caller that wants to stay on the bar it was
+  //          on has to follow it. The blank bar carries the METER of the bar it was built beside
+  //          and nothing else: a meter is per bar here, so a new 4/4 bar in a 3/4 tune would be a
+  //          musical change nobody asked for, while repeat signs and alternative endings are signs
+  //          of a passage and copying one into an arbitrary position invents a repeat.
+  // KEYWORDS: bar-insert, measure-insert, meter-inheritance, form-building, undoable
+  /// Inserts a blank bar before the bar at ([sectionId], [barIndex]).
+  bool insertBarBefore({required String sectionId, required int barIndex}) {
+    final Bar? reference = _document.song.barAt(sectionId, barIndex);
+    if (reference == null) {
+      return false;
+    }
+    apply(
+      MeasureInsertEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        index: barIndex,
+        bar: _blankBarLike(reference),
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Insert one blank bar after the bar the musician is working on, which is the same
+  //          operation as [insertBarBefore] with the new bar landing one place later.
+  // INPUTS: sectionId and barIndex — the selected bar, as in [insertBarBefore].
+  // OUTPUTS: True when the bar was inserted, false when the address names no bar. The new bar takes
+  //          `barIndex + 1`, so the selected bar does not move. The meter is inherited for the same
+  //          reason as above.
+  // KEYWORDS: bar-insert, measure-insert, append-after, meter-inheritance, undoable
+  /// Inserts a blank bar after the bar at ([sectionId], [barIndex]).
+  bool insertBarAfter({required String sectionId, required int barIndex}) {
+    final Bar? reference = _document.song.barAt(sectionId, barIndex);
+    if (reference == null) {
+      return false;
+    }
+    apply(
+      MeasureInsertEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        index: barIndex + 1,
+        bar: _blankBarLike(reference),
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Copy the bar the musician is working on into the place after it, which is how a chart
+  //          of a repeated bar — eight bars of one groove, two bars of a turnaround — is written
+  //          once and repeated.
+  // INPUTS: sectionId and barIndex — the bar to copy.
+  // OUTPUTS: True when the copy was made, false when the address names no bar. The copy is a new
+  //          immutable value carrying every field of its source, including chords, signs and meter,
+  //          and it lands at `barIndex + 1`. A copied bar is equal to its source, which is the
+  //          point: a musician who wanted a different bar will edit it after it is there.
+  // KEYWORDS: bar-duplicate, measure-duplicate, whole-value-copy, deterministic-replay, undoable
+  /// Copies the bar at ([sectionId], [barIndex]) into the position after it.
+  bool duplicateBar({required String sectionId, required int barIndex}) {
+    final Bar? source = _document.song.barAt(sectionId, barIndex);
+    if (source == null) {
+      return false;
+    }
+    apply(
+      MeasureDuplicateEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        index: barIndex,
+        duplicate: source.copyWith(),
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Remove the bar the musician is working on, which is how a form that came out one bar
+  //          too long is fixed.
+  // INPUTS: sectionId and barIndex — the bar to remove.
+  // OUTPUTS: True when the bar was removed, false when the address names no bar, and false when
+  //          this is the section's LAST bar. That second refusal is deliberate and is the one rule
+  //          this method adds to the catalogue's: the page draws a section through the bars it
+  //          contains, so a section with no bars cannot be seen, cannot be tapped and therefore
+  //          cannot be selected again — a state a musician could reach in one tap and not leave.
+  //          Removing the last section is refused for the same reason by [deleteSection].
+  // KEYWORDS: bar-delete, measure-delete, last-bar-refusal, addressability, undoable
+  /// Removes the bar at ([sectionId], [barIndex]).
+  bool deleteBar({required String sectionId, required int barIndex}) {
+    final Section? section = _document.song.sectionById(sectionId);
+    if (section == null ||
+        barIndex < 0 ||
+        barIndex >= section.bars.length ||
+        section.bars.length <= 1) {
+      return false;
+    }
+    apply(
+      MeasureDeleteEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        index: barIndex,
+        removed: section.bars[barIndex],
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Insert a new section before the one the musician is working in, which is how an intro
+  //          is put in front of a form that was written without one.
+  // INPUTS: sectionId — a section of the song, whose own meter and position decide the new one's.
+  // OUTPUTS: The new section's id, or null when [sectionId] names no section. The new section
+  //          carries one blank bar in the meter of the reference section's last bar, and a fresh
+  //          identity and label: a section with no bars would be invisible and unreachable (see
+  //          [deleteBar]), so "new section" means "new section with its first bar in it".
+  // KEYWORDS: section-insert, rehearsal-letter, fresh-identity, one-bar, meter-inheritance, undoable
+  /// Inserts a new one-bar section before the section named [sectionId].
+  String? insertSectionBefore(String sectionId) =>
+      _insertSectionBeside(sectionId, after: false);
+
+  // PURPOSE: Insert a new section after the one the musician is working in, which is how a B part
+  //          is added after the A part.
+  // INPUTS: sectionId — the section to insert after.
+  // OUTPUTS: The new section's id, or null when [sectionId] names no section. Built exactly as in
+  //          [insertSectionBefore].
+  // KEYWORDS: section-insert, form-building, fresh-identity, one-bar, undoable
+  /// Inserts a new one-bar section after the section named [sectionId].
+  String? insertSectionAfter(String sectionId) =>
+      _insertSectionBeside(sectionId, after: true);
+
+  // PURPOSE: Copy a whole section, which is how a form that plays A twice is written once — the
+  //          copy is a starting point the musician then edits.
+  // INPUTS: sectionId — the section to copy.
+  // OUTPUTS: The copy's id, or null when [sectionId] names no section. The copy lands directly
+  //          after its source and carries a FRESH identity: two sections sharing an id would make
+  //          every annotation anchor naming that id ambiguous, and an anchor is resolved by id. Its
+  //          label is deliberately NOT changed — a chart may hold two sections called A, and
+  //          relabelling silently would be the app deciding what the musician's form is called.
+  // KEYWORDS: section-duplicate, fresh-identity, anchor-safety, label-preserved, undoable
+  /// Copies the section named [sectionId] into the position after it, under a new identity.
+  String? duplicateSection(String sectionId) {
+    final int index = _sectionIndex(sectionId);
+    if (index < 0) {
+      return null;
+    }
+    final Section source = _document.song.sections[index];
+    final Section duplicate = source.copyWith(id: _freshSectionId());
+    apply(
+      SectionDuplicateEvent(
+        docId: _docId,
+        seq: _seq,
+        sourceId: sectionId,
+        index: index,
+        duplicate: duplicate,
+      ),
+    );
+    return duplicate.id;
+  }
+
+  // PURPOSE: Remove a whole section, which is how a part that turned out not to belong is taken out
+  //          of the form.
+  // INPUTS: sectionId — the section to remove.
+  // OUTPUTS: True when the section was removed, false when [sectionId] names no section and false
+  //          when it is the song's ONLY section. The second refusal is the same rule [deleteBar]
+  //          applies one level down: a song with no sections has no bars, the page shows nothing to
+  //          tap, and there would be no way back to a chart from inside the app. Every bar the
+  //          section held goes with it. An annotation anchored in the removed section is NOT removed
+  //          with it: the catalogue has no cascade, so such a mark is left naming a section that no
+  //          longer exists and is simply not drawn, which is the same state a mark in a section
+  //          another device removed is in. Undo restores the section, and the mark with it, because
+  //          the deletion event carries the whole section.
+  // KEYWORDS: section-delete, last-section-refusal, dangling-anchor, undoable, form-building
+  /// Removes the section named [sectionId], unless it is the song's only section.
+  bool deleteSection(String sectionId) {
+    final int index = _sectionIndex(sectionId);
+    if (index < 0 || _document.song.sections.length <= 1) {
+      return false;
+    }
+    apply(
+      SectionDeleteEvent(
+        docId: _docId,
+        seq: _seq,
+        index: index,
+        removed: _document.song.sections[index],
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Give a section a different label, which is how a section that came out of an import
+  //          as the wrong rehearsal letter — or as no letter at all — is fixed.
+  // INPUTS: sectionId — the section to relabel. label — the label it should carry.
+  // OUTPUTS: True when the label changed, false when [sectionId] names no section and false when
+  //          the label is already that one, because an event that changes nothing is still an entry
+  //          in the log and an offer to undo it. The event carries both labels, so undo restores
+  //          the exact label that was written before — not a re-derived one.
+  // KEYWORDS: section-rename, section-update, reversible, no-op-refusal, undoable
+  /// Relabels the section named [sectionId] with [label].
+  bool renameSection(String sectionId, SectionLabel label) {
+    final Section? section = _document.song.sectionById(sectionId);
+    if (section == null || section.label == label) {
+      return false;
+    }
+    apply(
+      SectionUpdateEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        from: section.label,
+        to: label,
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Move a section earlier or later in the written order, which is how a form that came
+  //          out in the wrong order is repaired without retyping it.
+  // INPUTS: sectionId — the section to move. places — how many positions to move it by; negative
+  //         moves it earlier, positive later.
+  // OUTPUTS: True when the section moved, false when [sectionId] names no section, when [places] is
+  //          zero (an event that changes nothing) and when the target position would fall outside
+  //          the song. The section's identity travels with it, so every annotation anchored in it
+  //          stays anchored: an address is (section id, bar index), and a reorder changes neither.
+  // KEYWORDS: section-reorder, move, stable-identity, anchor-survival, bounds-check, undoable
+  /// Moves the section named [sectionId] by [places] positions in the written order.
+  bool moveSection(String sectionId, int places) {
+    final int index = _sectionIndex(sectionId);
+    if (index < 0 || places == 0) {
+      return false;
+    }
+    final int target = index + places;
+    if (target < 0 || target >= _document.song.sections.length) {
+      return false;
+    }
+    apply(
+      SectionReorderEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        fromIndex: index,
+        toIndex: target,
+      ),
+    );
+    return true;
+  }
+
+  // --- The song's own metadata ------------------------------------------------------------------
+  //
+  // One event family covers all four fields, because they are one thing a musician edits: what the
+  // tune is. Keeping them together is also what lets the event carry both whole values, which is
+  // what makes its inverse exact.
+
+  // PURPOSE: Change what the tune says about itself — its name, who wrote it, what it is played as
+  //          and how fast — which is the edit the scene bar's tempo and style were waiting for.
+  // INPUTS: The fields to replace. A null argument leaves that field alone; an empty string and a
+  //         zero tempo are VALUES the model represents rather than absences, so a title can be
+  //         cleared and a tempo unset.
+  // OUTPUTS: True when the update was appended, false in two cases. Nothing to change: an event
+  //          whose two sides are equal is still a log row and still an offer to undo, so it is not
+  //          written. A negative tempo: a tempo below zero is not a tempo, and the model already
+  //          documents 0 as the value for "this chart sets none", so a negative one would be a
+  //          third state nothing else in the system knows how to read. The event carries all four
+  //          fields on both sides, so undo restores the previous values exactly rather than
+  //          reconstructing them from the change.
+  // KEYWORDS: song-update, metadata, title, composer, style, tempo, no-op-refusal, undoable
+  /// Replaces the named fields of the song's metadata, reporting whether anything changed.
+  bool updateSong({
+    String? title,
+    String? composer,
+    String? style,
+    int? tempo,
+  }) {
+    if (tempo != null && tempo < 0) {
+      return false;
+    }
+    final SongMetadata from = SongMetadata.of(_document.song);
+    final SongMetadata to = SongMetadata(
+      title: title ?? from.title,
+      composer: composer ?? from.composer,
+      style: style ?? from.style,
+      tempo: tempo ?? from.tempo,
+    );
+    if (to == from) {
+      return false;
+    }
+    apply(SongUpdateEvent(docId: _docId, seq: _seq, from: from, to: to));
+    return true;
+  }
+
+  // PURPOSE: Find where a section sits, so every section operation can turn the identity a caller
+  //          holds into the position an event needs.
+  // INPUTS: sectionId — the identity to look for.
+  // OUTPUTS: The section's index in the song, or -1 when no section carries that id. Negative
+  //          rather than null so every caller's guard is the same single comparison.
+  // KEYWORDS: lookup, section-index, identity-to-position, sentinel
+  int _sectionIndex(String sectionId) => _document.song.sections.indexWhere(
+    (Section section) => section.id == sectionId,
+  );
+
+  // PURPOSE: Build the blank bar a form edit needs, so the meter rule has one home.
+  // INPUTS: reference — the bar the musician was working from.
+  // OUTPUTS: A bar carrying [reference]'s meter and no content: no chords (which means the previous
+  //          chord sustains), no notes, no signs and single barlines.
+  // KEYWORDS: blank-bar, meter-inheritance, new-measure, single-rule
+  Bar _blankBarLike(Bar reference) =>
+      Bar(timeSignature: reference.timeSignature);
+
+  // PURPOSE: Insert a new one-bar section on the side of a reference section that the caller asks
+  //          for, so "before" and "after" share one implementation of what a new section is.
+  // INPUTS: sectionId — the reference section. after — true to place the new section later in the
+  //         order, false to place it earlier.
+  // OUTPUTS: The new section's identity, or null when [sectionId] names no section.
+  // KEYWORDS: section-insert, before-after, one-implementation, meter-inheritance
+  String? _insertSectionBeside(String sectionId, {required bool after}) {
+    final int index = _sectionIndex(sectionId);
+    if (index < 0) {
+      return null;
+    }
+    final Section reference = _document.song.sections[index];
+    final Section section = Section(
+      id: _freshSectionId(),
+      label: _nextSectionLabel(),
+      bars: <Bar>[
+        _blankBarLike(
+          reference.bars.isEmpty ? const Bar() : reference.bars.last,
+        ),
+      ],
+    );
+    apply(
+      SectionInsertEvent(
+        docId: _docId,
+        seq: _seq,
+        index: after ? index + 1 : index,
+        section: section,
+      ),
+    );
+    return section.id;
+  }
+
+  // PURPOSE: Mint an identity for a section that is being created, which no operation may leave to
+  //          a caller: an id has to be unique in the song, and an id reused after a deletion would
+  //          silently reattach every annotation anchored in the section that was removed.
+  // INPUTS: None; reads the song's sections and this session's sequence counter.
+  // OUTPUTS: An id of the form `sec-N` that no section currently carries. The counter starts at the
+  //          next sequence number, so a document that never had a section added twice cannot offer
+  //          the same number twice, and the loop closes the remaining case — an imported section
+  //          that happens to be named `sec-N` already.
+  // KEYWORDS: identity, fresh-id, collision-avoidance, monotone, section-creation
+  String _freshSectionId() {
+    final Set<String> used = <String>{
+      for (final Section section in _document.song.sections) section.id,
+    };
+    int counter = _seq + 1;
+    String candidate = 'sec-$counter';
+    while (used.contains(candidate)) {
+      counter++;
+      candidate = 'sec-$counter';
+    }
+    return candidate;
+  }
+
+  // PURPOSE: Name a section that is being created, so a musician adding a part gets the next
+  //          rehearsal letter instead of being asked for a name before there is anything to name.
+  // INPUTS: None; reads the labels the song already carries.
+  // OUTPUTS: The first single letter from A to Z that no section already uses as its text,
+  //          upper-cased. When all twenty-six are taken, a custom label `S<n>` carrying the
+  //          section count, which is a name rather than a duplicate.
+  // KEYWORDS: rehearsal-letter, next-label, uniqueness, fallback, section-creation
+  SectionLabel _nextSectionLabel() {
+    final Set<String> used = <String>{
+      for (final Section section in _document.song.sections) section.label.text,
+    };
+    for (int index = 0; index < 26; index++) {
+      final String letter = String.fromCharCode('A'.codeUnitAt(0) + index);
+      if (!used.contains(letter)) {
+        return SectionLabel.letter(letter);
+      }
+    }
+    return SectionLabel.custom('S${_document.song.sections.length + 1}');
   }
 }

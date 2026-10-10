@@ -51,13 +51,15 @@ typedef ChartFileSaver = Future<void> Function(String path, Uint8List bytes);
 /// Reads a container's bytes from the place the reader named.
 typedef ChartFileOpener = Future<Uint8List> Function(String path);
 
-/// What an opened `.chart` file gives the viewer: the document it describes, and the operation tail
-/// the file carried beside its snapshot.
+/// What an opened `.chart` file gives the viewer: the state the file stored and the operation tail
+/// it carried beside that state.
 ///
-/// Both are handed over because the file holds both and they mean different things: the document is
-/// the chart to show, and the tail is the position in the log that a session restored from this file
-/// must continue from. A record rather than a small class because it is a pair of values passed
-/// straight through, and because a class would need a name that says "song and tail" twice.
+/// Both are handed over because the file holds both and they mean different things: [document] is
+/// the SNAPSHOT — the state BEFORE the tail — and the tail is what a session applying the two
+/// together reaches, and what it must continue from rather than reissue. A caller that shows
+/// [document] and ignores the tail would show a chart missing every edit the file recorded; a
+/// caller that reduces the two itself and then hands both over would run the history twice. A
+/// record rather than a small class because it is a pair of values passed straight through.
 typedef OpenedChart = ({DocumentState document, List<ChartEvent> events});
 
 // PURPOSE: Derive the `.chart` path that sits beside a source path, so the dialog's path field
@@ -274,8 +276,17 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
     try {
       final Uint8List bytes = await widget.open(path);
       final ChartFileDecodeResult decoded = ChartFileCodec.decode(bytes);
-      final DocumentState document = decoded.file.reducedDocument;
-      final Song song = document.song;
+      // THE SNAPSHOT, NOT THE REDUCED DOCUMENT. The container's document is the snapshot PLUS the
+      // operations, so a caller that hands over the reduction and the operations together is asking
+      // the session to apply every operation twice: a bar insert doubles, a bar delete takes a
+      // neighbouring bar, and a re-applied stroke is refused because a stroke with that id is
+      // already there. The session folds the tail in itself, which is what makes the chart on
+      // screen the chart the writer saw.
+      final DocumentState document = decoded.file.snapshot;
+      // The song a session opened from this file will reach, used for the status line only. It is
+      // the reduction, because a `song.update` in the tail may have renamed the tune and the reader
+      // should read the name they are about to see on the page.
+      final Song shown = decoded.file.reducedDocument.song;
       if (!mounted) {
         return;
       }
@@ -283,11 +294,11 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       setState(() {
         _busy = false;
         _status =
-            'Opened "$song" · ${decoded.file.events.length} operation(s).'
+            'Opened "$shown" · ${decoded.file.events.length} operation(s).'
             '${_warningSuffix(decoded.warnings)}';
       });
       debugPrint(
-        'viewer.chart.open.ok bars=${song.writtenBarCount} '
+        'viewer.chart.open.ok bars=${shown.writtenBarCount} '
         'operations=${decoded.file.events.length} '
         'warnings=${decoded.warnings.length}',
       );
