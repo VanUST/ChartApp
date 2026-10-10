@@ -6,7 +6,8 @@
 //         addresses (`sectionId`, `barIndex`) rather than the bars themselves, and the barlines,
 //         repeat marks, voltas and staff text live on the [Bar]. page — the [PageLayout] to draw.
 //         metrics — the same [FlutterTextMetrics] the layout was measured with, so drawn text
-//         lands in the box the engine reserved.
+//         lands in the box the engine reserved. selection — the bar and cell a musician touched, or
+//         null; it is what makes an interaction visible rather than only logged.
 // OUTPUTS: [paint] writes into the canvas and returns nothing. A page whose bars cannot be
 //          resolved against the song still draws its barlines, so a missing bar is visible as an
 //          empty measure rather than as a gap.
@@ -38,13 +39,19 @@ class ChartPainter extends CustomPainter {
   /// Creates a painter for one page.
   ///
   /// [metrics] must be the instance the layout was measured with; see the file header.
+  /// [selection] is the bar and cell the musician has touched, or null when nothing is selected;
+  /// the painter draws the highlight, and it is the only thing on the page that says "you are
+  /// here" without a word.
   const ChartPainter({
     required this.song,
     required this.page,
     required this.metrics,
     this.spellingTable = const SpellingTable(),
+    this.selection,
     this.lineColor = const Color(0xFF102A43),
     this.backgroundColor = const Color(0xFFFFFFFF),
+    this.selectionFillColor = const Color(0x2E2F80ED),
+    this.selectionStrokeColor = const Color(0xFF2F80ED),
   });
 
   /// The model the page was laid out from, read for the signs [PageLayout] does not carry.
@@ -59,11 +66,25 @@ class ChartPainter extends CustomPainter {
   /// The rule chords are rendered to text with, matching the layout engine's.
   final SpellingTable spellingTable;
 
+  /// The bar and cell to highlight, or null when nothing is selected.
+  ///
+  /// The hit is matched by ADDRESS — section id, bar index and beat — and not by object identity,
+  /// because the viewer holds the hit from the tap while a rebuild may have produced a fresh
+  /// layout with equal values. Matching the address is what lets a highlight survive a rebuild,
+  /// a transposition or a page mode change without being re-derived.
+  final ChartHit? selection;
+
   /// Colour of barlines, repeat dots and text.
   final Color lineColor;
 
   /// Colour the page is filled with before anything is drawn.
   final Color backgroundColor;
+
+  /// Colour the selected region is washed with, under the music so chords stay readable.
+  final Color selectionFillColor;
+
+  /// Colour of the outline drawn around the selected region.
+  final Color selectionStrokeColor;
 
   // PURPOSE: Draw the page: section labels, then each bar's barlines, signs and chords.
   // INPUTS: canvas — the target. size — the extent the painter was given, which is the page's own
@@ -105,8 +126,11 @@ class ChartPainter extends CustomPainter {
       oldDelegate.page != page ||
       oldDelegate.song != song ||
       oldDelegate.metrics != metrics ||
+      oldDelegate.selection != selection ||
       oldDelegate.lineColor != lineColor ||
-      oldDelegate.backgroundColor != backgroundColor;
+      oldDelegate.backgroundColor != backgroundColor ||
+      oldDelegate.selectionFillColor != selectionFillColor ||
+      oldDelegate.selectionStrokeColor != selectionStrokeColor;
 
   // PURPOSE: Draw the section heading a system starts, in the band the engine reserved above the
   //          stave, so the heading is never drawn over a chord.
@@ -133,6 +157,63 @@ class ChartPainter extends CustomPainter {
     );
   }
 
+  // PURPOSE: Mark the bar and cell the musician touched, so a selection is visible on the page and
+  //          not only stated beside it. The mark is drawn from the layout's own rectangles, which is
+  //          what guarantees it lands exactly where the hit test said the touch was rather than a
+  //          little to one side.
+  // INPUTS: canvas — the target. placed — the bar being drawn, with the cells it owns.
+  // OUTPUTS: Nothing. Draws for the one bar whose address matches [selection], and for the cell
+  //          whose beat matches; a selection naming a bar on another page draws nothing here. When
+  //          the selection names no cell — a touch in a bar's padding — the whole bar is marked,
+  //          which is the honest picture of a bar-level selection. A beat the bar does not have
+  //          falls back to the whole bar rather than drawing nothing, because a highlight that
+  //          silently vanishes is indistinguishable from a tap that missed.
+  // KEYWORDS: selection, highlight, address-match, cell, bar-level, visual-feedback
+  void _paintSelection(Canvas canvas, PlacedBar placed) {
+    final ChartHit? hit = selection;
+    if (hit == null ||
+        hit.sectionId != placed.sectionId ||
+        hit.barIndex != placed.barIndex) {
+      return;
+    }
+    final int? beat = hit.beat;
+    final PlacedCell? cell = beat == null ? null : _cellOf(placed, beat);
+    final LayoutRect region = cell?.bounds ?? placed.bounds;
+    final Rect rect = Rect.fromLTWH(
+      region.left,
+      region.top,
+      region.size.width,
+      region.size.height,
+    );
+    canvas.drawRect(rect, Paint()..color = selectionFillColor);
+    // The outline is inset by half its own width so it sits inside the region. Drawn centred it
+    // would straddle the cell's edge and tint the neighbouring cell, which is exactly the confusion
+    // the label beside the chart exists to remove.
+    const double strokeWidth = 2;
+    canvas.drawRect(
+      rect.deflate(strokeWidth / 2),
+      Paint()
+        ..color = selectionStrokeColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth,
+    );
+  }
+
+  // PURPOSE: Find the cell a selection names, so the highlight can be drawn on a cell that may have
+  //          been produced by a different layout instance than the one the hit came from.
+  // INPUTS: bar — the bar being drawn. beat — the cell index the selection carries.
+  // OUTPUTS: The matching cell, or null when the bar has no cell at that index; the caller then
+  //          falls back to marking the whole bar.
+  // KEYWORDS: cell-lookup, beat, fallback, value-match
+  PlacedCell? _cellOf(PlacedBar bar, int beat) {
+    for (final PlacedCell cell in bar.cells) {
+      if (cell.beat == beat) {
+        return cell;
+      }
+    }
+    return null;
+  }
+
   // PURPOSE: Draw one bar: its bounding barlines, the signs the bar carries, and its chords.
   // INPUTS: canvas — the target. placed — the bar and its rectangle. firstInSystem — whether this
   //         bar opens its system, which decides whether its opening barline needs drawing.
@@ -146,6 +227,11 @@ class ChartPainter extends CustomPainter {
   }) {
     final Bar? bar = song.barAt(placed.sectionId, placed.barIndex);
     final LayoutRect bounds = placed.bounds;
+
+    // The selection wash goes down before the barlines and the chords, so the symbol the musician
+    // selected stays fully readable — a highlight that dims the chord it marks is worse than none,
+    // because the musician is trying to check that the selection landed on the chord they meant.
+    _paintSelection(canvas, placed);
 
     // An interior barline is shared: the previous bar's closing line already draws it. So the
     // opening barline is drawn when it opens the system, or when it is a SIGN rather than a plain

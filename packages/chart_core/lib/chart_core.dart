@@ -8,8 +8,9 @@
 // What lives here: written pitch and pitch classes, keys and their signatures, the rule that
 // resolves enharmonic spelling, the chord model, transposition, the song structure that addresses
 // a bar, the iReal import path from an `irealb://` payload through de-obfuscation and notation to
-// a Song, the layout engine, and the document event catalogue that undo, autosave and a future
-// sync all replay.
+// a Song, the layout engine and the page hit test, the document event catalogue that undo,
+// autosave and a future sync all replay, and the `.chart` container that serialises one document —
+// its snapshot and its operation tail — to bytes and back.
 //
 // The song model stores the WRITTEN form only. The order a tune is played in — repeats,
 // alternative endings, navigation — is a pure function over this model, so there is no second
@@ -18,16 +19,19 @@
 // What must never live here: flutter, storage_drift, ink_native or any platform channel. The
 // package's value rests on `dart test` running every one of its tests on a machine with no
 // device, no emulator and no Android SDK, and the dependency list in pubspec.yaml is empty to
-// keep that true. Every file in this library is pure: no I/O, no clock, no globals.
+// keep that true. Every file in this library is pure: no I/O, no clock, no globals. The container
+// follows that rule by taking bytes and returning bytes: resolving a path, opening a file and
+// invoking a browser's file chooser are the app's job, through its own conditional-export seam.
 //
-// Still absent by design, and deliberately not stubbed: the `.chart` and `.setlist` file
-// containers and the snapshot format. Writing either before the ink format is measured would fix
-// its design on a guess.
+// Still absent by design: the `.setlist` container. A setlist is a different kind of document — it
+// names songs rather than containing one — and the codec here deliberately refuses a setlist
+// operation inside a chart file rather than growing a second document type it does not model yet.
 
 /// ChartApp's pure-Dart chart domain.
 library;
 
 export 'src/chord.dart';
+export 'src/container/chart_file.dart';
 export 'src/ireal/chord_parser.dart';
 export 'src/ireal/obfuscation.dart';
 export 'src/ireal/parser.dart';
@@ -35,6 +39,7 @@ export 'src/ireal/payload.dart';
 export 'src/ireal/tokenizer.dart';
 export 'src/key.dart';
 export 'src/layout/geometry.dart';
+export 'src/layout/hit_test.dart';
 export 'src/layout/layout_engine.dart';
 export 'src/layout/layout_style.dart';
 export 'src/layout/page_layout.dart';

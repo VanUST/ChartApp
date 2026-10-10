@@ -1,15 +1,18 @@
-// PURPOSE: Turn the song-model values an event payload carries into JSON and back, so that one
-//          place decides how a chord, a note, a bar or a section is written inside `events.jsonl`
-//          and every event family reuses that decision. A second encoder per event would be a
-//          second chance to write a bar without its volta or a note without its tie.
+// PURPOSE: Turn the song-model values an event payload carries into JSON and back — and, at the
+//          top of that ladder, a whole song and a whole document, which is the snapshot a
+//          `.chart` container stores. One place decides how a chord, a note, a bar, a section, a
+//          staff set or a song is written and read; every event family and the container reuse
+//          that decision. A second encoder per caller would be a second chance to write a bar
+//          without its volta or a note without its tie.
 // INPUTS: Immutable model values from the chart domain, or the decoded JSON object a previous
 //         call produced.
 // OUTPUTS: A JSON object per value, and the value rebuilt from one. Decoding is strict: every
 //          field is required unless the model itself can hold null (a slash bass, a volta
-//          bracket, a tuplet), and a wrong or missing field throws [EventFormatException] rather
-//          than producing a value with an invented default. A list read back is a fresh, mutable
-//          list, so a caller mutating it cannot reach the decoded object's siblings.
-// KEYWORDS: json, model-mapping, event-payload, chord, note, bar, section, key, strict-decode
+//          bracket, a tuplet, a staff slot), and a wrong or missing field throws
+//          [EventFormatException] rather than producing a value with an invented default. A list
+//          read back is a fresh, mutable list, so a caller mutating it cannot reach the decoded
+//          object's siblings.
+// KEYWORDS: json, model-mapping, event-payload, chord, note, bar, section, key, song, staff-set, strict-decode
 part of 'oplog.dart';
 
 /// The JSON mapping of the chart model's value types.
@@ -318,6 +321,201 @@ abstract final class ModelJson {
       'mode',
     ),
   );
+
+  /// Writes a [StaffSpec] as its kind, clef and — for a percussion staff — its drum map.
+  ///
+  /// The drum map's instrument numbers are written as JSON object keys, which JSON forces to be
+  /// strings. That is the only reason the reader has to parse them back, and the reader reports a
+  /// key that is not a number rather than dropping the instrument.
+  static Map<String, Object?> staffSpec(StaffSpec spec) {
+    final Map<int, String>? drumMap = spec.drumMap;
+    return <String, Object?>{
+      'kind': spec.kind.name,
+      'clef': spec.clef,
+      'drumMap': drumMap == null
+          ? null
+          : <String, Object?>{
+              for (final MapEntry<int, String> entry in drumMap.entries)
+                '${entry.key}': entry.value,
+            },
+    };
+  }
+
+  /// Rebuilds a [StaffSpec] from [json], enforcing the rule the model's own constructor asserts.
+  ///
+  /// The two states the model forbids — a pitched staff carrying a drum map, and a percussion
+  /// staff without one — are reported as [EventFormatException] rather than reaching the assert,
+  /// because a decode path must not depend on asserts being enabled.
+  static StaffSpec decodeStaffSpec(Map<String, Object?> json) {
+    final StaffKind kind = EventJson.enumeration(
+      StaffKind.values,
+      EventJson.string(json, 'kind'),
+      'kind',
+    );
+    final Map<String, Object?>? rawMap = EventJson.optionalObject(
+      json,
+      'drumMap',
+    );
+    final Map<int, String>? drumMap = rawMap == null
+        ? null
+        : _decodeDrumMap(rawMap);
+    if (kind == StaffKind.pitched && drumMap != null) {
+      throw const EventFormatException(
+        'field "drumMap" is present on a pitched staff, which reads notes, '
+        'not a drum map',
+      );
+    }
+    if (kind == StaffKind.percussion && drumMap == null) {
+      throw const EventFormatException(
+        'a percussion staff without field "drumMap" has no way to name what '
+        'is struck',
+      );
+    }
+    return StaffSpec(
+      kind: kind,
+      drumMap: drumMap,
+      clef: EventJson.string(json, 'clef'),
+    );
+  }
+
+  /// Rebuilds a drum map from its JSON object, reporting an instrument key that is not a number.
+  static Map<int, String> _decodeDrumMap(Map<String, Object?> json) {
+    final Map<int, String> drumMap = <int, String>{};
+    for (final MapEntry<String, Object?> entry in json.entries) {
+      final int? instrument = int.tryParse(entry.key);
+      if (instrument == null) {
+        throw EventFormatException(
+          'an entry of "drumMap" has key "${entry.key}", which is not an '
+          'instrument number',
+        );
+      }
+      final Object? label = entry.value;
+      if (label is! String) {
+        throw EventFormatException(
+          'the label of drum-map instrument $instrument is not a string',
+        );
+      }
+      drumMap[instrument] = label;
+    }
+    return drumMap;
+  }
+
+  /// Writes a [StaffSet] as its optional pitched and percussion slots.
+  static Map<String, Object?> staffSet(StaffSet set) {
+    final StaffSpec? pitched = set.pitched;
+    final StaffSpec? percussion = set.percussion;
+    return <String, Object?>{
+      'pitched': pitched == null ? null : staffSpec(pitched),
+      'percussion': percussion == null ? null : staffSpec(percussion),
+    };
+  }
+
+  /// Rebuilds a [StaffSet] from [json], reporting a staff placed in the wrong slot.
+  static StaffSet decodeStaffSet(Map<String, Object?> json) {
+    final Map<String, Object?>? pitched = EventJson.optionalObject(
+      json,
+      'pitched',
+    );
+    final Map<String, Object?>? percussion = EventJson.optionalObject(
+      json,
+      'percussion',
+    );
+    return StaffSet(
+      pitched: pitched == null
+          ? null
+          : _staffOfKind(pitched, StaffKind.pitched, 'pitched'),
+      percussion: percussion == null
+          ? null
+          : _staffOfKind(percussion, StaffKind.percussion, 'percussion'),
+    );
+  }
+
+  /// Rebuilds the staff at [field] and reports it when its kind is not [kind].
+  static StaffSpec _staffOfKind(
+    Map<String, Object?> json,
+    StaffKind kind,
+    String field,
+  ) {
+    final StaffSpec spec = decodeStaffSpec(json);
+    if (spec.kind != kind) {
+      throw EventFormatException(
+        'field "$field" holds a ${spec.kind.name} staff where a ${kind.name} '
+        'one belongs',
+      );
+    }
+    return spec;
+  }
+
+  /// Writes a [Song] as its identity, its metadata and its sections in order.
+  ///
+  /// The whole song is written, including the empty strings and the zero tempo, because this
+  /// mapping is what a `.chart` container stores as the document the log starts from: a reader
+  /// that cannot understand the newest operation still has the song the writer saw.
+  static Map<String, Object?> song(Song song) => <String, Object?>{
+    'id': song.id,
+    'title': song.title,
+    'composer': song.composer,
+    'style': song.style,
+    'key': key(song.key),
+    'tempo': song.tempo,
+    'staffSet': staffSet(song.staffSet),
+    'sections': <Object?>[
+      for (final Section section in song.sections) ModelJson.section(section),
+    ],
+  };
+
+  /// Rebuilds a [Song] from [json].
+  static Song decodeSong(Map<String, Object?> json) => Song(
+    id: EventJson.string(json, 'id'),
+    title: EventJson.string(json, 'title'),
+    composer: EventJson.string(json, 'composer'),
+    style: EventJson.string(json, 'style'),
+    key: decodeKey(EventJson.object(json, 'key')),
+    tempo: EventJson.integer(json, 'tempo'),
+    sections: <Section>[
+      for (final Object? entry in EventJson.array(json, 'sections'))
+        decodeSection(_asObject(entry, 'sections')),
+    ],
+    staffSet: decodeStaffSet(EventJson.object(json, 'staffSet')),
+  );
+
+  /// Writes a [DocumentState] as the song plus the three anchored collections.
+  ///
+  /// This is the materialised snapshot a container stores so that opening a document does not
+  /// depend on replaying every operation, and so that a reader which cannot understand a newer
+  /// operation still recovers the document as of the snapshot.
+  static Map<String, Object?> documentState(DocumentState state) =>
+      <String, Object?>{
+        'song': song(state.song),
+        'strokes': <Object?>[
+          for (final InkStroke stroke in state.strokes) stroke.toJson(),
+        ],
+        'annotations': <Object?>[
+          for (final Annotation annotation in state.annotations)
+            annotation.toJson(),
+        ],
+        'textCues': <Object?>[
+          for (final TextCue cue in state.textCues) cue.toJson(),
+        ],
+      };
+
+  /// Rebuilds a [DocumentState] from [json].
+  static DocumentState decodeDocumentState(Map<String, Object?> json) =>
+      DocumentState(
+        song: decodeSong(EventJson.object(json, 'song')),
+        strokes: <InkStroke>[
+          for (final Object? entry in EventJson.array(json, 'strokes'))
+            InkStroke.fromJson(_asObject(entry, 'strokes')),
+        ],
+        annotations: <Annotation>[
+          for (final Object? entry in EventJson.array(json, 'annotations'))
+            Annotation.fromJson(_asObject(entry, 'annotations')),
+        ],
+        textCues: <TextCue>[
+          for (final Object? entry in EventJson.array(json, 'textCues'))
+            TextCue.fromJson(_asObject(entry, 'textCues')),
+        ],
+      );
 
   /// Rebuilds a JSON object from an array entry of [field], reporting the field when it is not one.
   static Map<String, Object?> _asObject(Object? entry, String field) {

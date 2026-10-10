@@ -401,12 +401,22 @@ class LayoutEngine {
         measured.width,
         style.barHeight,
       );
+      // The cell columns are computed once here and handed to both the cells the hit test reads
+      // and the chords drawn inside them. Recomputing them for the hit test would put the two on
+      // separate code paths that can drift, and a chord that moved by a pixel while its cell did
+      // not is exactly the kind of wrongness that looks right on screen.
+      final List<double> offsets = _cellOffsets(
+        measured.bar,
+        measured.key,
+        bounds.size.width,
+      );
       bars.add(
         PlacedBar(
           sectionId: measured.sectionId,
           barIndex: measured.barIndex,
           bounds: bounds,
-          chords: _placeChords(measured, bounds),
+          cells: _placeCells(offsets, bounds),
+          chords: _placeChords(measured, bounds, offsets),
         ),
       );
       x += measured.width;
@@ -424,13 +434,52 @@ class LayoutEngine {
     );
   }
 
-  List<PlacedChord> _placeChords(_MeasuredBar measured, LayoutRect barBounds) {
+  // PURPOSE: Turn the cell offsets of a bar into the columns a hit test needs, so that a touch can
+  //          be named as a cell without the hit test re-deriving the bar's division. A cell is
+  //          wider than its chord: it owns the gap that follows the chord too, because that gap is
+  //          still part of the time the chord is held.
+  // INPUTS: offsets — the left edge of each cell relative to the bar's left edge, from
+  //         [_cellOffsets]. bounds — where the bar is drawn.
+  // OUTPUTS: One cell per offset, in beat order, each spanning the bar's full height and its own
+  //          column. The columns tile the bar's interior exactly: the first begins after the left
+  //          padding, each later one begins where the previous ended, and the last ends before the
+  //          right padding — so the paddings themselves are bar and not cell, which is the state
+  //          that makes "a bar with no cell at this point" expressible. An empty offset list
+  //          yields no cells, which the engine's minimum cell width makes unreachable in practice.
+  // KEYWORDS: cell-column, hit-target, tiling, padding-gap, geometry-single-source
+  List<PlacedCell> _placeCells(List<double> offsets, LayoutRect bounds) {
+    if (offsets.isEmpty) {
+      return const <PlacedCell>[];
+    }
+    final List<PlacedCell> cells = <PlacedCell>[];
+    for (int beat = 0; beat < offsets.length; beat++) {
+      final double left = bounds.left + offsets[beat];
+      // The last cell ends at the interior's right edge rather than at the next offset, because
+      // there is no next offset to read it from.
+      final double right = beat + 1 < offsets.length
+          ? bounds.left + offsets[beat + 1]
+          : bounds.right - style.barPadding;
+      cells.add(
+        PlacedCell(
+          beat: beat,
+          bounds: LayoutRect.fromLTWH(
+            left,
+            bounds.top,
+            right - left,
+            bounds.size.height,
+          ),
+        ),
+      );
+    }
+    return cells;
+  }
+
+  List<PlacedChord> _placeChords(
+    _MeasuredBar measured,
+    LayoutRect barBounds,
+    List<double> offsets,
+  ) {
     final Bar bar = measured.bar;
-    final List<double> offsets = _cellOffsets(
-      bar,
-      measured.key,
-      barBounds.size.width,
-    );
     if (offsets.isEmpty) {
       return const <PlacedChord>[];
     }

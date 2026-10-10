@@ -25,7 +25,11 @@ abstract final class EventCodec {
   ///
   /// Throws [EventFormatException] when the object is not an event of a known type or is missing
   /// a field the type requires. The enum and number readers throw the same exception for a field
-  /// of the wrong type, so a caller has exactly one failure to handle.
+  /// of the wrong type, so a caller has exactly one failure to handle. An unknown `type` is thrown
+  /// as [UnknownEventTypeException] and an unknown `v` as [UnsupportedEventVersionException], both
+  /// of which are [EventFormatException]; a container that can keep reading a file written by a
+  /// newer build uses those two subtypes to tell "this build does not know this event" apart from
+  /// "this event is malformed".
   static DocumentEvent decode(Map<String, Object?> json) {
     final String type = EventJson.string(json, 'type');
     final String docId = EventJson.string(json, 'docId');
@@ -73,7 +77,7 @@ abstract final class EventCodec {
       throw EventFormatException('missing format version "v"', type: type);
     }
     if (version != documentEventFormatVersion) {
-      throw EventFormatException(
+      throw UnsupportedEventVersionException(
         'unsupported format version $version, this build writes '
         '$documentEventFormatVersion',
         type: type,
@@ -350,7 +354,7 @@ abstract final class EventCodec {
           to: SetlistItem.fromJson(EventJson.object(payload, 'to')),
         );
       default:
-        throw EventFormatException(
+        throw UnknownEventTypeException(
           'unknown event type "$type"; refusing to skip it because a lost event '
           'is a lost edit',
           type: type,

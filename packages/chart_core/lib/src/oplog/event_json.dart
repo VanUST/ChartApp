@@ -33,6 +33,29 @@ class EventFormatException implements Exception {
       : 'EventFormatException: $message (event type "$type")';
 }
 
+/// Thrown when an encoded event names a `type` this build has no family for.
+///
+/// It extends [EventFormatException] rather than replacing it, so every existing caller that
+/// treats a bad event as one failure keeps working. It is a separate type because it is not
+/// corruption: it is the one ordinary way a file written by a NEWER build looks to an older one,
+/// and a container that can keep reading the rest of such a file has to tell that case apart from
+/// a field that was written wrong. Skipping the event is then a decision the container records,
+/// not an accident.
+class UnknownEventTypeException extends EventFormatException {
+  /// Creates a failure describing the unknown [type] that was seen.
+  const UnknownEventTypeException(super.message, {super.type});
+}
+
+/// Thrown when an encoded event carries a format version this build does not know.
+///
+/// Same reasoning as [UnknownEventTypeException]: a newer writer may bump the payload layout of an
+/// event without changing the container envelope, and that is forward compatibility rather than a
+/// malformed file. The message already names both versions, so no extra field is carried.
+class UnsupportedEventVersionException extends EventFormatException {
+  /// Creates a failure describing the version that was seen, naming its [type] when one was read.
+  const UnsupportedEventVersionException(super.message, {super.type});
+}
+
 /// The strict readers used to rebuild an event from JSON.
 ///
 /// Every reader is total in the sense that it either returns the value or throws; none of them

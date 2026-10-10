@@ -8,16 +8,26 @@
 //         and whether to load the starting reference on the first frame. The loader is injected so
 //         a widget test can pump this screen with a synthetic payload and never touch the
 //         filesystem, and so the web build can hand it a browser file chooser instead of a path.
-// OUTPUTS: A screen with a source bar, a song list, a scene bar and the selected song's page or
-//          pages, each drawn by `ChartPainter` at the size the window gives it.
+// OUTPUTS: A screen with a source bar, a chart save/open bar, a song list, a scene bar and the
+//          selected song's page or pages, each drawn by `ChartPainter` at the size the window gives
+//          it. A tap on a page selects the bar and cell under it, the painter highlights them, and a
+//          line above the page states the selected position in words.
 // KEYWORDS: viewer, ireal, reader, screen, page-view, transposition, scene-bar, page-modes,
-//           widget-test-seam, platform-seam, verification
+//           chart-file, save, open, widget-test-seam, platform-seam, verification
 //
 // WHAT CHANGES ON THE WEB, AND WHAT DOES NOT. Everything below the source bar is identical on
 // every platform, because nothing below it touches a file: the loader is the seam and it is the
 // same seam the widget tests use. Only the source bar differs — a path field where a path exists
 // and a file-picker button where the browser can only offer a choice — which is what
 // [sourceIsFilePath] selects. A screen that cannot name a file must not pretend to.
+//
+// WHERE THE CHART FILE IS SAVED AND OPENED. [`ChartFileAction`] owns that, not this screen: it is
+// an app-bar action that opens a dialog holding the path field, the two buttons and the status
+// line, and it renders nothing in a browser where `.chart` save/open is not implemented. This
+// screen contributes only the WRITTEN song to save and takes the song an opened file decodes to.
+// Keeping it in the APP BAR rather than in the body is deliberate: a bar above the chart takes
+// height away from it, and D13's FIT mode refuses to shrink a chart past a legible floor, so a body
+// bar turned a 200-bar song that fitted on one page into one that did not.
 //
 // WHICH TRANSPOSITION THIS IS. Owner decision D14 gives transposition two meanings, and this screen
 // implements the EDITOR meaning: the chart is shown in another key, its key badge changes, and every
@@ -36,6 +46,7 @@ import 'package:chart_ui/chart_ui.dart';
 // names the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
 import 'package:flutter/material.dart' hide Key;
 
+import 'chart_file_bar.dart';
 import 'ireal_library.dart';
 import 'ireal_source.dart';
 import 'key_grid.dart';
@@ -135,6 +146,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// FIT and a phone in PAGES, and once the musician picks a mode it stays picked.
   PageMode? _chosenPageMode;
 
+  /// The bar and cell the musician last touched, or null when nothing is selected.
+  ///
+  /// This is the whole state of selection. It is a hit-test result rather than a copy of the
+  /// selection's geometry, so the highlight is drawn from the layout that is on screen NOW: a
+  /// rebuild from a transposition, a page-mode switch or a resize produces a new layout, and the
+  /// address in this hit is matched against it instead of a stale rectangle being painted at the
+  /// old position. Cleared when a different song or library is shown, because a section id and a
+  /// bar index then name different music.
+  ChartHit? _selection;
+
   @override
   void initState() {
     super.initState();
@@ -178,6 +199,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         _library = library;
         _selectedSong = 0;
         _semitonesBySong.clear();
+        // A section id and a bar index from the previous library name different music here, so a
+        // selection carried across a load would point at whatever happens to sit at that address.
+        _selection = null;
         _loading = false;
       });
       debugPrint(
@@ -294,7 +318,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   Widget build(BuildContext context) {
     final String? error = _error;
     return Scaffold(
-      appBar: AppBar(title: const Text('ChartApp — iReal reader')),
+      appBar: AppBar(
+        title: const Text('ChartApp — iReal reader'),
+        // Where a path exists, the chart document itself can be named and moved. The action renders
+        // nothing in a browser, so the source bar below stays the only file control there. It lives
+        // in the app bar because a control in the body takes height away from the chart, and D13's
+        // FIT mode refuses to shrink a chart past a legible floor — the bar turned a song that
+        // fitted on one page into one that did not.
+        actions: <Widget>[
+          ChartFileAction(
+            song: _writtenSongOfSelection,
+            initialPath: chartPathBeside(widget.initialPath),
+            onOpened: _adoptOpenedSong,
+          ),
+        ],
+      ),
       body: Column(
         children: <Widget>[
           _buildPathBar(context),
@@ -304,6 +342,44 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ],
       ),
     );
+  }
+
+  // PURPOSE: Give the save/open action the song to write, which must be the WRITTEN one and not the
+  //          one on screen.
+  // INPUTS: None; reads the library and the selection.
+  // OUTPUTS: The selected song as written, or null when nothing is loaded. A selected index outside
+  //          the library — which only a library replacement can produce — is treated as the first
+  //          song, the same rule [_buildBody] uses.
+  // KEYWORDS: written-form, selection, save-source, null-when-empty
+  Song? get _writtenSongOfSelection {
+    final IRealLibrary? library = _library;
+    if (library == null || library.songs.isEmpty) {
+      return null;
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    return library.songs[index].song;
+  }
+
+  // PURPOSE: Replace the shown library with the one song a `.chart` file produced, so the chart the
+  //          file describes is the one on screen.
+  // INPUTS: song — the written song decoded from the container.
+  // OUTPUTS: Nothing. The library becomes a single-song one, the selection returns to the first
+  //          song, and every remembered transposition and the current hit selection are cleared:
+  //          both are addressed by an index or a section id that names different music now.
+  // KEYWORDS: open-chart, adopt-song, state-reset, transposition, selection
+  void _adoptOpenedSong(Song song) {
+    setState(() {
+      _library = IRealLibrary(
+        playlistName: '',
+        songs: <IRealSong>[IRealSong(index: 0, song: song)],
+      );
+      _selectedSong = 0;
+      _semitonesBySong.clear();
+      _selection = null;
+      _error = null;
+    });
   }
 
   // PURPOSE: Give the reader the control that starts a load, in the form the platform can honour.
@@ -443,7 +519,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          onTap: () => setState(() => _selectedSong = index),
+          onTap: () => setState(() {
+            _selectedSong = index;
+            // A selection belongs to the song it was made in; another song's bar at the same
+            // address is a different bar.
+            _selection = null;
+          }),
         );
       },
     );
@@ -508,6 +589,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                   setState(() => _chosenPageMode = picked),
             ),
             const SizedBox(height: 6),
+            _buildSelectionLine(context, displayed),
             Expanded(child: _buildPages(entry, displayed, mode)),
           ],
         );
@@ -527,6 +609,119 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   PageMode _pageModeFor(double paneWidth) =>
       _chosenPageMode ??
       (paneWidth >= sceneBarTabletWidth ? PageMode.fit : PageMode.pages);
+
+  // PURPOSE: One page of the chart, with the touch that turns a point on the glass into a selection.
+  // INPUTS: page — the laid-out page to draw and hit-test against. song — the model it came from,
+  //         handed to the painter for the signs the layout does not carry.
+  // OUTPUTS: The page wrapped in a gesture detector that reports a completed tap. The detector is
+  //          OPAQUE because the page paints no widget over most of its area; without that, a tap on
+  //          the white space between two systems — exactly where a musician may miss — would fall
+  //          through instead of clearing the selection.
+  // KEYWORDS: page-widget, gesture-detector, tap, opaque, selection-entry
+  Widget _tappablePage(PageLayout page, Song song) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTapUp: (TapUpDetails details) => _select(page, details.localPosition),
+    child: CustomPaint(
+      painter: ChartPainter(
+        song: song,
+        page: page,
+        metrics: _metrics,
+        selection: _selection,
+      ),
+      child: const SizedBox.expand(),
+    ),
+  );
+
+  // PURPOSE: Turn a completed tap on a page into a selection, converting the surface point into the
+  //          page's own coordinates first, so a fitted page is hit where it is DRAWN rather than
+  //          where it was engraved.
+  // INPUTS: page — the page the tap landed on. localPosition — the point in the page widget's own
+  //         coordinate space, which is the surface the painter scaled into.
+  // OUTPUTS: Nothing. Sets [_selection] to the hit, or to null when the tap missed every bar; a miss
+  //          clears the selection rather than leaving a stale one, because a highlight that survives
+  //          the tap meant to dismiss it is a lie about what is selected. The surface point, the
+  //          converted page point and the answer are logged as key-value pairs, so the arithmetic
+  //          can be checked against what is on screen.
+  // KEYWORDS: tap-handling, coordinate-transform, page-point, hit-test, selection-state, structured-log
+  void _select(PageLayout page, Offset localPosition) {
+    final LayoutOffset surface = LayoutOffset(
+      localPosition.dx,
+      localPosition.dy,
+    );
+    final LayoutOffset pagePoint = page.pagePointOf(surface);
+    final ChartHit? hit = hitTestPage(page, pagePoint);
+    setState(() => _selection = hit);
+    debugPrint(
+      'viewer.select page=${page.index} scale=${page.scale} '
+      'surface=(${surface.x.toStringAsFixed(1)},${surface.y.toStringAsFixed(1)}) '
+      'page_point=(${pagePoint.x.toStringAsFixed(1)},'
+      '${pagePoint.y.toStringAsFixed(1)}) '
+      'hit=${hit == null ? 'none' : '${hit.sectionId}#${hit.barIndex} '
+                'beat=${hit.beat}'}',
+    );
+  }
+
+  // PURPOSE: State the selection in words beside the chart, because a highlight proves that
+  //          SOMETHING is selected and not which thing: a screenshot cannot falsify "the bar I
+  //          touched", and a labelled number can.
+  // INPUTS: context — the build context, for the text theme. song — the chart on screen, read to
+  //         number the bar the way a musician counts it.
+  // OUTPUTS: A one-line widget. With a selection it reads `selected: bar 12 cell 2`; without one it
+  //          invites a tap. A bar-level selection says so instead of inventing a cell number.
+  // KEYWORDS: selection-label, falsifiable-feedback, musician-numbering, empty-state
+  Widget _buildSelectionLine(BuildContext context, Song song) {
+    final ChartHit? hit = _selection;
+    final String text = hit == null
+        ? 'Tap a bar to select it.'
+        : _selectionLabel(song, hit);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          key: const ValueKey<String>('viewer-selection-label'),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // PURPOSE: Render a selection the way the musician counts — bars from the top of the chart and
+  //          cells from the start of the bar, both one-based — while the model keeps zero-based
+  //          indices. The conversion lives here so the label and the log cannot disagree silently.
+  // INPUTS: song — the chart. hit — the selection, holding the model's zero-based address.
+  // OUTPUTS: The label. A null cell means the touch landed on the bar and not on a cell, which is
+  //          stated rather than rounded to the nearest cell.
+  // KEYWORDS: label-format, one-based, global-bar-ordinal, model-address
+  String _selectionLabel(Song song, ChartHit hit) {
+    final int bar = _writtenBarOrdinal(song, hit.sectionId, hit.barIndex);
+    final int? beat = hit.beat;
+    return beat == null
+        ? 'selected: bar $bar (whole bar)'
+        : 'selected: bar $bar cell ${beat + 1}';
+  }
+
+  // PURPOSE: Number a bar the way a musician counts, across sections from the top, because the model
+  //          addresses a bar by its index inside its section and that number restarts at every
+  //          section.
+  // INPUTS: song — the chart. sectionId — the section the bar is in. barIndex — its index there.
+  // OUTPUTS: The one-based ordinal of the bar in the whole written chart. A section id the song does
+  //          not have — a layout and a model that disagree — still returns a finite number counted
+  //          from the end rather than throwing inside build.
+  // KEYWORDS: bar-ordinal, section-walk, total-function, defensive
+  int _writtenBarOrdinal(Song song, String sectionId, int barIndex) {
+    int ordinal = 0;
+    for (final Section section in song.sections) {
+      if (section.id == sectionId) {
+        return ordinal + barIndex + 1;
+      }
+      ordinal += section.bars.length;
+    }
+    return ordinal + barIndex + 1;
+  }
 
   // PURPOSE: Lay the displayed song out at the size the window gives it and show it as one fitted
   //          page or as a page at a time.
@@ -560,14 +755,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           if (page == null) {
             return _buildNoFit(context, outcome);
           }
-          return CustomPaint(
-            painter: ChartPainter(
-              song: displayed,
-              page: page,
-              metrics: _metrics,
-            ),
-            child: const SizedBox.expand(),
-          );
+          return _tappablePage(page, displayed);
         }
         final List<PageLayout> pages = _engine.layout(
           displayed,
@@ -580,14 +768,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         return PageView.builder(
           key: ValueKey<int>(entry.index),
           itemCount: pages.length,
-          itemBuilder: (BuildContext context, int index) => CustomPaint(
-            painter: ChartPainter(
-              song: displayed,
-              page: pages[index],
-              metrics: _metrics,
-            ),
-            child: const SizedBox.expand(),
-          ),
+          itemBuilder: (BuildContext context, int index) =>
+              _tappablePage(pages[index], displayed),
         );
       },
     );

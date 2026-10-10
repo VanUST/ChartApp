@@ -46,13 +46,49 @@ class PlacedChord {
   String toString() => 'placed($chord) at $bounds';
 }
 
-/// A bar drawn at a position, together with the chords inside it.
+/// One cell of a bar: the slice of the bar's width that one beat occupies.
+///
+/// A cell is not a chord. An empty cell is where a chord written before it keeps sounding, and it
+/// still owns a column of the bar, so an answer to "what did the musician touch" must be able to
+/// say "this cell, no chord" as readily as "this cell, this chord". The engine already divides the
+/// bar into these columns in order to place its chords; publishing those columns as layout values
+/// is what lets a hit test read the geometry that was engraved instead of re-deriving it, which is
+/// the same reason [PlacedChord.bounds] exists rather than being recomputed by the painter.
+class PlacedCell {
+  /// Creates a cell for [beat] with the given [bounds].
+  const PlacedCell({required this.beat, required this.bounds});
+
+  /// The cell's index inside its bar, in the song model's beat numbering.
+  ///
+  /// It is the `beat` half of an annotation anchor, so a cell named by a touch and a cell named by
+  /// an annotation are the same value and can be compared without a conversion.
+  final int beat;
+
+  /// Where the cell is drawn, in page coordinates.
+  ///
+  /// The rectangle spans the bar's full stave height and the cell's own column of its width, so a
+  /// point anywhere in the column — above, on or below the chord symbol — hits the same cell.
+  final LayoutRect bounds;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedCell && other.beat == beat && other.bounds == bounds;
+
+  @override
+  int get hashCode => Object.hash(beat, bounds);
+
+  @override
+  String toString() => 'PlacedCell($beat) at $bounds';
+}
+
+/// A bar drawn at a position, together with its cells and the chords inside it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
   const PlacedBar({
     required this.sectionId,
     required this.barIndex,
     required this.bounds,
+    required this.cells,
     required this.chords,
   });
 
@@ -68,6 +104,14 @@ class PlacedBar {
   /// Where the bar is drawn, in page coordinates.
   final LayoutRect bounds;
 
+  /// The bar's cells, left to right, one per beat the bar has room for.
+  ///
+  /// The columns tile the bar's interior between its two paddings; a point inside the bar but in
+  /// one of those paddings therefore lies over the bar and over no cell, which is a state a hit
+  /// test reports rather than hides. There is always at least one cell: the meter declares at
+  /// least one, and the engine widens the count to include a chord written past the meter.
+  final List<PlacedCell> cells;
+
   /// The chords inside the bar, ordered by cell and then by step.
   final List<PlacedChord> chords;
 
@@ -77,8 +121,14 @@ class PlacedBar {
         other.sectionId != sectionId ||
         other.barIndex != barIndex ||
         other.bounds != bounds ||
+        other.cells.length != cells.length ||
         other.chords.length != chords.length) {
       return false;
+    }
+    for (int index = 0; index < cells.length; index++) {
+      if (other.cells[index] != cells[index]) {
+        return false;
+      }
     }
     for (int index = 0; index < chords.length; index++) {
       if (other.chords[index] != chords[index]) {
@@ -89,8 +139,13 @@ class PlacedBar {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(sectionId, barIndex, bounds, Object.hashAll(chords));
+  int get hashCode => Object.hash(
+    sectionId,
+    barIndex,
+    bounds,
+    Object.hashAll(cells),
+    Object.hashAll(chords),
+  );
 
   @override
   String toString() => 'PlacedBar($sectionId[$barIndex]) at $bounds';
@@ -182,6 +237,27 @@ class PageLayout {
   List<PlacedBar> get bars => <PlacedBar>[
     for (final PlacedSystem system in systems) ...system.bars,
   ];
+
+  // PURPOSE: Turn a point on the surface the page is drawn on into the point in this page's own
+  //          coordinates that lies under it. This is the inverse of the single transform the
+  //          renderer applies, and it exists here because a hit test given a surface point would
+  //          otherwise have to know that [scale] exists — and a hit test that assumes scale 1 is
+  //          wrong ONLY for a fitted page, which is the failure hardest to notice, because every
+  //          ordinary page still answers correctly.
+  // INPUTS: surfacePoint — a position measured from the top-left of the rectangle the page is
+  //         drawn into, in logical pixels. This is the coordinate a pointer event arrives in when
+  //         the page fills its widget.
+  // OUTPUTS: The position in this page's engraved coordinates. Equal to [surfacePoint] when
+  //          [scale] is 1, so an ordinary page pays nothing; divided by [scale] otherwise. A
+  //          non-positive [scale] is not produced by the engine — [LayoutEngine] emits 1 or a
+  //          value at or above its legibility floor — so no clamp is applied here: a page a
+  //          caller built by hand with a meaningless scale yields a meaningless, visible result
+  //          rather than a plausible-looking wrong one.
+  // KEYWORDS: coordinate-transform, page-scale, fit, hit-testing, single-bridge, inverse
+  /// Returns the point of this page under [surfacePoint].
+  LayoutOffset pagePointOf(LayoutOffset surfacePoint) => scale == 1
+      ? surfacePoint
+      : LayoutOffset(surfacePoint.x / scale, surfacePoint.y / scale);
 
   @override
   bool operator ==(Object other) {
