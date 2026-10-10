@@ -6,8 +6,8 @@
 // KEYWORDS: chart-core, public-api, barrel, domain-boundary, pure-dart
 //
 // What lives here: written pitch and pitch classes, keys and their signatures, the rule that
-// resolves enharmonic spelling, the chord model, transposition, and the song structure that
-// addresses a bar.
+// resolves enharmonic spelling, the chord model, transposition, the song structure that addresses
+// a bar, the iReal import path from obfuscated body to tokens to Song, and the layout engine.
 //
 // The song model stores the WRITTEN form only. The order a tune is played in — repeats,
 // alternative endings, navigation — is a pure function over this model, so there is no second
@@ -18,9 +18,9 @@
 // device, no emulator and no Android SDK, and the dependency list in pubspec.yaml is empty to
 // keep that true. Every file in this library is pure: no I/O, no clock, no globals.
 //
-// Still absent by design, and deliberately not stubbed: the layout engine, the file codecs and
-// the op-log. The layout engine's shape is measured by spike S4, and the codecs' by S1; writing
-// either before those measurements would fix its design on a guess.
+// Still absent by design, and deliberately not stubbed: the `.chart` and `.setlist` file
+// containers and the snapshot format. Writing either before the ink format is measured would fix
+// its design on a guess.
 
 /// ChartApp's pure-Dart chart domain.
 library;
@@ -28,6 +28,7 @@ library;
 export 'src/chord.dart';
 export 'src/ireal/chord_parser.dart';
 export 'src/ireal/obfuscation.dart';
+export 'src/ireal/parser.dart';
 export 'src/ireal/tokenizer.dart';
 export 'src/key.dart';
 export 'src/layout/geometry.dart';
