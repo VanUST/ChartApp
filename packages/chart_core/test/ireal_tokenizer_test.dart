@@ -177,45 +177,58 @@ void main() {
       expect(notation[tokens[2].offset], 'C');
     });
 
-    test('the tokens reconstruct the input exactly', () {
-      // What this proves: no character is LOST. Slicing the input by the recorded offsets and
-      // reassembling it returns the input character for character, so a tokenizer that skipped a
-      // byte would fail here.
-      //
-      // What this does NOT prove, stated because it was checked rather than assumed: it would not
-      // have caught the two boundary bugs found in this tokenizer. `C7ppF7` collapsing into one
-      // chord token still reconstructs to `C7ppF7`, and `*AB-` splitting into the label `AB` plus
-      // a stray `-` still reconstructs to `*AB-`. Both are wrong BOUNDARIES, not lost characters.
-      // Those were caught by the exact token-kind assertions above and, for the section label,
-      // only by the real export. A property that holds for a wrong tokenisation is worth having
-      // and is not worth overstating.
-      //
-      // The corpus includes a form this tokenizer does not fully understand — a bass written after
-      // an alternate chord — because the property must hold there too: the characters are kept as
-      // an unrecognised token rather than dropped, which is what keeps every following offset
-      // pointing at a real position.
-      const List<String> corpus = <String>[
-        '*A|C7ppF7|',
-        '[*iB- |x |E- |x ]{*AB- |x |A |D,B/D# |E- |B- |C#,F# |B-,F#,  ||',
-        'T44{*AC ^7 |A-7 |D-9 |G7#5 Z',
-        'T44{C |A- |N1D- |G7 } |N2D- G7 |C6 Z',
-        'sEh,A7,lD- D-/C Bb7(A7b9) <Fine> <*72Solo> Q f S Y YY',
-        'Bb7(A7b9)/F',
-        'C@E',
-        '',
-      ];
-      for (final String notation in corpus) {
-        final List<IRealToken> tokens = tokenizeIReal(notation);
-        final StringBuffer rebuilt = StringBuffer();
-        for (int index = 0; index < tokens.length; index++) {
-          final int end = index + 1 < tokens.length
-              ? tokens[index + 1].offset
-              : notation.length;
-          rebuilt.write(notation.substring(tokens[index].offset, end));
+    test(
+      'token offsets are strictly increasing and address real characters',
+      () {
+        // WHAT THIS DOES NOT PROVE — falsified rather than assumed.
+        //
+        // This test was first written claiming it showed that no character is lost by the
+        // tokenizer. It does not. The `default` branch was mutated to emit no token at all, so that
+        // an unrecognised character vanished, and the test STILL PASSED. The reason is in the loop
+        // below: each slice runs from a token's offset to the NEXT token's offset, so a dropped
+        // token merely makes its predecessor's slice longer and the reassembly matches anyway.
+        //
+        // A property that also holds for a tokenizer which drops a character is not evidence that
+        // none is dropped. What is left is weaker and worth keeping honest: offsets increase
+        // strictly, so no slice is empty, and each offset addresses a real character — which is what
+        // the diagnostic offsets rely on. The strong version needs every token to carry its own
+        // consumed extent; that is not implemented, and the token-boundary assertions above plus the
+        // real-export test are the evidence that actually matters until it is.
+        const List<String> corpus = <String>[
+          '*A|C7ppF7|',
+          '[*iB- |x |E- |x ]{*AB- |x |A |D,B/D# |E- |B- |C#,F# |B-,F#,  ||',
+          'T44{*AC ^7 |A-7 |D-9 |G7#5 Z',
+          'T44{C |A- |N1D- |G7 } |N2D- G7 |C6 Z',
+          'sEh,A7,lD- D-/C Bb7(A7b9) <Fine> <*72Solo> Q f S Y YY',
+          // A form this tokenizer does not fully understand — a bass written after an alternate
+          // chord. The characters are preserved as an unrecognised token rather than dropped, which
+          // is what keeps every following offset pointing at a real position.
+          'Bb7(A7b9)/F',
+          'C@E',
+        ];
+        for (final String notation in corpus) {
+          final List<IRealToken> tokens = tokenizeIReal(notation);
+          expect(tokens, isNotEmpty, reason: notation);
+          expect(tokens.first.offset, 0, reason: notation);
+          for (int index = 0; index + 1 < tokens.length; index++) {
+            expect(
+              tokens[index + 1].offset,
+              greaterThan(tokens[index].offset),
+              reason:
+                  '${tokens[index].runtimeType} then '
+                  '${tokens[index + 1].runtimeType} in $notation',
+            );
+          }
+          expect(
+            tokens.last.offset,
+            lessThan(notation.length),
+            reason: notation,
+          );
         }
-        expect(rebuilt.toString(), notation, reason: notation);
-      }
-    });
+        // An empty body is the one input with no tokens, and it has no offsets to check.
+        expect(tokenizeIReal(''), isEmpty);
+      },
+    );
 
     test('an empty body is an empty token list', () {
       expect(tokenizeIReal(''), isEmpty);
