@@ -1,15 +1,15 @@
-# PURPOSE: Declare ink_native_android — the Android half of the federated ink plugin, carrying
-#          the Kotlin InkView scaffolding that will draw strokes from coalesced and predicted
-#          motion events.
+# PURPOSE: Declare ink_native_android — the Android half of the federated ink plugin. It carries
+#          the Kotlin InkView that draws strokes from real motion events, keeps the coalesced
+#          historical samples, and measures each drawn sample's input-to-present latency.
 # INPUTS: None. Resolved as a member of the root pub workspace.
-# OUTPUTS: A Flutter plugin whose native class InkNativeAndroidPlugin is registered on Android.
-#          IMPORTANT: the Dart side of the ink contract is not implemented yet, so this package
-#          does NOT satisfy InkNativePlatform and is not declared an implementation of ink_native.
-# KEYWORDS: ink-native, android, inkview, kotlin, plugin, spike-s2, not-yet-implemented
+# OUTPUTS: A Flutter plugin whose native class InkNativeAndroidPlugin is registered on Android and
+#          whose Dart class InkNativeAndroid implements InkNativePlatform. It declares
+#          `implements: ink_native`, so the app-facing package routes to it on Android.
+# KEYWORDS: ink-native, android, inkview, kotlin, plugin, federated-implementation, latency
 name: ink_native_android
 description: >-
-  Android ink implementation scaffolding backed by a custom InkView. Native class registered;
-  the Dart contract implementation lands with spike S2.
+  Android ink implementation: a custom InkView in Kotlin that draws coalesced stylus and finger
+  strokes, plus the input-to-present latency measurement that only a device can produce.
 version: 0.1.0
 publish_to: none
 
@@ -31,18 +31,34 @@ dev_dependencies:
 
 flutter:
   plugin:
+    # `implements` is what makes this package an implementation of the app-facing contract rather
+    # than a second, separately registerable plugin. It is true now: the Dart class below extends
+    # InkNativePlatform and satisfies every member of it.
+    implements: ink_native
     platforms:
       android:
         package: com.chartapp.ink_native_android
         pluginClass: InkNativeAndroidPlugin
+        # Called by the generated registrant before main(), so the app-facing fallback never
+        # claims the platform slot on Android.
+        dartPluginClass: InkNativeAndroid
 
-# Wiring note. The same three conditions as ink_native_ios apply before this package can be
-# declared an implementation of ink_native: `implements: ink_native`, a `dartPluginClass`
-# extending InkNativePlatform, and a dependency from the app-facing package. See the note in
-# ink_native_ios/pubspec.yaml; the reasoning is identical and is not repeated here.
+# Decisions already made in this package, recorded here because they are not visible from the
+# Kotlin source alone:
 #
-# One Android-specific decision is still open and belongs to spike S2: whether the ink surface
-# reaches Dart through a PlatformView using Hybrid Composition, which is what the design calls
-# for, or through a Texture. Hybrid Composition is the design's choice because it gives the
-# native view the real input stream it needs for predicted events; either way the Dart-side
-# contract is unchanged, which is the point of fixing it now.
+# * The surface reaches Dart as a PlatformView in **hybrid composition**
+#   (`PlatformViewsService.initExpensiveAndroidView`), not as a texture. The choice is the input
+#   path: a real view in the Android hierarchy receives the digitizer's own MotionEvents with
+#   their original event timestamps, which is the origin every measurement here is taken from.
+#   The Dart side selects the mode and passes it in the creation parameters, so the surface
+#   reports the mode that was actually used instead of a constant.
+#
+# * `MotionEvent.TOOL_TYPE_PALM` is `@hide` and absent from the public SDK, so the palm tool type
+#   is compared against its documented numeric value and the raw tool type is reported alongside
+#   every classification. That is what lets the palm observation be checked against the digitizer
+#   rather than trusted.
+#
+# * The presentation-time source is the display pipeline's own frame timeline where the public API
+#   allows it (`Choreographer.postVsyncCallback`, Android 13+), and otherwise `frameTimeNanos`
+#   plus one refresh period, which is a lower bound. Both are reported per sample. See the header
+#   of InkSurfaceView.kt for the full list of what the number includes and excludes.

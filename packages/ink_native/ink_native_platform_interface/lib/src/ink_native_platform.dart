@@ -4,7 +4,8 @@
 // INPUTS: None at declaration. At runtime the current implementation is set through
 //         `InkNativePlatform.instance`.
 // OUTPUTS: An abstract class whose methods return Futures that complete when the native side
-//          has applied the change, and a broadcast-able `onStrokeCommitted` stream. Calling a
+//          has applied the change, and broadcast-able streams: `onStrokeCommitted` for finished
+//          strokes, plus `onLatencySample` and `onPalmObservation` for the bench. Calling a
 //          method with no implementation registered throws [UnimplementedError]; the app-facing
 //          package installs a desktop no-op so that a desktop build degrades instead of
 //          crashing.
@@ -91,4 +92,46 @@ abstract class InkNativePlatform extends PlatformInterface {
   /// Emits after the stroke is committed to the native model, not per input event, so the
   /// listener does not run on the drawing hot path.
   Stream<CommittedStroke> get onStrokeCommitted;
+
+  // ---------------------------------------------------------------------------------------
+  // Measurement surface.
+  //
+  // These four members exist because input-to-photon latency is a property of the hardware
+  // path and can only be measured on the device, so the device has to be able to say what it
+  // measured. They are added to this contract rather than kept inside one platform package
+  // because the bench that reads them is the app's, and a bench that reached into
+  // `ink_native_android` directly would stop compiling the day an iOS pen has to be measured
+  // the same way. Nothing in the drawing path reads them.
+  // ---------------------------------------------------------------------------------------
+
+  /// Reports one drawn input sample per emission, with the time it was expected to be shown.
+  ///
+  /// Emits after a stroke is finished rather than per input event, for the same reason
+  /// [onStrokeCommitted] does: a channel call per sample would itself be on the drawing hot
+  /// path and would change the number being measured.
+  ///
+  /// Implementations that cannot measure latency emit nothing, and [describeSurface] says so,
+  /// rather than emitting a fabricated zero.
+  Stream<InkLatencySample> get onLatencySample;
+
+  /// Reports what the surface observed about each stroke's contact geometry.
+  ///
+  /// This carries an observation, not a decision: [InkPalmObservation.drawAdmitted] records
+  /// what the surface did with a contact whose raw tool type it could see, and the absence of
+  /// any observation is not evidence that no palm touched the glass.
+  Stream<InkPalmObservation> get onPalmObservation;
+
+  /// Describes what this surface measures and on which clock.
+  ///
+  /// Must be callable before [initialize]; an unsupported implementation answers with a
+  /// description that names itself as having no native surface, so a caller never has to
+  /// distinguish "not measured yet" from "cannot be measured".
+  Future<InkSurfaceInfo> describeSurface();
+
+  /// A directory this surface can write bench logs to, or null when it has none.
+  ///
+  /// The log is written by the Dart side, which owns the bench format, so this answers only
+  /// where the bytes may go. A null answer means the bench must be read from a live console
+  /// instead of from a file, which is why it is reported rather than thrown.
+  Future<String?> benchLogDirectory();
 }

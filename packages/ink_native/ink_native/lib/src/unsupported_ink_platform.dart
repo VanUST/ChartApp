@@ -4,9 +4,12 @@
 //          exception that reaches the widget tree.
 // INPUTS: None. Every mutating method accepts its arguments and ignores them.
 // OUTPUTS: [supportsInk] is false; [exportStrokes] answers with an empty list rather than null;
-//          [onStrokeCommitted] is a permanently empty stream, so a listener waits forever
-//          rather than being told a stroke arrived. Nothing here throws for a call made in the
-//          wrong order, because a desktop build has no ordering to enforce.
+//          [onStrokeCommitted], [onLatencySample] and [onPalmObservation] are permanently empty
+//          streams, so a listener waits forever rather than being told a stroke or a sample
+//          arrived. [describeSurface] answers with a description that names itself as having no
+//          native surface, and [benchLogDirectory] answers null, so a bench run on a desktop
+//          prints "no surface" instead of reporting a latency of zero. Nothing here throws for
+//          a call made in the wrong order, because a desktop build has no ordering to enforce.
 // KEYWORDS: ink-native, no-op, desktop, unsupported, empty-stream, graceful-degradation
 import 'package:ink_native_platform_interface/ink_native_platform_interface.dart';
 
@@ -36,4 +39,31 @@ class UnsupportedInkPlatform extends InkNativePlatform {
   @override
   Stream<CommittedStroke> get onStrokeCommitted =>
       const Stream<CommittedStroke>.empty();
+
+  @override
+  Stream<InkLatencySample> get onLatencySample =>
+      const Stream<InkLatencySample>.empty();
+
+  @override
+  Stream<InkPalmObservation> get onPalmObservation =>
+      const Stream<InkPalmObservation>.empty();
+
+  @override
+  Future<InkSurfaceInfo> describeSurface() async => const InkSurfaceInfo(
+    // Named `none` rather than a plausible-looking mode: a reader who sees this in a bench
+    // report must be able to tell that no surface was present, not that one was misconfigured.
+    platformViewMode: 'none',
+    presentationSource: InkPresentationSource.vsyncPlusDelay,
+    apiLevel: 0,
+    refreshRateHz: 0,
+    clockOffsetMs: 0,
+    clockOffsetDriftMs: 0,
+    deviceModel: '',
+    androidRelease: '',
+    eventTimePrecision: 'unknown',
+    usedTimelinePoster: false,
+  );
+
+  @override
+  Future<String?> benchLogDirectory() async => null;
 }
