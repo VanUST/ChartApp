@@ -19,6 +19,10 @@ resolution: workspace
 dependencies:
   args: ^2.7.0
   chart_core: any
+  # Reused so that "p95" has exactly one implementation in this project: the S4 benchmark and the
+  # device bench logs are reduced by the same code, and a difference between them could not then
+  # be explained by a different percentile definition.
+  logview: any
 
 dev_dependencies:
   lints: ^6.1.0

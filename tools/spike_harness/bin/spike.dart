@@ -33,10 +33,9 @@ const Map<String, String> registeredSpikes = <String, String>{
 ///
 /// A spike is added here in the same change that makes its claim measurable. S1 is absent
 /// because it cannot be measured without real iReal exports, and a body that reported numbers
-/// from nowhere would be worse than an absent one. S4 and S5 wait on the song model and on the
-/// storage opener respectively.
+/// from nowhere would be worse than an absent one. S5 waits on the choice of storage opener.
 final Map<String, SpikeOutcome Function()> _runnable =
-    <String, SpikeOutcome Function()>{'s3': runSpikeS3};
+    <String, SpikeOutcome Function()>{'s3': runSpikeS3, 's4': runSpikeS4};
 
 void main(List<String> arguments) {
   final ArgParser parser = ArgParser()

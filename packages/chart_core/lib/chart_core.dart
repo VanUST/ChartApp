@@ -27,6 +27,11 @@ library;
 
 export 'src/chord.dart';
 export 'src/key.dart';
+export 'src/layout/geometry.dart';
+export 'src/layout/layout_engine.dart';
+export 'src/layout/layout_style.dart';
+export 'src/layout/page_layout.dart';
+export 'src/layout/text_metrics.dart';
 export 'src/pitch.dart';
 export 'src/song/bar.dart';
 export 'src/song/section.dart';
