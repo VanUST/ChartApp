@@ -65,6 +65,22 @@ Device-only measurements (ink latency, frame rate, cold-open) are a manual CI jo
 `docs/ux/test-protocol.md` for the bench procedure and `tools/logview` for reading its
 output.
 
+## Where it runs
+
+The application is distributed as a **web page**, installable to the home screen, and the
+native targets stay for the quality they give where it matters. That is a recorded decision
+(D20 in `docs/sdd.md`) rather than a preference: the stores are not reachable from every
+country a musician may live in, and a page needs no account, no signing step and no review.
+
+The same Dart code serves every target. The only platform-bound part is the ink, and it sits
+behind one seam (`packages/ink_native`): Android supplies raw stylus input through a
+PlatformView, the web supplies Pointer Events, and a stroke is canonicalised into ONE stored
+form either way — so a chart written on one device opens on the other.
+
+User data lives in **files the musician keeps**, not in browser storage. That is not tidiness:
+Safari deletes script-writable storage after seven days of no interaction, and a file the user
+holds is what makes that harmless.
+
 ## Commands
 
 | Command | What it does |
@@ -79,12 +95,30 @@ output.
 | `dart run logview bench.jsonl --metric ms --agg p50,p95` | Summarise a bench log |
 | `lefthook install` | Install the pre-commit hook (once per checkout) |
 
+**`lefthook install` is a step, not a claim.** As committed, `.git/hooks` holds only the shipped
+samples and `lefthook` is not on most machines' PATH, so NOTHING RUNS ON COMMIT until someone
+runs that command in their own checkout. The project declaration lists that honestly: see
+`.dsh/project.json`, rule `commit-runs-the-fast-checks`, which is marked pending rather than
+enforced.
+
+`bootstrap` does not install the hook either, so the gate you actually depend on is the one you
+run: `melos run verify`.
+
+## The project declaration
+
+`.dsh/project.json` names this project's languages, its verification commands, and every rule
+it claims **together with the command that fails when that rule is broken**. A rule with no such
+command is listed as pending rather than as enforced, so the file states what is true — including
+the rules nothing currently checks. Read it with the `context_rules` tool, or as a file.
+
 ## Layout
 
 ```
-apps/mobile/                       Flutter application (android, ios, linux, windows)
-packages/chart_core/               Pure Dart domain: model, grammar, transposer, layout
-packages/chart_ui/                 Design system, docks, gestures
+apps/mobile/                       Flutter application (android, ios, linux, windows, web)
+apps/mobile/web/                   The web target's shell, manifest and icons
+packages/chart_core/               Pure Dart domain: model, grammar, transposer, layout,
+                                     the op-log, the .chart container, the play-order derivation
+packages/chart_ui/                 Design system, painters, gestures
 packages/ink_native/               Federated plugin container
   ink_native/                        App-facing package
   ink_native_platform_interface/      Contract shared by all implementations
@@ -94,8 +128,9 @@ packages/storage_drift/            SQLite schema, repositories, migrations
 packages/telemetry/                Structured event schemas, batching, sinks
 tools/logview/                     JSONL bench-log analyser (p50/p95)
 tools/spike_harness/               Executable spikes S1-S5
-docs/sdd.md                        The system design document
-docs/contracts/                    Per-module PURPOSE/INPUTS/OUTPUTS/KEYWORDS
+tools/web_pen_spike/               Page that measures what a browser gives a stylus
+.dsh/project.json                  Languages, verification commands and rules
+docs/sdd.md                        The design record: decisions, and what is NOT done
 docs/fixtures/                     Hand-transcribed sketch fixtures
 docs/ux/                           Gesture legend, tap budgets, test protocol
 ```
