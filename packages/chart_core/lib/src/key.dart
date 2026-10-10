@@ -65,23 +65,54 @@ class Key {
   //          degrades to C-major spelling instead of failing a whole import.
   // KEYWORDS: circle-of-fifths, key-signature, sharps, flats, derivation
   /// Returns this key's position on the circle of fifths, negative for flat keys.
-  int get signatureFifths {
-    // The relative major of a minor key is a minor third above its tonic, spelled by letter so
-    // that A minor maps to C major rather than to a pitch-class coincidence.
-    final WrittenNote reference = mode == Mode.major
-        ? tonic
-        : WrittenNote(
-            tonic.letter.step(2),
-            shortestAlter(
-              normalizePitchClass(tonicPitchClass + 3),
-              tonic.letter.step(2),
-            ),
-          );
+  int get signatureFifths => _fifthsOf(_circleReference) ?? 0;
 
-    // A key a given number of fifths above C has its tonic on the letter that many letter-steps
-    // of four up, and its pitch class seven semitones up per fifth. Searching the practical
-    // range and comparing the spelled result keeps the inversion honest without a lookup table
-    // that could disagree with the arithmetic.
+  // PURPOSE: Report whether this key's tonic is one of the spellings the practical circle of
+  //          fifths produces, so a transposition control can refuse to offer a key it cannot
+  //          name conventionally instead of showing a spelling no musician would write.
+  // INPUTS: None.
+  // OUTPUTS: True for every tonic that sits at a position from -7 to +7 on the circle: C, Db, D,
+  //          Eb, E, F, F#, G, Ab, A, Bb, B and their parallel minors — the keys a chart is
+  //          actually written in. False for a spelling beyond that range, such as D# major
+  //          (nine sharps) or Db minor (eight flats), whose interval from the circle cannot be
+  //          named by [signatureFifths] and reaches 0 there.
+  //
+  //          The distinction matters because [signatureFifths] returns 0 both for a key with no
+  //          signature and for a key it cannot place, and a caller that has to choose which
+  //          enharmonic to display must be able to tell those apart.
+  // KEYWORDS: key-signature, practical-circle, enharmonic-choice, spellability
+  /// Returns whether this key is a spelling the practical circle of fifths produces.
+  bool get isPracticallySpelled => _fifthsOf(_circleReference) != null;
+
+  // PURPOSE: Give both [signatureFifths] and [isPracticallySpelled] the one note they place on
+  //          the circle, so the two cannot disagree about which spelling they are looking for.
+  // INPUTS: None.
+  // OUTPUTS: The tonic itself for a major key. For a minor key, its relative major — a minor
+  //          third above the tonic, spelled by letter so that A minor maps to C major rather
+  //          than to a pitch-class coincidence.
+  // KEYWORDS: circle-of-fifths, relative-major, derivation
+  WrittenNote get _circleReference => mode == Mode.major
+      ? tonic
+      : WrittenNote(
+          tonic.letter.step(2),
+          shortestAlter(
+            normalizePitchClass(tonicPitchClass + 3),
+            tonic.letter.step(2),
+          ),
+        );
+
+  // PURPOSE: Invert the circle of fifths for one spelled note, which is the arithmetic both
+  //          getters above are stated in.
+  // INPUTS: reference — the note to place, normally a key's tonic or its relative major.
+  // OUTPUTS: The number of fifths above C, negative for flat keys, or null when no position in
+  //          the practical range -7..+7 spells that note.
+  //
+  //          A key a given number of fifths above C has its tonic on the letter that many
+  //          letter-steps of four up, and its pitch class seven semitones up per fifth. Searching
+  //          the practical range and comparing the spelled result keeps the inversion honest
+  //          without a lookup table that could disagree with the arithmetic.
+  // KEYWORDS: circle-of-fifths, inversion, search, nullable-result
+  int? _fifthsOf(WrittenNote reference) {
     for (int fifths = -7; fifths <= 7; fifths++) {
       final NoteLetter letter = NoteLetter.c.step(4 * fifths);
       final int pitchClass = normalizePitchClass(7 * fifths);
@@ -93,7 +124,7 @@ class Key {
         return fifths;
       }
     }
-    return 0;
+    return null;
   }
 
   // PURPOSE: Report which accidental direction this key prefers for a note that is not one of

@@ -79,6 +79,104 @@ class LayoutEngine {
     );
   }
 
+  /// The smallest fraction of the requested page size the FIT mode will shrink to.
+  ///
+  /// Below this the chord line stops being readable at arm's length on the tablet this is built
+  /// for, and a chart that has been shrunk past it is worse than one that is honestly reported as
+  /// not fitting. The value is a product decision, not a measurement: 50% of a 15-pixel chord
+  /// symbol is 7.5 logical pixels, which is about 16 physical pixels at the reference tablet's
+  /// 2.125 device pixel ratio.
+  static const double minLegibleScale = 0.5;
+
+  // PURPOSE: Put a whole song on one page, scaled down rather than paginated, which is what a
+  //          musician reading a chart on stage asks for when the tune is short enough.
+  // INPUTS: song — the chart. pageWidth and pageHeight — the surface the single page must fit
+  //         inside, in logical pixels. minScale — the smallest scale that counts as legible; the
+  //         default is [minLegibleScale].
+  // OUTPUTS: A [FitOutcome]. It fits when the whole song lands on one page at a scale of at least
+  //          [minScale], and the outcome then carries that page and its scale. It does not fit
+  //          when even [minScale] leaves more than one page, and the outcome then carries no page
+  //          and the smallest scale that was tried, so a caller can say how far off it is. A song
+  //          with no bars reports that it does not fit rather than a blank page, matching the
+  //          contract of [layout].
+  //
+  //          HOW THE SCALE IS FOUND. The page is re-engraved at `pageWidth / scale` by
+  //          `pageHeight / scale`: a larger virtual page packs the systems wider, so fewer of
+  //          them are needed, and shrinking the result by `scale` lands it on the real surface.
+  //          That is why the scale lives on [PageLayout] as one factor between engraved
+  //          coordinates and the surface, instead of the engine emitting pre-multiplied geometry
+  //          that no longer matches the page it was laid out for. The largest workable scale is
+  //          found by a fixed-count bisection, so the result is the same on every run.
+  // KEYWORDS: fit-page, one-page, auto-scale, bisection, legibility-floor, page-mode
+  /// Returns the single page [song] fits on, or why it does not.
+  FitOutcome fitToPage(
+    Song song, {
+    required double pageWidth,
+    required double pageHeight,
+    double minScale = minLegibleScale,
+  }) {
+    if (song.sections.isEmpty || minScale <= 0 || minScale > 1) {
+      return const FitOutcome(page: null, scale: 1, fits: false);
+    }
+    final List<PageLayout> asRequested = layout(
+      song,
+      pageWidth: pageWidth,
+      pageHeight: pageHeight,
+    );
+    if (asRequested.length == 1) {
+      // Already one page at full size, so no shrinking is needed and none is done: a chart is
+      // never enlarged past the surface it was given.
+      return FitOutcome(page: asRequested.single, scale: 1, fits: true);
+    }
+    if (asRequested.isEmpty ||
+        !_fitsOnOnePage(song, pageWidth, pageHeight, minScale)) {
+      return FitOutcome(page: null, scale: minScale, fits: false);
+    }
+    double low = minScale;
+    double high = 1;
+    for (int step = 0; step < 24; step++) {
+      final double mid = (low + high) / 2;
+      if (_fitsOnOnePage(song, pageWidth, pageHeight, mid)) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    final PageLayout raw = layout(
+      song,
+      pageWidth: pageWidth / low,
+      pageHeight: pageHeight / low,
+    ).single;
+    return FitOutcome(
+      page: PageLayout(
+        index: raw.index,
+        size: raw.size,
+        systems: raw.systems,
+        scale: low,
+      ),
+      scale: low,
+      fits: true,
+    );
+  }
+
+  // PURPOSE: Answer whether the song would be one page if it were engraved at [scale] and shrunk
+  //          back onto the caller's surface.
+  // INPUTS: song, the surface size and the scale to test.
+  // OUTPUTS: True when the enlarged page needs no more than one page.
+  // KEYWORDS: fit-test, virtual-page, single-page
+  bool _fitsOnOnePage(
+    Song song,
+    double pageWidth,
+    double pageHeight,
+    double scale,
+  ) =>
+      layout(
+        song,
+        pageWidth: pageWidth / scale,
+        pageHeight: pageHeight / scale,
+      ).length ==
+      1;
+
   // PURPOSE: Report the width a bar needs for its content. Exposed because the bar width is the
   //          unit a layout test reasons in, and because a caller sizing a single bar should not
   //          have to lay out a whole song to find out.
@@ -374,6 +472,34 @@ class LayoutEngine {
     }
     return placed;
   }
+}
+
+/// The result of asking the engine to put a whole song on one page.
+class FitOutcome {
+  /// Creates an outcome that either carries the fitted [page] or reports that none fits.
+  const FitOutcome({
+    required this.page,
+    required this.scale,
+    required this.fits,
+  });
+
+  /// The single page holding the whole song, or null when the song does not fit legibly.
+  final PageLayout? page;
+
+  /// The factor the page is drawn at.
+  ///
+  /// When [fits], this is the scale the engine chose, at least the `minScale` the caller allowed.
+  /// When not, it is that floor — the smallest the engine was willing to try — so a caller can say
+  /// how far short the chart fell without inventing a number.
+  final double scale;
+
+  /// Whether [page] holds the whole song at a legible scale.
+  final bool fits;
+
+  @override
+  String toString() => fits
+      ? 'FitOutcome(fits, scale $scale, ${page?.systems.length} system(s))'
+      : 'FitOutcome(does not fit, floor $scale)';
 }
 
 /// A bar together with the width it needs and whether it opens a section.

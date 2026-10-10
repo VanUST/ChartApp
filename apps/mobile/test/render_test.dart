@@ -3,15 +3,19 @@
 //          runs the real Flutter engine with no window, so the painting here is the same painting
 //          the application does; only the target differs (an image instead of a screen). It exists
 //          because a window on this machine takes focus away from whoever is working at it, and an
-//          agent that pops one to look at its own output interferes with its user.
+//          agent that pops one to look at its own output interferes with its user. The same test
+//          renders the song in a requested key, so a transposition can be checked by eye against
+//          the PNG and against the chord list printed beside it.
 // INPUTS: The owner's export at [defaultIRealPath]. A real system font is loaded when one is found,
 //         because the framework's default test font draws every glyph as a filled box and a page
-//         of boxes proves the layout but nothing about the text.
-// OUTPUTS: chair-page-1.png and chair-page-1@2x.png in the render output directory outside the
-//          repository, with their paths, page count and bar count printed to stdout. The test is
-//          SKIPPED when the owner's file is absent, so the suite stays green on a machine that does
-//          not have the export.
-// KEYWORDS: headless-render, png, ground-truth, chair, page-layout, offscreen, no-window, font
+//         of boxes proves the layout but nothing about the text. IREAL_RENDER_TRANSPOSE selects a
+//         key by the interval the twelve-key grid uses.
+// OUTPUTS: PNGs in the render output directory outside the repository, named for the song and the
+//          key, with their paths, page count, bar count and the chord of every bar printed to
+//          stdout. The test is SKIPPED when the owner's file is absent, so the suite stays green on
+//          a machine that does not have the export.
+// KEYWORDS: headless-render, png, ground-truth, chair, page-layout, offscreen, no-window, font,
+//           transposition, two-keys
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -196,6 +200,11 @@ void main() {
   final String outputDirectory =
       Platform.environment['IREAL_RENDER_OUT'] ?? renderOutputDirectory;
   final String slug = song.toLowerCase().replaceAll(RegExp(r'\s+'), '-');
+  // The interval the twelve-key grid uses: -5..+6, 0 for the written key. Anything else is
+  // rejected rather than silently clamped, because a render that quietly shows a different key
+  // than the one asked for is worse than no render.
+  final int transpose =
+      int.tryParse(Platform.environment['IREAL_RENDER_TRANSPOSE'] ?? '0') ?? 0;
 
   test(
     'renders $song to PNG files without opening a window',
@@ -203,6 +212,24 @@ void main() {
       final IRealLibrary library = _loadOwnerLibrary(defaultIRealPath)!;
       final IRealSong? entry = _songTitled(library, song);
       expect(entry, isNotNull, reason: 'the owner export must contain "$song"');
+      final Song written = entry!.song;
+      final TranspositionTarget target = const TranspositionGrid()
+          .targets(written.key)
+          .firstWhere(
+            (TranspositionTarget candidate) => candidate.semitones == transpose,
+            orElse: () => throw StateError(
+              'IREAL_RENDER_TRANSPOSE=$transpose is outside the twelve-key '
+              'grid interval range -5..+6',
+            ),
+          );
+      final Song shown = transpose == 0
+          ? written
+          : transposeSong(written, transpose, toKey: target.key);
+      const SpellingTable renderTable = SpellingTable();
+      final String keySlug = shown.key.toString().toLowerCase().replaceAll(
+        RegExp(r'\s+'),
+        '-',
+      );
 
       final String? family = await _loadChartFont();
       if (family == null) {
@@ -227,11 +254,35 @@ void main() {
           sectionLabelHeight: 26,
         ),
       );
-      final List<PageLayout> pages = engine.layout(
-        entry!.song,
-        pageWidth: renderPageWidth,
-        pageHeight: renderPageHeight,
-      );
+      // IREAL_RENDER_FIT=1 renders the FIT page instead of the first paginated one, so the scaled
+      // page can be looked at rather than only asserted about.
+      final bool fitMode = Platform.environment['IREAL_RENDER_FIT'] == '1';
+      final List<PageLayout> pages;
+      double fitScale = 1;
+      if (fitMode) {
+        final FitOutcome fit = engine.fitToPage(
+          shown,
+          pageWidth: renderPageWidth,
+          pageHeight: renderPageHeight,
+        );
+        final PageLayout? fitted = fit.page;
+        expect(
+          fitted,
+          isNotNull,
+          reason:
+              'FIT must put the song on one page at a scale of at least '
+              '${LayoutEngine.minLegibleScale}, but it reported '
+              '${fit.scale}',
+        );
+        fitScale = fit.scale;
+        pages = <PageLayout>[fitted!];
+      } else {
+        pages = engine.layout(
+          shown,
+          pageWidth: renderPageWidth,
+          pageHeight: renderPageHeight,
+        );
+      }
       expect(
         pages,
         isNotEmpty,
@@ -243,13 +294,34 @@ void main() {
           .map((PlacedSystem system) => system.sectionLabel)
           .join(',');
       stdout.writeln(
-        'render.song title="${entry.title}" key=${entry.song.key} '
-        'bars=${entry.song.writtenBarCount} sections=${entry.song.sections.length} '
+        'render.song title="${entry.title}" written=${written.key} '
+        'shown=${shown.key} transpose=$transpose mode=${fitMode ? 'fit' : 'pages'} '
+        'bars=${shown.writtenBarCount} sections=${shown.sections.length} '
         'issues=${entry.issues.length} pages=${pages.length} '
+        'fit_scale=$fitScale '
         'page_logical=${renderPageWidth}x$renderPageHeight',
       );
       for (final IRealParseIssue issue in entry.issues) {
         stdout.writeln('render.issue @${issue.offset}: ${issue.message}');
+      }
+      // Every bar's chords in the shown key, printed with the beat they sit on, so the
+      // transposition and the cells the chords occupy can be checked against the PNG.
+      stdout.writeln('render.chords key=${shown.key}');
+      for (final Section section in shown.sections) {
+        for (int index = 0; index < section.bars.length; index++) {
+          final Bar bar = section.bars[index];
+          final String chords = bar.chords
+              .map(
+                (BeatChord placed) =>
+                    '${placed.beat}.${placed.step}'
+                    '=${placed.chord.render(shown.key, renderTable)}',
+              )
+              .join(' ');
+          stdout.writeln(
+            'render.chord ${section.label}[$index] '
+            '${chords.isEmpty ? '(none)' : chords}',
+          );
+        }
       }
       stdout.writeln(
         'render.page1 bars=${pages.first.bars.length} '
@@ -260,10 +332,10 @@ void main() {
       outDir.createSync(recursive: true);
       for (final double ratio in <double>[1.0, 2.0]) {
         final String name = ratio == 1.0
-            ? '$slug-page-1.png'
-            : '$slug-page-1@2x.png';
+            ? '$slug-$keySlug-page-1${fitMode ? '-fit' : ''}.png'
+            : '$slug-$keySlug-page-1${fitMode ? '-fit' : ''}@2x.png';
         final File out = File('${outDir.path}${Platform.pathSeparator}$name');
-        await _renderPageToPng(pages.first, entry.song, metrics, ratio, out);
+        await _renderPageToPng(pages.first, shown, metrics, ratio, out);
         stdout.writeln(
           'render.wrote path=${out.path} bytes=${out.lengthSync()} '
           'pixels=${(renderPageWidth * ratio).round()}x'

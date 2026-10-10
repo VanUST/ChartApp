@@ -1,22 +1,37 @@
-// PURPOSE: Show the songs an iReal export contains and render the selected one a page at a time,
-//          so the importer can be checked against the application the file came from. This is a
-//          reader for verification, not an editor: it shows the layout the engine produced, and
-//          the issue list the import reported, without changing either.
+// PURPOSE: Show the songs an iReal export contains and render the selected one as a chart a
+//          musician can read: in the key they choose, with the whole tune on one page or paginated,
+//          and with the performance facts — position, tempo, style, key and repeats — on one bar.
+//          It is a reader first: it shows the layout the engine produced and the issue list the
+//          import reported.
 // INPUTS: A path typed by the reader, an [IRealLibraryLoader] that turns a path into an
 //         [IRealLibrary], a starting path, and whether to load that path on the first frame. The
 //         loader is injected so a widget test can pump this screen with a synthetic payload and
 //         never touch the filesystem.
-// OUTPUTS: A screen with a path bar, a song list, and the selected song's pages, each drawn by
-//          `ChartPainter` at the size the window gives it.
-// KEYWORDS: viewer, ireal, reader, screen, page-view, widget-test-seam, verification
+// OUTPUTS: A screen with a path bar, a song list, a scene bar and the selected song's page or
+//          pages, each drawn by `ChartPainter` at the size the window gives it.
+// KEYWORDS: viewer, ireal, reader, screen, page-view, transposition, scene-bar, page-modes,
+//           widget-test-seam, verification
+//
+// WHICH TRANSPOSITION THIS IS. Owner decision D14 gives transposition two meanings, and this screen
+// implements the EDITOR meaning: the chart is shown in another key, its key badge changes, and every
+// chord is re-spelled, while the loaded library keeps the written form and a per-song interval
+// remembers how far the shown chart has been moved. The SCENE meaning — an offset on one setlist
+// position that leaves the song's written key alone — is NOT implemented here; it needs a setlist,
+// and the model already carries the interval for it as `SetlistItem.transposeSem`, which a scene
+// view would apply per chord while keeping `Song.key` as written. See
+// `packages/chart_core/lib/src/transposition.dart` for the same note beside the operation itself.
 
 import 'dart:async';
 
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
-import 'package:flutter/material.dart';
+// Flutter's own `Key` (widget identity) collides with the domain's musical Key, and this screen
+// names the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
+import 'package:flutter/material.dart' hide Key;
 
 import 'ireal_library.dart';
+import 'key_grid.dart';
+import 'scene_bar.dart';
 
 /// Turns a path into the library it holds.
 typedef IRealLibraryLoader = Future<IRealLibrary> Function(String path);
@@ -47,7 +62,8 @@ class IRealViewerScreen extends StatefulWidget {
   State<IRealViewerScreen> createState() => _IRealViewerScreenState();
 }
 
-/// The viewer's state: the loaded library, which song is selected, and the last load error.
+/// The viewer's state: the loaded library, which song is selected, how far each song has been
+/// transposed for the screen, the page mode once the musician chooses one, and the last load error.
 class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// The one metrics instance. It is shared with every [ChartPainter] below so that a chord is
   /// drawn in exactly the box the engine measured for it.
@@ -69,11 +85,27 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     ),
   );
 
+  /// The spelling rule the twelve-key grid uses.
+  static const TranspositionGrid _grid = TranspositionGrid();
+
   late final TextEditingController _pathController;
   IRealLibrary? _library;
   int _selectedSong = 0;
   String? _error;
   bool _loading = false;
+
+  /// How far each song is shown from its written key, by [IRealSong.index].
+  ///
+  /// The library keeps the written form, so this is the only thing a transposition changes; an
+  /// absent entry means "as written". Cleared when a different library is loaded, because an index
+  /// means a different song then.
+  final Map<int, int> _semitonesBySong = <int, int>{};
+
+  /// The page mode the musician chose, or null while the default is in force.
+  ///
+  /// Null rather than a stored default so the default can follow the surface: a tablet opens in
+  /// FIT and a phone in PAGES, and once the musician picks a mode it stays picked.
+  PageMode? _chosenPageMode;
 
   @override
   void initState() {
@@ -100,7 +132,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // INPUTS: None; the path comes from [_pathController].
   // OUTPUTS: Nothing. Sets [_loading] around the read and either [_library] or [_error] afterwards.
   //          A result that arrives after the screen is gone is dropped rather than calling setState
-  //          on an unmounted state.
+  //          on an unmounted state. A successful load clears every remembered transposition.
   // KEYWORDS: load, error-handling, unmounted-guard, structured-log
   Future<void> _load() async {
     final String path = _pathController.text.trim();
@@ -117,6 +149,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       setState(() {
         _library = library;
         _selectedSong = 0;
+        _semitonesBySong.clear();
         _loading = false;
       });
       debugPrint(
@@ -167,6 +200,67 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       ),
     );
   }
+
+  // PURPOSE: Give the musician the twelve keys and remember the one they pick, which is the whole
+  //          two-tap transposition path: this is the second tap.
+  // INPUTS: entry — the song being transposed, whose written key is what the grid spells from.
+  // OUTPUTS: A future that completes when the grid closes. Picking a key stores its interval for
+  //          this song and rebuilds, so the chart, the key badge and the page are re-rendered in
+  //          the new key. A dismissed grid, an unavailable target, or a grid closed after the
+  //          screen is gone changes nothing.
+  // KEYWORDS: transposition, key-grid, two-taps, state-update, structured-log
+  Future<void> _chooseKey(IRealSong entry) async {
+    final int current = _semitonesBySong[entry.index] ?? 0;
+    final Key shownKey = _keyFor(entry.song.key, current);
+    final TranspositionTarget? picked = await showKeyGrid(
+      context,
+      writtenKey: entry.song.key,
+      currentPitchClass: shownKey.tonicPitchClass,
+    );
+    if (!mounted || picked == null || !picked.available) {
+      debugPrint(
+        'viewer.transpose.cancelled song="${entry.title}" '
+        'picked=${picked == null ? 'none' : picked.key}',
+      );
+      return;
+    }
+    setState(() => _semitonesBySong[entry.index] = picked.semitones);
+    debugPrint(
+      'viewer.transpose.ok song="${entry.title}" written=${entry.song.key} '
+      'shown=${picked.key} semitones=${picked.semitones}',
+    );
+  }
+
+  // PURPOSE: Find the target that reaches a stored interval, so a key remembered as a number is
+  //          rendered with the same practical spelling the grid offered.
+  // INPUTS: written — the key the chart is written in. semitones — the stored interval, in the
+  //         grid's own `[-5, 6]` range.
+  // OUTPUTS: The target's key. Every interval in that range is produced by exactly one of the
+  //          twelve targets, so the lookup always succeeds; a value outside the range (which
+  //          nothing in this screen produces) falls back to the written key rather than throwing.
+  // KEYWORDS: lookup, interval, key-spelling, fallback
+  Key _keyFor(Key written, int semitones) {
+    for (final TranspositionTarget target in _grid.targets(written)) {
+      if (target.semitones == semitones) {
+        return target.key;
+      }
+    }
+    return written;
+  }
+
+  // PURPOSE: Produce the chart to show for one song, which is the written chart moved by the
+  //          interval the musician chose, or the written chart itself when they chose nothing.
+  // INPUTS: entry — the song. semitones — the stored interval.
+  // OUTPUTS: The displayed song. At zero the written song is returned unchanged, so the common
+  //          case does no work and the drawn result is identical to the loaded one.
+  // KEYWORDS: display-song, transposition, identity-fast-path
+  Song _displayedSong(IRealSong entry, int semitones) => semitones == 0
+      ? entry.song
+      : transposeSong(
+          entry.song,
+          semitones,
+          toKey: _keyFor(entry.song.key, semitones),
+        );
 
   @override
   Widget build(BuildContext context) {
@@ -266,23 +360,28 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       children: <Widget>[
         SizedBox(width: 260, child: _buildSongList(context, library)),
         const VerticalDivider(width: 1),
-        Expanded(child: _buildSongPane(context, library.songs[songIndex])),
+        Expanded(child: _buildSongPane(context, library, songIndex)),
       ],
     );
   }
 
   // PURPOSE: List the loaded songs so one can be selected.
   // INPUTS: context — the build context. library — the loaded songs.
-  // OUTPUTS: A scrollable list. Each row names the song, its bar count, its written key and, when
-  //          there are any, its issue count.
-  // KEYWORDS: song-list, selection, issue-count, written-key
+  // OUTPUTS: A scrollable list. Each row names the song, its bar count, the key it is shown in and,
+  //          when there are any, its issue count. A transposed song shows the move, so the list
+  //          says which charts are no longer in their written key.
+  // KEYWORDS: song-list, selection, issue-count, shown-key, written-key
   Widget _buildSongList(BuildContext context, IRealLibrary library) {
     return ListView.builder(
       itemCount: library.songs.length,
       itemBuilder: (BuildContext context, int index) {
         final IRealSong entry = library.songs[index];
+        final int semitones = _semitonesBySong[entry.index] ?? 0;
+        final String keyLabel = semitones == 0
+            ? '${entry.song.key}'
+            : '${entry.song.key} → ${_keyFor(entry.song.key, semitones)}';
         final String subtitle =
-            '${entry.song.writtenBarCount} bar(s) · ${entry.song.key}'
+            '${entry.song.writtenBarCount} bar(s) · $keyLabel'
             '${entry.issues.isEmpty ? '' : ' · ${entry.issues.length} issue(s)'}';
         return ListTile(
           dense: true,
@@ -303,31 +402,37 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
-  // PURPOSE: Show one song: its identity, its issue count, and its pages.
-  // INPUTS: context — the build context. entry — the selected song.
-  // OUTPUTS: A column widget. The header is outside the page area so the drawn page keeps the full
-  //          remaining height for the layout engine to paginate into.
-  // KEYWORDS: song-pane, header, issue-button, pages
-  Widget _buildSongPane(BuildContext context, IRealSong entry) {
-    final String style = entry.song.style.isEmpty
-        ? 'no style'
-        : entry.song.style;
+  // PURPOSE: Show one song: its identity, the scene bar with everything a performer reads, and the
+  //          chart in the chosen key and page mode.
+  // INPUTS: context — the build context. library — the loaded songs. songIndex — which one.
+  // OUTPUTS: A column widget. The title stays visible above the scene bar because the song's name
+  //          is the one thing the scene bar does not repeat.
+  // KEYWORDS: song-pane, title, scene-bar, issue-button, pages
+  Widget _buildSongPane(
+    BuildContext context,
+    IRealLibrary library,
+    int songIndex,
+  ) {
+    final IRealSong entry = library.songs[songIndex];
+    final int semitones = _semitonesBySong[entry.index] ?? 0;
+    final Song displayed = _displayedSong(entry, semitones);
+    final PageMode mode = _pageModeFor(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: Row(
             children: <Widget>[
               Expanded(
                 child: Text(
-                  '${entry.title} — $style',
+                  entry.title,
                   style: Theme.of(context).textTheme.titleMedium,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Text('${entry.song.key} · ${entry.song.writtenBarCount} bar(s)'),
+              Text('${entry.song.writtenBarCount} bar(s)'),
               if (entry.issues.isNotEmpty) ...<Widget>[
                 const SizedBox(width: 8),
                 TextButton(
@@ -338,19 +443,47 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             ],
           ),
         ),
-        const Divider(height: 1),
-        Expanded(child: _buildPages(entry)),
+        SceneBar(
+          position: songIndex + 1,
+          songCount: library.songs.length,
+          song: displayed,
+          semitones: semitones,
+          pageMode: mode,
+          onOpenKeyGrid: () => unawaited(_chooseKey(entry)),
+          onPageModeChanged: (PageMode picked) =>
+              setState(() => _chosenPageMode = picked),
+        ),
+        const SizedBox(height: 6),
+        Expanded(child: _buildPages(entry, displayed, mode)),
       ],
     );
   }
 
-  // PURPOSE: Lay the song out at the size the window gives it and show one page at a time.
-  // INPUTS: entry — the selected song.
-  // OUTPUTS: A [PageView] over the layout's pages, one page on screen. A song the layout engine
-  //          produces no pages for says so instead of showing an empty page, because an empty song
-  //          and a blank page must not look alike.
-  // KEYWORDS: pagination, layout-call, page-view, window-sized, empty-song
-  Widget _buildPages(IRealSong entry) {
+  // PURPOSE: Decide which page mode is in force, so the default follows the surface and a choice
+  //          the musician made survives.
+  // INPUTS: context — the build context, read for the window's width.
+  // OUTPUTS: The mode the musician chose, or — before they have chosen — FIT on a surface at least
+  //          [sceneBarTabletWidth] logical pixels wide and PAGES on anything narrower. That is
+  //          owner decision D13's "tablet edit = FIT" expressed against the window the chart is
+  //          actually drawn in rather than the device's label.
+  // KEYWORDS: page-mode, default, tablet, fit, pages, responsive
+  PageMode _pageModeFor(BuildContext context) =>
+      _chosenPageMode ??
+      (MediaQuery.sizeOf(context).width >= sceneBarTabletWidth
+          ? PageMode.fit
+          : PageMode.pages);
+
+  // PURPOSE: Lay the displayed song out at the size the window gives it and show it as one fitted
+  //          page or as a page at a time.
+  // INPUTS: entry — the selected song, for identity. displayed — the chart to draw, in its chosen
+  //         key. mode — FIT or PAGES.
+  // OUTPUTS: The chart. PAGES is the layout engine's ordinary pagination in a [PageView]. FIT is
+  //          one scaled page, or a message saying the song would have to be shrunk below the
+  //          legible floor, which is reported on screen rather than delivered as an unreadable
+  //          page. A song the layout engine produces no pages for says so instead of showing an
+  //          empty page, because an empty song and a blank page must not look alike.
+  // KEYWORDS: pagination, fit, page-scale, layout-call, page-view, empty-song, legibility-message
+  Widget _buildPages(IRealSong entry, Song displayed, PageMode mode) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double pageWidth = constraints.maxWidth;
@@ -358,11 +491,31 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         if (!pageWidth.isFinite ||
             !pageHeight.isFinite ||
             pageWidth <= 0 ||
-            pageHeight <= 0) {
-          return const SizedBox.shrink();
+            pageHeight <= 0 ||
+            displayed.writtenBarCount == 0) {
+          return const Center(child: Text('This song has no bars.'));
+        }
+        if (mode == PageMode.fit) {
+          final FitOutcome outcome = _engine.fitToPage(
+            displayed,
+            pageWidth: pageWidth,
+            pageHeight: pageHeight,
+          );
+          final PageLayout? page = outcome.page;
+          if (page == null) {
+            return _buildNoFit(context, outcome);
+          }
+          return CustomPaint(
+            painter: ChartPainter(
+              song: displayed,
+              page: page,
+              metrics: _metrics,
+            ),
+            child: const SizedBox.expand(),
+          );
         }
         final List<PageLayout> pages = _engine.layout(
-          entry.song,
+          displayed,
           pageWidth: pageWidth,
           pageHeight: pageHeight,
         );
@@ -374,7 +527,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           itemCount: pages.length,
           itemBuilder: (BuildContext context, int index) => CustomPaint(
             painter: ChartPainter(
-              song: entry.song,
+              song: displayed,
               page: pages[index],
               metrics: _metrics,
             ),
@@ -384,6 +537,27 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       },
     );
   }
+
+  // PURPOSE: Say on screen that a song will not fit one page at a legible size, instead of drawing
+  //          a page nobody can read.
+  // INPUTS: context — the build context. outcome — the failed fit, carrying the scale floor the
+  //         engine tried.
+  // OUTPUTS: A centred message naming the floor and pointing at PAGES.
+  // KEYWORDS: fit, legibility-floor, on-screen-message, honest-failure
+  Widget _buildNoFit(BuildContext context, FitOutcome outcome) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        'This song does not fit on one page legibly.\n'
+        'It would need to be smaller than '
+        '${(outcome.scale * 100).round()}% of the page, so it is not '
+        'shrunk to nothing.\n'
+        'Use PAGES to read it page by page.',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+    ),
+  );
 
   // PURPOSE: State what is loaded, so the reader can tell a 22-song playlist from a single song
   //          without counting the list.

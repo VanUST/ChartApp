@@ -69,13 +69,22 @@ class ChartPainter extends CustomPainter {
   // INPUTS: canvas — the target. size — the extent the painter was given, which is the page's own
   //         size when the viewer sizes the widget to the layout.
   // OUTPUTS: Nothing. Everything is drawn clipped to `size`, so a system the engine deliberately
-  //          let overflow the page edge cannot bleed into the neighbouring page of a PageView.
+  //          let overflow the page edge cannot bleed into the neighbouring page of a PageView. The
+  //          canvas is scaled by [PageLayout.scale] before the geometry is drawn, which is what
+  //          lets the same painter draw an ordinary page and a page the FIT mode shrank.
   // KEYWORDS: paint, clipping, section-label, reading-order
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = backgroundColor);
     canvas.save();
     canvas.clipRect(Offset.zero & size);
+    // The page's geometry is in engraved coordinates. FIT produces a page engraved at a larger
+    // virtual size and records the factor that brings it back onto this surface, so one scale here
+    // keeps every rectangle, hit test and annotation anchor in a single coordinate system.
+    final double scale = page.scale;
+    if (scale != 1) {
+      canvas.scale(scale, scale);
+    }
     for (final PlacedSystem system in page.systems) {
       _paintSectionLabel(canvas, system);
       for (int index = 0; index < system.bars.length; index++) {

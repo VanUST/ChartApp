@@ -33,7 +33,7 @@ import '../song/song.dart';
 import '../song/staff.dart';
 import '../song/time_signature.dart';
 import '../spelling_table.dart';
-import '../transposer.dart';
+import '../transposition.dart';
 
 part 'anchor.dart';
 part 'annotation.dart';

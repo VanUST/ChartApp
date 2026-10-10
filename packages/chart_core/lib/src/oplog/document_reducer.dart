@@ -459,29 +459,8 @@ abstract final class DocumentReducer {
 
   // --- Key ------------------------------------------------------------------------------
   /// Returns [song] with its chord line moved by [semitones] and its key relabelled [toKey].
-  static Song _transposedSong(Song song, int semitones, Key toKey) {
-    const Transposer transposer = Transposer();
-    final List<Section> sections = <Section>[
-      for (final Section section in song.sections)
-        section.copyWith(
-          bars: <Bar>[
-            for (final Bar bar in section.bars)
-              bar.copyWith(
-                chords: <BeatChord>[
-                  for (final BeatChord placed in bar.chords)
-                    BeatChord(
-                      chord: transposer.transposeChord(placed.chord, semitones),
-                      beat: placed.beat,
-                      step: placed.step,
-                      size: placed.size,
-                    ),
-                ],
-              ),
-          ],
-        ),
-    ];
-    return song.copyWith(key: toKey, sections: sections);
-  }
+  static Song _transposedSong(Song song, int semitones, Key toKey) =>
+      transposeSong(song, semitones, toKey: toKey);
 
   // --- Ink ------------------------------------------------------------------------------
   /// Returns [state] with [stroke] inserted at [index] of the stroke list.

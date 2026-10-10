@@ -154,16 +154,29 @@ class PageLayout {
     required this.index,
     required this.size,
     required this.systems,
+    this.scale = 1,
   });
 
   /// Zero-based page number.
   final int index;
 
-  /// The page's extent, which is the size the caller asked for, not the extent of its content.
+  /// The page's extent, in the coordinates the page was engraved in. This is the size the caller
+  /// asked for, not the extent of its content.
   final LayoutSize size;
 
   /// The systems on this page, top to bottom.
   final List<PlacedSystem> systems;
+
+  /// The factor that maps this page's coordinates onto the surface it is drawn on.
+  ///
+  /// Every rectangle above is in engraved page coordinates; a renderer must scale by this factor
+  /// before drawing. It is 1 for an ordinary page, and below 1 for the single page the FIT mode
+  /// produces: there the page was engraved at `size / scale` so that the systems could be packed
+  /// wide, and shrinking the result by [scale] lands it inside the surface the caller measured.
+  /// Keeping the geometry in one coordinate system and this factor as the only bridge is what
+  /// lets a hit test, an annotation anchor and a golden image each apply one transform instead of
+  /// each re-deriving the fit.
+  final double scale;
 
   /// Every bar on this page, in reading order.
   List<PlacedBar> get bars => <PlacedBar>[
@@ -175,6 +188,7 @@ class PageLayout {
     if (other is! PageLayout ||
         other.index != index ||
         other.size != size ||
+        other.scale != scale ||
         other.systems.length != systems.length) {
       return false;
     }
@@ -187,9 +201,10 @@ class PageLayout {
   }
 
   @override
-  int get hashCode => Object.hash(index, size, Object.hashAll(systems));
+  int get hashCode => Object.hash(index, size, scale, Object.hashAll(systems));
 
   @override
   String toString() =>
-      'PageLayout($index, ${systems.length} system(s), ${bars.length} bar(s))';
+      'PageLayout($index, ${systems.length} system(s), ${bars.length} bar(s)'
+      '${scale == 1 ? '' : ', scale $scale'})';
 }

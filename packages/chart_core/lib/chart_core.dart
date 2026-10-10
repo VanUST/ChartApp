@@ -50,3 +50,4 @@ export 'src/song/staff.dart';
 export 'src/song/time_signature.dart';
 export 'src/spelling_table.dart';
 export 'src/transposer.dart';
+export 'src/transposition.dart';
