@@ -26,6 +26,7 @@
 library;
 
 export 'src/chord.dart';
+export 'src/ireal/obfuscation.dart';
 export 'src/key.dart';
 export 'src/layout/geometry.dart';
 export 'src/layout/layout_engine.dart';
