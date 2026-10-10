@@ -9,8 +9,9 @@
 // resolves enharmonic spelling, the chord model, transposition, the song structure that addresses
 // a bar, the iReal import path from an `irealb://` payload through de-obfuscation and notation to
 // a Song, the layout engine and the page hit test, the document event catalogue that undo,
-// autosave and a future sync all replay, and the `.chart` container that serialises one document —
-// its snapshot and its operation tail — to bytes and back.
+// autosave and a future sync all replay, the `.chart` container that serialises one document —
+// its snapshot and its operation tail — to bytes and back, and the two editing values that join
+// those: the chord palette a cell offers, and the session that applies an edit through the log.
 //
 // The song model stores the WRITTEN form only. The order a tune is played in — repeats,
 // alternative endings, navigation — is a pure function over this model, so there is no second
@@ -32,6 +33,7 @@ library;
 
 export 'src/chord.dart';
 export 'src/container/chart_file.dart';
+export 'src/editing/chord_palette.dart';
 export 'src/ireal/chord_parser.dart';
 export 'src/ireal/obfuscation.dart';
 export 'src/ireal/parser.dart';

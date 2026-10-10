@@ -38,7 +38,7 @@ Future<void> main() async {
 
   // --- SAVE, exactly as the button does it -----------------------------------------------------
   final ChartFile document = chartFileFor(
-    entry.song,
+    DocumentState(song: entry.song),
     modifiedAt: DateTime.utc(2026, 10, 10, 19, 30),
   );
   final ChartFileEncodeResult encoded = ChartFileCodec.encode(document);

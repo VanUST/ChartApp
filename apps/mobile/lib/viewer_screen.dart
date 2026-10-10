@@ -1,19 +1,31 @@
-// PURPOSE: Show the songs an iReal export contains and render the selected one as a chart a
-//          musician can read: in the key they choose, with the whole tune on one page or paginated,
-//          and with the performance facts — position, tempo, style, key and repeats — on one bar.
-//          It is a reader first: it shows the layout the engine produced and the issue list the
-//          import reported.
+// PURPOSE: Show the songs an iReal export contains, render the selected one as a chart a musician
+//          can read — in the key they choose, with the whole tune on one page or paginated, and
+//          with the performance facts on one bar — and let them CHANGE a chord in it.
+//          It is a reader and an editor: it shows the layout the engine produced, the issue list the
+//          import reported, and the chord palette for the cell they selected.
 // INPUTS: A reference the reader supplies, an [IRealLibraryLoader] that turns that reference into
 //         an [IRealLibrary], a starting reference, whether a reference is a filesystem path at all,
 //         and whether to load the starting reference on the first frame. The loader is injected so
 //         a widget test can pump this screen with a synthetic payload and never touch the
 //         filesystem, and so the web build can hand it a browser file chooser instead of a path.
-// OUTPUTS: A screen with a source bar, a chart save/open bar, a song list, a scene bar and the
-//          selected song's page or pages, each drawn by `ChartPainter` at the size the window gives
-//          it. A tap on a page selects the bar and cell under it, the painter highlights them, and a
-//          line above the page states the selected position in words.
-// KEYWORDS: viewer, ireal, reader, screen, page-view, transposition, scene-bar, page-modes,
-//           chart-file, save, open, widget-test-seam, platform-seam, verification
+// OUTPUTS: A screen with a source bar, a chart save/open bar, undo and redo, a song list, a scene
+//          bar and the selected song's page or pages, each drawn by `ChartPainter` at the size the
+//          window gives it. A tap on a page selects the bar and cell under it, the painter
+//          highlights them, and a line above the page states the selected position in words. Tapping
+//          that line opens the chord palette for the selected cell; a chord chosen there is applied
+//          through the operation log and redrawn, and undo and redo move that same log back and
+//          forth.
+// KEYWORDS: viewer, ireal, reader, editor, screen, page-view, transposition, scene-bar, page-modes,
+//           chord-palette, op-log, undo, redo, chart-file, save, open, widget-test-seam,
+//           platform-seam, verification
+//
+// WHERE AN EDIT LIVES. Each song shown has one [EditSession], created the first time the song is
+// reached and kept until a different library is loaded. The session — not this widget's state and
+// not the loaded [IRealSong] — holds the document, because the document is the reduction of a log
+// and the log is what undo, redo and the saved tail all read. The page is drawn from
+// `session.song`, the save action is given `session.document` and `session.log`, and an opened
+// `.chart` file seeds a session from the tail it carried. There is no path by which a chord reaches
+// the screen except through `EditSession`.
 //
 // WHAT CHANGES ON THE WEB, AND WHAT DOES NOT. Everything below the source bar is identical on
 // every platform, because nothing below it touches a file: the loader is the seam and it is the
@@ -47,6 +59,7 @@ import 'package:chart_ui/chart_ui.dart';
 import 'package:flutter/material.dart' hide Key;
 
 import 'chart_file_bar.dart';
+import 'chord_palette_sheet.dart';
 import 'ireal_library.dart';
 import 'ireal_source.dart';
 import 'key_grid.dart';
@@ -156,6 +169,49 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// bar index then name different music.
   ChartHit? _selection;
 
+  /// The editing session of each loaded song, by [IRealSong.index].
+  ///
+  /// An entry is created the first time a song is shown and then lives until a different library is
+  /// loaded, which is what makes an edit survive switching songs and coming back — the log, not a
+  /// copy of the song, is what is kept. The map is keyed by the payload index rather than by the
+  /// list position because that index is the identity the song list already uses, and a library
+  /// replacement renumbers positions.
+  final Map<int, EditSession> _sessions = <int, EditSession>{};
+
+  // PURPOSE: Return the session of one song, opening it against the song as loaded the first time
+  //          the song is reached.
+  // INPUTS: entry — the loaded song.
+  // OUTPUTS: The session, created on first use and reused afterwards. An existing session is
+  //          returned untouched: a session holds the document, and rebuilding it from the loaded
+  //          song would silently discard every edit made to that song.
+  // KEYWORDS: session, lazy-creation, per-song, edit-persistence
+  EditSession _sessionFor(IRealSong entry) => _sessions.putIfAbsent(
+    entry.index,
+    () => EditSession(
+      document: DocumentState(song: entry.song),
+      docId: entry.song.id,
+    ),
+  );
+
+  // PURPOSE: Return the session of the song currently selected, for the app bar, which has no song
+  //          entry of its own.
+  // INPUTS: None; reads the library and the selected index, following the same clamp the body uses.
+  // OUTPUTS: The session, or null when nothing is loaded. Opening it here rather than only in the
+  //          body keeps the undo and redo controls bound to the same session the page is drawn
+  //          from; the two must never be two objects, or the buttons would offer to undo an edit
+  //          the page is not showing.
+  // KEYWORDS: current-session, app-bar, selection-clamp, null-when-empty
+  EditSession? get _currentSession {
+    final IRealLibrary? library = _library;
+    if (library == null || library.songs.isEmpty) {
+      return null;
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    return _sessionFor(library.songs[index]);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -199,6 +255,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         _library = library;
         _selectedSong = 0;
         _semitonesBySong.clear();
+        // An index means a different song in a new library, so every session in the old one names
+        // music that is no longer loaded. Dropping them is what keeps an edit from being applied to
+        // whatever happens to sit at that index now.
+        _sessions.clear();
         // A section id and a bar index from the previous library name different music here, so a
         // selection carried across a load would point at whatever happens to sit at that address.
         _selection = null;
@@ -300,34 +360,57 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return written;
   }
 
-  // PURPOSE: Produce the chart to show for one song, which is the written chart moved by the
-  //          interval the musician chose, or the written chart itself when they chose nothing.
-  // INPUTS: entry — the song. semitones — the stored interval.
-  // OUTPUTS: The displayed song. At zero the written song is returned unchanged, so the common
-  //          case does no work and the drawn result is identical to the loaded one.
-  // KEYWORDS: display-song, transposition, identity-fast-path
-  Song _displayedSong(IRealSong entry, int semitones) => semitones == 0
-      ? entry.song
-      : transposeSong(
-          entry.song,
-          semitones,
-          toKey: _keyFor(entry.song.key, semitones),
-        );
+  // PURPOSE: Produce the chart to show for one song, which is the EDITED chart moved by the
+  //          interval the musician chose, or the edited chart itself when they chose nothing.
+  // INPUTS: entry — the song as loaded. semitones — the stored interval.
+  // OUTPUTS: The displayed song. The base is the session's document rather than the loaded song,
+  //          because the session is where an edit lives; at zero semitones it is returned
+  //          unchanged, so the common case does no work and the drawn result is identical to the
+  //          edited one.
+  // KEYWORDS: display-song, session-document, transposition, identity-fast-path
+  Song _displayedSong(IRealSong entry, int semitones) {
+    final Song song = _sessionFor(entry).song;
+    return semitones == 0
+        ? song
+        : transposeSong(song, semitones, toKey: _keyFor(song.key, semitones));
+  }
 
   @override
   Widget build(BuildContext context) {
     final String? error = _error;
+    final EditSession? session = _currentSession;
     return Scaffold(
       appBar: AppBar(
         title: const Text('ChartApp — iReal reader'),
-        // Where a path exists, the chart document itself can be named and moved. The action renders
-        // nothing in a browser, so the source bar below stays the only file control there. It lives
-        // in the app bar because a control in the body takes height away from the chart, and D13's
-        // FIT mode refuses to shrink a chart past a legible floor — the bar turned a song that
-        // fitted on one page into one that did not.
+        // Undo and redo stand beside the save action because all three are about the document
+        // rather than about the page: the two reversals move the log, and the save writes what the
+        // log produced. They are disabled rather than hidden when there is nothing to reverse, so
+        // the pair keeps its place in the bar and a musician's hand learns where it is.
         actions: <Widget>[
+          IconButton(
+            key: const ValueKey<String>('viewer-undo'),
+            icon: const Icon(Icons.undo),
+            tooltip: 'Undo the last chart edit',
+            onPressed: session != null && session.canUndo
+                ? () => _undo(session)
+                : null,
+          ),
+          IconButton(
+            key: const ValueKey<String>('viewer-redo'),
+            icon: const Icon(Icons.redo),
+            tooltip: 'Redo the last undone chart edit',
+            onPressed: session != null && session.canRedo
+                ? () => _redo(session)
+                : null,
+          ),
+          // Where a path exists, the chart document itself can be named and moved. The action renders
+          // nothing in a browser, so the source bar below stays the only file control there. It lives
+          // in the app bar because a control in the body takes height away from the chart, and D13's
+          // FIT mode refuses to shrink a chart past a legible floor — the bar turned a song that
+          // fitted on one page into one that did not.
           ChartFileAction(
-            song: _writtenSongOfSelection,
+            document: _documentOfSelection,
+            events: session?.log ?? const <ChartEvent>[],
             initialPath: chartPathBeside(widget.initialPath),
             onOpened: _adoptOpenedSong,
           ),
@@ -344,14 +427,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
-  // PURPOSE: Give the save/open action the song to write, which must be the WRITTEN one and not the
-  //          one on screen.
+  // PURPOSE: Give the save/open action the document to write, which must be the WRITTEN one and not
+  //          the one on screen, together with the operation tail that produced it.
   // INPUTS: None; reads the library and the selection.
-  // OUTPUTS: The selected song as written, or null when nothing is loaded. A selected index outside
-  //          the library — which only a library replacement can produce — is treated as the first
-  //          song, the same rule [_buildBody] uses.
-  // KEYWORDS: written-form, selection, save-source, null-when-empty
-  Song? get _writtenSongOfSelection {
+  // OUTPUTS: The selected song's session document, or null when nothing is loaded. The document is
+  //          handed over as a whole rather than as a song because a `.chart` file stores a snapshot
+  //          plus a log, and the log lives on the session; a selected index outside the library —
+  //          which only a library replacement can produce — is treated as the first song, the same
+  //          rule [_buildBody] uses.
+  // KEYWORDS: written-form, selection, save-source, operation-tail, null-when-empty
+  DocumentState? get _documentOfSelection {
     final IRealLibrary? library = _library;
     if (library == null || library.songs.isEmpty) {
       return null;
@@ -359,27 +444,56 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
         ? _selectedSong
         : 0;
-    return library.songs[index].song;
+    return _sessionFor(library.songs[index]).document;
   }
 
   // PURPOSE: Replace the shown library with the one song a `.chart` file produced, so the chart the
-  //          file describes is the one on screen.
-  // INPUTS: song — the written song decoded from the container.
+  //          file describes is the one on screen, and seed its session from the operation tail the
+  //          file carried.
+  // INPUTS: opened — the document the container's snapshot and tail reduce to, and the tail itself.
   // OUTPUTS: Nothing. The library becomes a single-song one, the selection returns to the first
   //          song, and every remembered transposition and the current hit selection are cleared:
-  //          both are addressed by an index or a section id that names different music now.
-  // KEYWORDS: open-chart, adopt-song, state-reset, transposition, selection
-  void _adoptOpenedSong(Song song) {
+  //          both are addressed by an index or a section id that names different music now. The
+  //          file's tail is carried into the session as RESTORED events, so the sequence numbers the
+  //          file recorded are not reissued: `(docId, seq)` addresses a log row, and a session that
+  //          restarted at 1 would produce two events claiming the same position.
+  // KEYWORDS: open-chart, adopt-document, restored-log, seq-continuation, state-reset
+  void _adoptOpenedSong(OpenedChart opened) {
     setState(() {
       _library = IRealLibrary(
         playlistName: '',
-        songs: <IRealSong>[IRealSong(index: 0, song: song)],
+        songs: <IRealSong>[IRealSong(index: 0, song: opened.document.song)],
       );
       _selectedSong = 0;
       _semitonesBySong.clear();
+      _sessions
+        ..clear()
+        ..[0] = EditSession(
+          document: opened.document,
+          docId: opened.document.song.id,
+          seq: _highestSeq(opened.events),
+          restored: opened.events,
+        );
       _selection = null;
       _error = null;
     });
+  }
+
+  // PURPOSE: Find the sequence number a restored log ends at, so a session continuing it issues the
+  //          next free number rather than a used one.
+  // INPUTS: events — the operations read from a file, in log order.
+  // OUTPUTS: The highest `seq` the events carry, or 0 when there are none. A log from a file is
+  //          written in ascending order, so the last event's number is the answer; the maximum is
+  //          taken rather than the last element alone so that a hand-assembled list is still safe.
+  // KEYWORDS: seq, restored-log, continuation, max
+  static int _highestSeq(List<ChartEvent> events) {
+    int highest = 0;
+    for (final ChartEvent event in events) {
+      if (event.seq > highest) {
+        highest = event.seq;
+      }
+    }
+    return highest;
   }
 
   // PURPOSE: Give the reader the control that starts a load, in the form the platform can honour.
@@ -661,30 +775,132 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
+  // PURPOSE: Open the chord palette for the selected cell, which is the second tap of the edit
+  //          budget D2 sets: the first named the cell, this one opens what can be written in it.
+  // INPUTS: context — the build context.
+  // OUTPUTS: Nothing. Does nothing when no cell is selected — a bar-level selection names no cell
+  //          to write into, and a tap in a bar's padding must not silently pick a beat — or when
+  //          nothing is loaded. Otherwise the sheet edits through the session and rebuilds this
+  //          screen after each applied chord, so the page shows the change as it is made.
+  // KEYWORDS: edit-entry, second-tap, cell-required, session, rebuild-on-apply
+  void _editSelection(BuildContext context) {
+    final ChartHit? hit = _selection;
+    final IRealLibrary? library = _library;
+    final EditSession? session = _currentSession;
+    if (hit == null || hit.cell == null || library == null || session == null) {
+      debugPrint(
+        'viewer.edit.skipped hit=${hit ?? 'none'} '
+        'cell=${hit?.beat ?? 'none'}',
+      );
+      return;
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    final IRealSong entry = library.songs[index];
+    final int semitones = _semitonesBySong[entry.index] ?? 0;
+    unawaited(
+      showChordPalette(
+        context,
+        session: session,
+        sectionId: hit.sectionId,
+        barIndex: hit.barIndex,
+        beat: hit.beat!,
+        shownKey: _displayedSong(entry, semitones).key,
+        semitoneShift: semitones,
+        // The page is drawn from the session, so a rebuild after each applied chord is the whole of
+        // what "show the edit" means here. The selection is deliberately NOT recomputed: the
+        // address did not move, and re-running the hit test would need a point the sheet never had.
+        onChanged: () => setState(() {}),
+      ),
+    );
+  }
+
+  // PURPOSE: Reverse the last edit through the session's inverse and show the page it produces.
+  // INPUTS: session — the session of the song on screen.
+  // OUTPUTS: Nothing. Rebuilds the screen when an edit was reversed. The document afterwards is
+  //          EQUAL to the document before the reversed edit — the comparison is `DocumentState ==`,
+  //          so it covers the song, the strokes, the annotations and the text cues — which is what
+  //          the log-and-reducer design buys and what an undo that restored a re-rendered chart
+  //          would not.
+  // KEYWORDS: undo, inverse-event, exact-restore, rebuild, structured-log
+  void _undo(EditSession session) {
+    final bool undone = session.undo();
+    setState(() {});
+    debugPrint(
+      'viewer.undo done=$undone seq=${session.seq} '
+      'undo_depth=${session.undoDepth} redo_depth=${session.redoDepth} '
+      'events=${session.log.length}',
+    );
+  }
+
+  // PURPOSE: Put back the edit the musician just reversed.
+  // INPUTS: session — the session of the song on screen.
+  // OUTPUTS: Nothing. Rebuilds the screen when an edit was redone.
+  // KEYWORDS: redo, re-apply, rebuild, structured-log
+  void _redo(EditSession session) {
+    final bool redone = session.redo();
+    setState(() {});
+    debugPrint(
+      'viewer.redo done=$redone seq=${session.seq} '
+      'undo_depth=${session.undoDepth} redo_depth=${session.redoDepth} '
+      'events=${session.log.length}',
+    );
+  }
+
   // PURPOSE: State the selection in words beside the chart, because a highlight proves that
   //          SOMETHING is selected and not which thing: a screenshot cannot falsify "the bar I
-  //          touched", and a labelled number can.
+  //          touched", and a labelled number can. With a cell selected the line is also the control
+  //          that opens the chord palette, which is why it is pressable rather than a bare label.
   // INPUTS: context — the build context, for the text theme. song — the chart on screen, read to
   //         number the bar the way a musician counts it.
   // OUTPUTS: A one-line widget. With a selection it reads `selected: bar 12 cell 2`; without one it
-  //          invites a tap. A bar-level selection says so instead of inventing a cell number.
-  // KEYWORDS: selection-label, falsifiable-feedback, musician-numbering, empty-state
+  //          invites a tap. A bar-level selection says so instead of inventing a cell number, and it
+  //          is NOT pressable, because a bar-level selection names no cell to write a chord into.
+  //          The hint beside the label states the affordance in words, since a label that changes
+  //          what it is when touched is not discoverable on its own.
+  // KEYWORDS: selection-label, edit-entry, falsifiable-feedback, musician-numbering, empty-state
   Widget _buildSelectionLine(BuildContext context, Song song) {
     final ChartHit? hit = _selection;
+    final bool editable = hit != null && hit.cell != null;
     final String text = hit == null
         ? 'Tap a bar to select it.'
         : _selectionLabel(song, hit);
+    final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
+      fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
+    );
+    final Widget label = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          text,
+          key: const ValueKey<String>('viewer-selection-label'),
+          style: style,
+        ),
+        if (editable) ...<Widget>[
+          const SizedBox(width: 8),
+          Text(
+            '— tap to change the chord',
+            key: const ValueKey<String>('viewer-selection-edit-hint'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Text(
-          text,
-          key: const ValueKey<String>('viewer-selection-label'),
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
-          ),
-        ),
+        child: editable
+            ? InkWell(
+                key: const ValueKey<String>('viewer-selection-edit'),
+                onTap: () => _editSelection(context),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: label,
+                ),
+              )
+            : label,
       ),
     );
   }

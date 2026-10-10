@@ -1,11 +1,12 @@
-// PURPOSE: Give a `.chart` document a name and two buttons — save the chart on screen to a file the
-//          reader names, and open a `.chart` file into the app — from the viewer's app bar, so the
-//          chart area keeps every pixel it had. It is a widget of its own so that the viewer gains
-//          one line rather than a second state machine, and so the whole save/open path reads in one
-//          place.
-// INPUTS: The song to save, written form only; a callback that receives a song read back from a
-//         file; and, injected for a test, the two functions that move bytes. The defaults are the
-//         platform's own, selected by `chart_source.dart` at compile time.
+// PURPOSE: Give a `.chart` document a name and two buttons — save the document on screen to a file
+//          the reader names, and open a `.chart` file into the app — from the viewer's app bar, so
+//          the chart area keeps every pixel it had. It is a widget of its own so that the viewer
+//          gains one line rather than a second state machine, and so the whole save/open path reads
+//          in one place.
+// INPUTS: The document to save, written form only, together with the operation tail that produced
+//         it; a callback that receives the document and the tail read back from a file; and,
+//         injected for a test, the two functions that move bytes. The defaults are the platform's
+//         own, selected by `chart_source.dart` at compile time.
 // OUTPUTS: An app-bar button that opens a dialog holding the path field, Save and Open, and a
 //          one-line status. Where [chartSourceIsFilePath] is false — a browser — it renders nothing
 //          at all, because there is no path to name and the functions behind the buttons are not
@@ -28,10 +29,13 @@
 // saving the displayed key would bake a temporary choice into the document. The caller passes the
 // written song and this widget does not know a transposition exists.
 //
-// WHY THE DOCUMENT IS SAVED AS A SNAPSHOT WITH NO OPERATIONS. This reader has no editing UI yet, so
-// there is no operation log to carry: the file is the document as it stands, which is exactly the
-// container's "snapshot plus an empty tail" case. The container is built for the tail of operations
-// that undo and a future sync will append, and nothing here forecloses it.
+// WHY THE PROJECT IS SAVED AS A SNAPSHOT PLUS ITS OPERATION TAIL, AND WHY BOTH ARE HANDED OVER
+// UNTOUCHED. The document on screen was produced by applying operations through the log, and the
+// container stores a snapshot plus the operations after it. The snapshot is what makes the file
+// readable by a build that does not understand every operation in it; the tail is what makes it an
+// editing record rather than a picture, and it is what a restored session replays from. Folding the
+// tail into the snapshot before saving would throw away the only copy of how the chart got to where
+// it is, so neither half is derived from the other here.
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -46,6 +50,15 @@ typedef ChartFileSaver = Future<void> Function(String path, Uint8List bytes);
 
 /// Reads a container's bytes from the place the reader named.
 typedef ChartFileOpener = Future<Uint8List> Function(String path);
+
+/// What an opened `.chart` file gives the viewer: the document it describes, and the operation tail
+/// the file carried beside its snapshot.
+///
+/// Both are handed over because the file holds both and they mean different things: the document is
+/// the chart to show, and the tail is the position in the log that a session restored from this file
+/// must continue from. A record rather than a small class because it is a pair of values passed
+/// straight through, and because a class would need a name that says "song and tail" twice.
+typedef OpenedChart = ({DocumentState document, List<ChartEvent> events});
 
 // PURPOSE: Derive the `.chart` path that sits beside a source path, so the dialog's path field
 //          starts with something sensible instead of empty.
@@ -71,24 +84,32 @@ String chartPathBeside(String sourcePath) {
 
 /// The app-bar control that saves and opens a `.chart` document.
 class ChartFileAction extends StatelessWidget {
-  /// Creates the control for [song], reporting an opened document through [onOpened].
+  /// Creates the control for [document], reporting an opened document through [onOpened].
   ///
   /// [save] and [open] default to the platform implementations from `chart_source.dart`, so the
-  /// viewer passes neither and a test can pass both without a filesystem.
+  /// viewer passes neither and a test can pass both without a filesystem. [events] is the operation
+  /// tail that produced [document] and is written beside the snapshot unchanged.
   const ChartFileAction({
     super.key,
-    required this.song,
+    required this.document,
     required this.onOpened,
+    this.events = const <ChartEvent>[],
     this.initialPath = '',
     this.save = saveChartFile,
     this.open = loadChartFile,
   });
 
-  /// The written song to save, or null when no song is loaded.
-  final Song? song;
+  /// The written document to save, or null when nothing is loaded.
+  ///
+  /// A document and not a song, because a `.chart` file is a snapshot plus a log and both halves
+  /// live on this value; a song alone would force the save path to invent an empty tail.
+  final DocumentState? document;
 
-  /// Called with the song a `.chart` file was decoded into.
-  final ValueChanged<Song> onOpened;
+  /// The operations applied since that document's snapshot, in log order.
+  final List<ChartEvent> events;
+
+  /// Called with the document and the operation tail a `.chart` file decoded to.
+  final ValueChanged<OpenedChart> onOpened;
 
   /// The path the dialog's field starts with, normally [chartPathBeside] of the loaded export.
   final String initialPath;
@@ -113,7 +134,8 @@ class ChartFileAction extends StatelessWidget {
         showDialog<void>(
           context: context,
           builder: (BuildContext context) => _ChartFileDialog(
-            song: song,
+            document: document,
+            events: events,
             onOpened: onOpened,
             initialPath: initialPath,
             save: save,
@@ -132,15 +154,17 @@ class ChartFileAction extends StatelessWidget {
 /// refused — and closing would throw that away. The reader closes it when they have read it.
 class _ChartFileDialog extends StatefulWidget {
   const _ChartFileDialog({
-    required this.song,
+    required this.document,
+    required this.events,
     required this.onOpened,
     required this.initialPath,
     required this.save,
     required this.open,
   });
 
-  final Song? song;
-  final ValueChanged<Song> onOpened;
+  final DocumentState? document;
+  final List<ChartEvent> events;
+  final ValueChanged<OpenedChart> onOpened;
   final String initialPath;
   final ChartFileSaver save;
   final ChartFileOpener open;
@@ -167,15 +191,16 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
     super.dispose();
   }
 
-  // PURPOSE: Write the song on screen to the file the reader named.
-  // INPUTS: None; the song is [ChartFileAction.song] and the destination is the path field.
-  // OUTPUTS: Nothing. Sets [_busy] around the write and [_status] afterwards with either the byte
-  //          count and any D19 warning, or the failure. A missing song and an empty path are
-  //          reported in the status line rather than silently doing nothing.
-  // KEYWORDS: save, encode, chart-file, d19, status, error-reporting
+  // PURPOSE: Write the document on screen to the file the reader named, snapshot and operation tail
+  //          together.
+  // INPUTS: None; the document is [ChartFileAction.document] and the destination is the path field.
+  // OUTPUTS: Nothing. Sets [_busy] around the write and [_status] afterwards with the operation
+  //          count, the byte count and any D19 warning, or the failure. A missing document and an
+  //          empty path are reported in the status line rather than silently doing nothing.
+  // KEYWORDS: save, encode, chart-file, operation-tail, d19, status, error-reporting
   Future<void> _save() async {
-    final Song? song = widget.song;
-    if (song == null) {
+    final DocumentState? document = widget.document;
+    if (document == null) {
       setState(() => _status = 'Load or import a song before saving it.');
       return;
     }
@@ -191,7 +216,8 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
     debugPrint('viewer.chart.save.start path_chars=${path.length}');
     try {
       final ChartFile file = chartFileFor(
-        song,
+        document,
+        events: widget.events,
         modifiedAt: DateTime.now().toUtc(),
       );
       final ChartFileEncodeResult encoded = ChartFileCodec.encode(file);
@@ -202,11 +228,13 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       setState(() {
         _busy = false;
         _status =
-            'Saved ${encoded.bytes.length} bytes to $path.'
+            'Saved ${encoded.bytes.length} bytes to $path'
+            ' · ${widget.events.length} operation(s).'
             '${_warningSuffix(encoded.warnings)}';
       });
       debugPrint(
         'viewer.chart.save.ok bytes=${encoded.bytes.length} '
+        'operations=${widget.events.length} '
         'warnings=${encoded.warnings.length}',
       );
     } catch (error) {
@@ -221,13 +249,17 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
     }
   }
 
-  // PURPOSE: Read the `.chart` file the reader named and hand its song to the viewer.
+  // PURPOSE: Read the `.chart` file the reader named and hand its document and operation tail to the
+  //          viewer.
   // INPUTS: None; the source is the path field.
   // OUTPUTS: Nothing, or a call to [ChartFileAction.onOpened]. Sets [_busy] around the read and
   //          [_status] afterwards with the title and any warning. A decode failure is shown as the
   //          typed message the container produced, which is the point of the container's failure
   //          types: a truncated file says it is truncated rather than looking like an empty chart.
-  // KEYWORDS: open, read, decode, typed-failure, warnings, status
+  //          The document handed over is the file's REDUCED document — its snapshot with its
+  //          operation tail folded in — because that is the chart the writer saw; the tail travels
+  //          beside it so a session can continue the log rather than restart its numbering.
+  // KEYWORDS: open, read, decode, reduced-document, operation-tail, typed-failure, status
   Future<void> _open() async {
     final String path = _controller.text.trim();
     if (path.isEmpty) {
@@ -242,14 +274,17 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
     try {
       final Uint8List bytes = await widget.open(path);
       final ChartFileDecodeResult decoded = ChartFileCodec.decode(bytes);
-      final Song song = decoded.file.reducedDocument.song;
+      final DocumentState document = decoded.file.reducedDocument;
+      final Song song = document.song;
       if (!mounted) {
         return;
       }
-      widget.onOpened(song);
+      widget.onOpened((document: document, events: decoded.file.events));
       setState(() {
         _busy = false;
-        _status = 'Opened "$song".${_warningSuffix(decoded.warnings)}';
+        _status =
+            'Opened "$song" · ${decoded.file.events.length} operation(s).'
+            '${_warningSuffix(decoded.warnings)}';
       });
       debugPrint(
         'viewer.chart.open.ok bars=${song.writtenBarCount} '
