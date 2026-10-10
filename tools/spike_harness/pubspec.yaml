@@ -23,6 +23,7 @@ dependencies:
   # device bench logs are reduced by the same code, and a difference between them could not then
   # be explained by a different percentile definition.
   logview: any
+  storage_drift: any
 
 dev_dependencies:
   lints: ^6.1.0

@@ -33,11 +33,19 @@ const Map<String, String> registeredSpikes = <String, String>{
 ///
 /// A spike is added here in the same change that makes its claim measurable. S1 is absent
 /// because it cannot be measured without real iReal exports, and a body that reported numbers
-/// from nowhere would be worse than an absent one. S5 waits on the choice of storage opener.
-final Map<String, SpikeOutcome Function()> _runnable =
-    <String, SpikeOutcome Function()>{'s3': runSpikeS3, 's4': runSpikeS4};
+/// from nowhere would be worse than an absent one.
+///
+/// The runners return futures because S5 measures a database, and drift's API is asynchronous
+/// throughout. Rather than special-case the one spike, every runner is awaited, so a later spike
+/// that needs to do I/O is added without touching the dispatcher.
+final Map<String, Future<SpikeOutcome> Function()> _runnable =
+    <String, Future<SpikeOutcome> Function()>{
+      's3': () async => runSpikeS3(),
+      's4': () async => runSpikeS4(),
+      's5': runSpikeS5,
+    };
 
-void main(List<String> arguments) {
+Future<void> main(List<String> arguments) async {
   final ArgParser parser = ArgParser()
     ..addFlag('list', negatable: false, help: 'List the registered spikes.');
 
@@ -68,7 +76,7 @@ void main(List<String> arguments) {
     exit(2);
   }
 
-  final SpikeOutcome Function()? run = _runnable[id];
+  final Future<SpikeOutcome> Function()? run = _runnable[id];
   if (run == null) {
     stderr.writeln(
       'spike: "$id" is registered but not implemented: ${registeredSpikes[id]}',
@@ -79,7 +87,7 @@ void main(List<String> arguments) {
     exit(2);
   }
 
-  final SpikeOutcome outcome = run();
+  final SpikeOutcome outcome = await run();
   outcome.report(stdout);
 
   stderr.writeln('spike ${outcome.id}: ${outcome.question}');

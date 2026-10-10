@@ -52,6 +52,15 @@ jobs:
       - name: Resolve the workspace
         run: flutter pub get
 
+      - name: Check that generated code is current
+        # drift generates the table accessors into a committed .g.dart. Committing it keeps a
+        # plain `melos run verify` fast, and this step is what stops it from going stale: run the
+        # generator, then fail if it changed anything. Without this the committed file would
+        # silently describe an older schema than the hand-written tables beside it.
+        run: |
+          dart run melos run generate
+          git diff --exit-code
+
       # `dart run melos` uses the version pinned in the root pubspec dev_dependencies, so CI and
       # a developer resolve the identical Melos. There is no global install to drift.
       - name: Run the acceptance gate

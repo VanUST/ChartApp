@@ -7,3 +7,4 @@ library;
 
 export 'src/spike_s3.dart';
 export 'src/spike_s4.dart';
+export 'src/spike_s5.dart';

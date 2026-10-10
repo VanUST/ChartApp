@@ -66,6 +66,17 @@ melos:
       concurrency: 4
 
   scripts:
+    generate:
+      description: >-
+        Run the code generators across the workspace. drift writes the table accessors into a
+        `.g.dart` file that IS committed, so that a plain `melos run verify` stays fast and CI
+        does not pay thirty seconds of generator compilation before it can test anything. The
+        committed output is what CI checks for staleness after regenerating.
+      exec:
+        command: dart run build_runner build
+      packageFilters:
+        dependsOn: drift_dev
+
     # -------------------------------------------------------------------------
     # Verification gate.
     #

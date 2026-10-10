@@ -53,6 +53,14 @@ This runs `dart analyze`, `dart format --set-exit-if-changed` and both test suit
 and Flutter). It is the same sequence CI runs on Linux, so a green local result predicts a green
 CI result for everything that does not require a physical device.
 
+After changing a drift table, run `melos run generate` and commit the regenerated `.g.dart`. CI
+regenerates it and fails if the result differs, so a stale committed file is caught rather than
+silently describing an older schema.
+
+`storage_drift` deliberately does not depend on Flutter: `drift` opens a database file directly
+and the path is an ordinary argument. That keeps every storage test, and the cold-open
+measurement, runnable under `dart test` with no device and no widget binding.
+
 Device-only measurements (ink latency, frame rate, cold-open) are a manual CI job; see
 `docs/ux/test-protocol.md` for the bench procedure and `tools/logview` for reading its
 output.
@@ -62,6 +70,7 @@ output.
 | Command | What it does |
 |---|---|
 | `melos run verify` | The acceptance gate: lint + format-check + both test suites |
+| `melos run generate` | Run drift's code generator (needed after a schema change) |
 | `melos run lint` | Static analysis across the whole workspace |
 | `melos run format-check` | Fail if any file is not `dart format` clean |
 | `melos run format-fix` | Rewrite files into `dart format` shape |
