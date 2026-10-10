@@ -1,28 +1,27 @@
-// PURPOSE: Mark the boundary of the ChartApp chart domain and state precisely what does and
-//          does not live here, so that a later change does not quietly pull Flutter, a
-//          database or a platform channel into the one package that must stay portable.
+// PURPOSE: Mark the boundary of the ChartApp chart domain and publish its public surface, so
+//          that a change to the chord model is visible in one place and the package's promise —
+//          no Flutter, no database, no platform channel — stays checkable.
 // INPUTS: None.
-// OUTPUTS: A library with no public API in Phase 0. This is deliberate.
-// KEYWORDS: chart-core, domain-boundary, pure-dart, phase-0, no-api-yet
+// OUTPUTS: The pitch, key, spelling-table, chord and transposer types.
+// KEYWORDS: chart-core, public-api, barrel, domain-boundary, pure-dart
 //
-// Phase 0 creates the package and nothing else. The domain types that belong here — the song
-// model, chord grammar, transposition and the layout engine — are the subject of spikes S1
-// (iReal codec), S3 (transposer) and S4 (layout), which are Phase 1 work.
+// What lives here: written pitch and pitch classes, keys and their signatures, the rule that
+// resolves enharmonic spelling, the chord model, and transposition.
 //
-// Inventing that API now, before those spikes have run, would fix the song model and the
-// chord representation on a guess and then force the spikes to fit it rather than to inform
-// it. The empty library is the honest state of the design at this point: the package exists
-// so the workspace, the dependency graph and CI resolve it, and its contents land with the
-// evidence that decides their shape.
+// What must never live here: flutter, storage_drift, ink_native or any platform channel. The
+// package's value rests on `dart test` running every one of its tests on a machine with no
+// device, no emulator and no Android SDK, and the dependency list in pubspec.yaml is empty to
+// keep that true. Every file in this library is pure: no I/O, no clock, no globals.
 //
-// What this package must never depend on:
-//   - flutter, or any package that requires a Flutter binding;
-//   - storage_drift or any database package;
-//   - ink_native or any platform channel.
-//
-// `dart test` must remain able to run every test in this package on a machine with no device,
-// no emulator and no Android SDK. That property is what makes the domain cheap to verify and
-// is the reason the dependency list above is empty.
+// Still absent by design, and deliberately not stubbed: the song model, the layout engine, the
+// file codecs and the op-log. Those are informed by spikes S1 (iReal codec) and S4 (layout); a
+// song model invented before them would fix their shape on a guess.
 
-/// Chart domain for ChartApp. No public API in Phase 0; see the file header for why.
+/// ChartApp's pure-Dart chart domain.
 library;
+
+export 'src/chord.dart';
+export 'src/key.dart';
+export 'src/pitch.dart';
+export 'src/spelling_table.dart';
+export 'src/transposer.dart';
