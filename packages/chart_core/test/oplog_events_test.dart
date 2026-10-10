@@ -11,7 +11,6 @@
 import 'dart:convert';
 
 import 'package:chart_core/chart_core.dart';
-import 'package:chart_core/src/oplog/oplog.dart';
 import 'package:test/test.dart';
 
 // ---------------------------------------------------------------------------------------------

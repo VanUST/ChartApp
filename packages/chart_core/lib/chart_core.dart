@@ -7,8 +7,9 @@
 //
 // What lives here: written pitch and pitch classes, keys and their signatures, the rule that
 // resolves enharmonic spelling, the chord model, transposition, the song structure that addresses
-// a bar, the iReal import path from obfuscated body to tokens to Song, the layout engine, and the
-// document event catalogue that undo, autosave and a future sync all replay.
+// a bar, the iReal import path from an `irealb://` payload through de-obfuscation and notation to
+// a Song, the layout engine, and the document event catalogue that undo, autosave and a future
+// sync all replay.
 //
 // The song model stores the WRITTEN form only. The order a tune is played in — repeats,
 // alternative endings, navigation — is a pure function over this model, so there is no second
@@ -30,6 +31,7 @@ export 'src/chord.dart';
 export 'src/ireal/chord_parser.dart';
 export 'src/ireal/obfuscation.dart';
 export 'src/ireal/parser.dart';
+export 'src/ireal/payload.dart';
 export 'src/ireal/tokenizer.dart';
 export 'src/key.dart';
 export 'src/layout/geometry.dart';
