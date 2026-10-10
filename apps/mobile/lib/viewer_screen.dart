@@ -15,8 +15,10 @@
 //          bars-and-sections switch, a song list, a scene bar and the selected song's page or pages,
 //          each drawn by `ChartPainter` at
 //          the size the window gives it and covered by an `InkPainter` carrying the document's
-//          strokes and a `TextCuePainter` carrying the words written on the chart. A tap on a page
-//          selects the bar and cell under it, the painter highlights them,
+//          strokes and a `TextCuePainter` carrying the words written on the chart. A FIT that cannot
+//          reach the legible floor still shows the chart — as pages, with a strip saying why — which
+//          is the one case the mode request and the mode drawn disagree about (see below). A tap on
+//          a page selects the bar and cell under it, the painter highlights them,
 //          and a line above the page states the selected position in words. Tapping that line opens
 //          the chord palette for a selected cell and the bars-and-sections sheet for a bar-level
 //          selection; a chord chosen in the palette is applied through the
@@ -93,6 +95,26 @@
 // rather than hopeful: the selected song is the selected row when the drawer reopens, and the list
 // keeps its own [ScrollController], so a musician twenty songs down a playlist comes back to the
 // same twenty.
+//
+// WHAT FIT DOES WHEN IT CANNOT FIT, AND WHY AN EMPTY PAGE IS NOT AN ANSWER. The page mode is chosen
+// from the pane WIDTH, and FIT's verdict also depends on the pane's HEIGHT — so a window that is wide
+// enough to be engraved as a tablet but too short to hold the tune above [LayoutEngine.minLegibleScale]
+// asks for a fitted page that does not exist. Reporting that on screen and drawing nothing is a
+// musician opening a chart and being shown a sentence where the music should be, which is a refusal
+// however honest its wording. FIT therefore FALLS BACK TO PAGES: the paginated chart is drawn, and a
+// strip pinned over the top of it says why, naming the floor. The fallback is automatic (a press
+// between the musician and the music is the same refusal in slower form) and an explicit FIT press is
+// answered in the second person rather than silently ignored. The reasoning, the rejected alternative
+// and the measurements are recorded in `docs/sdd.md` A50; the mechanism is [_buildPages],
+// [_fitFallbackNotice] and the mode drawn being the one `_pageGeometry` reports.
+//
+// AND THE FALLBACK ONLY EARNS ITS KEEP IF THERE IS ROOM TO SEE IT. The same measurement at 915x412
+// found the chart pane 65 logical pixels tall, because the scene bar's full form wrapped to two rows
+// on a screen only 412 high; one system needs 98, so the pages FIT fell back to were themselves
+// clipped to their barlines. The bar therefore takes its compact form on a SHORT window as well as a
+// narrow one — [_isBarCompact], and `sceneBarTabletHeight` in `scene_bar.dart` — which returns about
+// 85 pixels to the chart. A form decided on the window's HEIGHT does not contradict the width rule:
+// the fields are not what cannot fit on a short surface, the chart is.
 //
 // WHY THE TOOLS GO TO THE BOTTOM RATHER THAN INTO THE MENU. D11 says a phone gets a bottom dock, and
 // the four controls that answer that description are the ones a hand reaches for while reading:
@@ -474,6 +496,25 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          take. A surface is one or the other, never both.
   // KEYWORDS: shell-form, phone-vs-tablet, threshold, window-width, d11
   bool _isPhoneWidth(double windowWidth) => windowWidth < sceneBarTabletWidth;
+
+  // PURPOSE: Decide whether the scene bar must take its COMPACT form, which is a question about the
+  //          window on TWO axes rather than one.
+  // INPUTS: window — the whole window's logical size, read from the [MediaQuery] by [_buildSongPane].
+  // OUTPUTS: True when the window is narrower than [sceneBarTabletWidth] OR shorter than
+  //          [sceneBarTabletHeight], false when it has room on both axes. The bar therefore keeps its
+  //          full form on every surface the owner uses — 1200x900, 1400x900 and 824x1318 all clear
+  //          both thresholds — and takes the compact form on a phone in portrait and, newly, on a
+  //          phone in LANDSCAPE, where the full bar's two rows left the chart pane 65 logical pixels.
+  //          One system needs `pageMargin + sectionLabelHeight + barHeight` = 98, so at 65 neither
+  //          FIT nor its paginated fallback could put a chord on screen; the compact form returns the
+  //          ~85 pixels that make the fallback worth having. WHY THIS IS NOT THE SHELL'S DECISION:
+  //          the shell's form stays width-only, because "where does a hand go" is a question about
+  //          width and a short window is a surface without room rather than a different device. See
+  //          A49 for the measurement and A50 for the fallback this room serves.
+  // KEYWORDS: scene-bar-form, compact, two-axes, window-height, chart-room, a49, a50
+  bool _isBarCompact(Size window) =>
+      window.width < sceneBarTabletWidth ||
+      window.height < sceneBarTabletHeight;
 
   // PURPOSE: Report the song list's scroll position when the drawer opens or closes, so "the list
   //          does not lose its place" is something that was read rather than something asserted.
@@ -1916,13 +1957,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               song: displayed,
               semitones: semitones,
               pageMode: mode,
-              // The bar's FORM follows the SHELL's one decision about the surface, taken from the
-              // window width by [_isPhoneWidth] — not from the pane this bar is drawn in. The pane
-              // is the right measure for the page mode above and the wrong one here: the owner's
-              // tablet has a 564-pixel pane, so a bar that called itself narrow on that number would
-              // drop STYLE and REPEATS on the owner's own device while the shell around it was still
-              // the tablet's.
-              compact: _isPhoneWidth(MediaQuery.sizeOf(context).width),
+              // The bar's FORM follows the SHELL's decision about the surface, taken from the
+              // WINDOW by [_isBarCompact] — not from the pane this bar is drawn in. The pane is the
+              // right measure for the page mode above and the wrong one here: the owner's tablet has
+              // a 564-pixel pane, so a bar that called itself narrow on that number would drop STYLE
+              // and REPEATS on the owner's own device while the shell around it was still the
+              // tablet's. The window is read on BOTH axes, and the height is the one that matters on
+              // a phone held sideways: see [_isBarCompact] and A49.
+              compact: _isBarCompact(MediaQuery.sizeOf(context)),
               // The key badge keeps its two-tap meaning in BOTH senses of D14: on a chart read on
               // its own it edits the editor interval, and while a programme entry is playing it
               // edits that entry's scene interval through the setlist log. Which one is in force is
@@ -2563,20 +2605,33 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return ordinal + barIndex + 1;
   }
 
+  /// The background of the strip that explains a FIT fallback.
+  ///
+  /// A warm band rather than the page's own white: the strip is a remark ABOUT the chart and must not
+  /// read as part of it.
+  static const Color _fitFallbackColor = Color(0xFFFFE9A8);
+
+  /// The colour of the words on [_fitFallbackColor].
+  static const Color _fitFallbackTextColor = Color(0xFF5A4300);
+
   // PURPOSE: Lay the displayed song out at the size the window gives it and show it as one fitted
   //          page or as a page at a time.
   // INPUTS: entry — the selected song, for identity. displayed — the chart to draw, in its chosen
-  //         key. mode — FIT or PAGES. layer — the ink layer of the song on screen, which decides
-  //         what a contact on a page means. strokes — the committed strokes of the WRITTEN document,
-  //         which are placed by address and so are unaffected by the transposition on screen.
-  //         textCues — the cues of the same document, placed by address for the same reason.
-  // OUTPUTS: The chart. PAGES is the layout engine's ordinary pagination in a [PageView]. FIT is
-  //          one scaled page, or a message saying the song would have to be shrunk below the
-  //          legible floor, which is reported on screen rather than delivered as an unreadable
-  //          page. A song the layout engine produces no pages for says so instead of showing an
-  //          empty page, because an empty song and a blank page must not look alike.
-  // KEYWORDS: pagination, fit, page-scale, layout-call, page-view, empty-song, legibility-message,
-  //           ink-layering, cue-layering
+  //         key. mode — the mode the musician asked for: FIT or PAGES. layer — the ink layer of the
+  //         song on screen, which decides what a contact on a page means. strokes — the committed
+  //         strokes of the WRITTEN document, which are placed by address and so are unaffected by
+  //         the transposition on screen. textCues — the cues of the same document, placed by
+  //         address for the same reason.
+  // OUTPUTS: The chart. PAGES is the layout engine's ordinary pagination in a [PageView]. FIT is one
+  //          scaled page when the song fits above the legible floor, and — when it does not — the
+  //          SAME pagination with [_fitFallbackNotice] pinned over the top of it, because a floor
+  //          the engine refuses to cross is a reason to paginate and not a reason to show nothing.
+  //          The mode DRAWN is what `_pageGeometry` reports, so a driving tool measures the pages on
+  //          screen rather than asking FIT again about a page that was never drawn. A song the
+  //          layout engine produces no pages for says so instead of showing an empty page, because
+  //          an empty song and a blank page must not look alike.
+  // KEYWORDS: pagination, fit, fit-fallback, page-scale, layout-call, page-view, empty-song,
+  //           legibility-message, fallback-notice, ink-layering, cue-layering, a50
   Widget _buildPages(
     IRealSong entry,
     Song displayed,
@@ -2606,11 +2661,64 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             cues: textCues,
           );
           final PageLayout? page = outcome.page;
-          if (page == null) {
-            return _buildNoFit(context, outcome);
+          if (page != null) {
+            _lastPageScale = page.scale;
+            return _tappablePage(page, displayed, layer, strokes, textCues);
           }
-          _lastPageScale = page.scale;
-          return _tappablePage(page, displayed, layer, strokes, textCues);
+          // --- THE FIT FALLBACK -----------------------------------------------------------------
+          // FIT could not put the song on one page above the legible floor, so the chart is shown
+          // PAGINATED rather than left blank. The decision and the reasons behind it are recorded
+          // beside [_fitFallbackNotice] and in `docs/sdd.md` A50; this is where it is carried out.
+          final List<PageLayout> fallback = _engine.layout(
+            displayed,
+            pageWidth: pageWidth,
+            pageHeight: pageHeight,
+            cues: textCues,
+          );
+          if (fallback.isEmpty) {
+            return const Center(child: Text('This song has no bars.'));
+          }
+          // The mode reported to `_pageGeometry` is the one DRAWN, so a driving tool re-engraves
+          // the paginated pages it is actually looking at instead of asking FIT again and getting
+          // an empty answer.
+          _lastPageMode = PageMode.pages;
+          _lastPageScale = fallback.first.scale;
+          debugPrint(
+            'viewer.page.fit.fallback song="${_titleFor(entry)}" '
+            'pane=${pageWidth.toStringAsFixed(0)}x${pageHeight.toStringAsFixed(0)} '
+            'floor=${outcome.scale} pages=${fallback.length} '
+            'bar0=${fallback.first.bars.length} '
+            'requested=${_chosenPageMode == PageMode.fit ? 'explicit' : 'default'}',
+          );
+          return Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              PageView.builder(
+                key: ValueKey<int>(entry.index),
+                itemCount: fallback.length,
+                itemBuilder: (BuildContext context, int index) => _tappablePage(
+                  fallback[index],
+                  displayed,
+                  layer,
+                  strokes,
+                  textCues,
+                ),
+              ),
+              // IGNORED BY THE POINTER, so the band states the substitution WITHOUT taking a contact
+              // away from the page under it. The page's own contract is that a touch on its white
+              // space — exactly where a musician may miss a bar — is reported and clears the
+              // selection; a band that swallowed the page's top strip would break that contract in
+              // the one mode where the page already has the least room.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: _fitFallbackNotice(context, outcome),
+                ),
+              ),
+            ],
+          );
         }
         final List<PageLayout> pages = _engine.layout(
           displayed,
@@ -2632,26 +2740,58 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
-  // PURPOSE: Say on screen that a song will not fit one page at a legible size, instead of drawing
-  //          a page nobody can read.
-  // INPUTS: context — the build context. outcome — the failed fit, carrying the scale floor the
-  //         engine tried.
-  // OUTPUTS: A centred message naming the floor and pointing at PAGES.
-  // KEYWORDS: fit, legibility-floor, on-screen-message, honest-failure
-  Widget _buildNoFit(BuildContext context, FitOutcome outcome) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
+  // PURPOSE: Say WHY the chart is paginated when FIT was asked for and could not deliver, without
+  //          taking the music off the screen — the strip states the substitution, the pages under it
+  //          are the chart.
+  // INPUTS: context — the build context, for the theme. outcome — the failed fit, whose [FitOutcome.scale]
+  //         is the legible floor the engine refused to go below.
+  // OUTPUTS: A one-to-three-line band pinned over the top of the chart area, saying that one page is
+  //          impossible at the floor and that the chart is shown as pages. It is drawn OVER the page
+  //          rather than above it: the chart area is the scarce resource that made the fallback
+  //          necessary in the first place, and the top of a page is its empty margin, so a band here
+  //          costs the music nothing. Returns a band whatever the surface; it never returns nothing,
+  //          because a silent substitution would leave the musician unable to tell a chart that was
+  //          too long from one they had asked to paginate.
+  // KEYWORDS: fit, legibility-floor, on-screen-message, fallback-notice, overlay, honest-substitution
+  //
+  // THE DECISIONS THIS BAND CARRIES, and why each is the one it is:
+  //
+  //   THE FALLBACK IS AUTOMATIC. A musician who opened a chart wants the music, and making them
+  //   press a control to be shown it is the same "no" the missing chart already was, in a slower
+  //   form. The strip explains the substitution instead of asking for permission to make it.
+  //
+  //   THE MESSAGE IS NEVER DROPPED. A3x's message existed so the reader would know the chart had
+  //   not silently been made small; the fallback must not throw that away. The floor is named, so
+  //   the reader can tell a genuinely long tune from a window that is merely short.
+  //
+  //   AN EXPLICIT FIT PRESS IS ANSWERED IN THE SECOND PERSON. Pressing FIT is a decision, not a
+  //   default, so it must be visible that the press was read and could not be honoured: the strip
+  //   then opens with "You asked for one page". The rejected alternative — honouring the press by
+  //   emptying the page again — is the defect this fallback exists to remove, so a press can change
+  //   the explanation but never the outcome.
+  Widget _fitFallbackNotice(BuildContext context, FitOutcome outcome) {
+    final int percent = (outcome.scale * 100).round();
+    // Kept to one line wherever the strip has the width for it, because the strip is pinned over the
+    // page and every line it wraps to covers a little more of the music's own band.
+    final String message = _chosenPageMode == PageMode.fit
+        ? 'You asked for one page, but at the $percent% legible floor it needs '
+              'more. Shown as pages instead.'
+        : 'This song does not fit on one page at the $percent% legible floor. '
+              'Shown as pages instead.';
+    return Container(
+      color: _fitFallbackColor,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Text(
-        'This song does not fit on one page legibly.\n'
-        'It would need to be smaller than '
-        '${(outcome.scale * 100).round()}% of the page, so it is not '
-        'shrunk to nothing.\n'
-        'Use PAGES to read it page by page.',
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.titleMedium,
+        message,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: _fitFallbackTextColor,
+          fontWeight: FontWeight.w600,
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   // PURPOSE: State what is loaded, so the reader can tell a 22-song playlist from a single song
   //          without counting the list.

@@ -164,16 +164,24 @@ void main() {
     expect(shownPainter(tester).page.bars, hasLength(200));
   });
 
+  // THIS TEST FORMERLY ASSERTED THE DEFECT, AND THAT IS SAID HERE RATHER THAN QUIETLY EDITED AWAY.
+  // It read `expect(find.byType(PageView), findsNothing)` beside the message: it asserted that a song
+  // FIT could not fit produced NO CHART AT ALL. That is exactly what a musician was given at 915x412,
+  // and the assertion was not wrong about the old behaviour — the behaviour was wrong. The FIT
+  // fallback (docs/sdd.md A50) makes the old assertion unsatisfiable by design, so the expectation is
+  // rewritten to the new contract: PAGES with the explanation over it. It is rewritten rather than
+  // deleted, and it still checks the message, because a fallback that drew nothing but kept the words
+  // would pass a test that only looked for the words.
   testWidgets(
-    'a song that cannot fit legibly says so instead of shrinking to nothing',
+    'a song that cannot fit legibly falls back to pages and says why',
     (WidgetTester tester) async {
       await pumpViewer(tester, libraryOf(syntheticSong(bars: 900)));
 
-      expect(find.byType(PageView), findsNothing);
-      expect(
-        find.textContaining('does not fit on one page legibly'),
-        findsOneWidget,
-      );
+      expect(find.byType(PageView), findsOneWidget);
+      expect(shownPainter(tester).page.bars, isNotEmpty);
+      expect(shownPainter(tester).page.scale, 1);
+      expect(find.textContaining('does not fit on one page'), findsOneWidget);
+      expect(find.textContaining('Shown as pages instead'), findsOneWidget);
     },
   );
 

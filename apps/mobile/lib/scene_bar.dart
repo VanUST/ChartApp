@@ -77,7 +77,29 @@ const Color sceneBarAccent = Color(0xFFFFC857);
 /// the wrong measure for the form: the owner's tablet is 824 logical pixels of window against 564 of
 /// pane, so a bar that called itself compact on a 564-pixel pane would drop STYLE and REPEATS on the
 /// owner's own device. The form is a fact about the surface, and the surface is the window.
+///
+/// THE BAR'S FORM IS THE ONE DECISION THAT ALSO READS THE HEIGHT, through [sceneBarTabletHeight].
+/// Width answers "is this surface narrow"; height answers "is it short", and a short surface is one
+/// where the chart, not the fields, is what runs out of room. Neither shell form nor page-mode
+/// default follows it there, because neither of those is a question about vertical room.
 const double sceneBarTabletWidth = 600;
+
+/// The height below which a surface is too short for the scene bar's full form.
+///
+/// The width threshold's sibling, and it decides ONE thing: whether this bar is compact. A surface
+/// at least [sceneBarTabletWidth] wide but shorter than this cannot afford two rows of readings,
+/// because those rows come out of the chart — and a chart pane shorter than one system
+/// (`pageMargin` + `sectionLabelHeight` + `barHeight` = 98 logical pixels) cannot show a single
+/// chord. Measured on the built web app at 915x412: the full bar left the pane **65** logical pixels,
+/// so FIT could not fit and its paginated fallback had no room to show even one system's chord row;
+/// the compact form returns about **85** of those pixels, which puts a whole system on screen.
+///
+/// It is deliberately NOT read for the shell form or the page-mode default. The shell is about where
+/// a hand goes and the page mode is about how wide the music is engraved; this is about HEIGHT, and
+/// height is the axis on which the chart runs out of room. Extending the width rule to a second axis
+/// rather than carving an exception out of it is the point — see A49 for the measurement and A50 for
+/// the FIT fallback the extra room makes useful.
+const double sceneBarTabletHeight = 600;
 
 /// The scene bar: position, tempo, style, key badge, repeats and the page-mode toggle.
 class SceneBar extends StatelessWidget {
