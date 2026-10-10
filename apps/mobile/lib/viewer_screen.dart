@@ -10,7 +10,8 @@
 //         and whether to load the starting reference on the first frame. The loader is injected so
 //         a widget test can pump this screen with a synthetic payload and never touch the
 //         filesystem, and so the web build can hand it a browser file chooser instead of a path.
-// OUTPUTS: A screen with a source bar, a chart save/open bar, an ink switch, undo and redo, a
+// OUTPUTS: A screen with a source bar, a chart save/open bar, an ink switch, an eraser switch, undo
+//          and redo, a
 //          bars-and-sections switch, a song list, a scene bar and the selected song's page or pages,
 //          each drawn by `ChartPainter` at
 //          the size the window gives it and covered by an `InkPainter` carrying the document's
@@ -21,12 +22,14 @@
 //          selection; a chord chosen in the palette is applied through the
 //          operation log and redrawn, and undo and redo move that same log back and forth. With ink
 //          on, a contact the palm rule admits is drawn into a stroke and appended to the same log,
-//          and a contact it refuses still selects. An app-bar action opens the words sheet for the
-//          selected bar, where `To Coda`, `D.C. al Fine`, `Solo` and the like are written, changed,
-//          moved and removed — also through that same log.
+//          and a contact it refuses still selects. With the eraser on, an admitted tap removes the
+//          whole stroke it is on through that same log — undo puts it back exactly — and NO touch
+//          selects at all, whether it hit ink or missed it. An app-bar action opens the words sheet
+//          for the selected bar, where `To Coda`, `D.C. al Fine`, `Solo` and the like are written,
+//          changed, moved and removed — also through that same log.
 // KEYWORDS: viewer, ireal, reader, editor, screen, page-view, transposition, scene-bar, page-modes,
-//           chord-palette, ink-mode, ink-layer, op-log, undo, redo, chart-file, save, open,
-//           song-form, bars, sections, text-cue, words, widget-test-seam, platform-seam,
+//           chord-palette, ink-mode, eraser-mode, ink-layer, op-log, undo, redo, chart-file, save,
+//           open, song-form, bars, sections, text-cue, words, widget-test-seam, platform-seam,
 //           verification
 //
 // WHERE THE INK LIVES. A stroke reaches the document through the same door a chord does: the ink
@@ -288,21 +291,37 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return layer;
   }
 
-  // PURPOSE: Report whether ink is on for the song on screen, for the app-bar control.
-  // INPUTS: None; reads the library and the selected index.
-  // OUTPUTS: True when a layer exists and its mode is on. False before any layer exists, because a
-  //          song nobody has drawn on has ink off: a control that claimed otherwise would light up
-  //          for a mode the next contact would not honour.
-  // KEYWORDS: ink-mode, app-bar-state, default-off, null-when-empty
-  bool get _inkOn {
+  // PURPOSE: Report whether THE PEN is on for the song on screen, for the app-bar control.
+  // INPUTS: None; reads the layer of the selected song.
+  // OUTPUTS: True when a layer exists and its mode is the pen. False before any layer exists, and
+  //          false while the eraser is on, because exactly one tool acts on a contact.
+  // KEYWORDS: ink-mode, app-bar-state, default-off, null-when-empty, pen-only
+  bool get _inkOn => _selectedInkLayer?.inkMode ?? false;
+
+  // PURPOSE: Report whether the ERASER is on for the song on screen, for its app-bar control.
+  // INPUTS: None; reads the layer of the selected song.
+  // OUTPUTS: True when a layer exists and its mode is the eraser, false otherwise — before any
+  //          layer exists, and while the pen is the active tool.
+  // KEYWORDS: eraser-mode, app-bar-state, default-off, null-when-empty, exclusive-with-pen
+  bool get _eraserOn => _selectedInkLayer?.eraserMode ?? false;
+
+  // PURPOSE: Return the ink layer of the song on screen WITHOUT creating one, which is what a
+  //          read-only control needs: listing a chart must not open a capture layer, and an absent
+  //          layer and a layer that is off must both read as "not on" rather than as two states.
+  // INPUTS: None; reads the library and the selected index, following the clamp the body uses.
+  // OUTPUTS: The layer, or null when nothing is loaded or no layer has been created yet. This is the
+  //          one place the app-bar controls resolve "the layer the selected song is drawn with", so
+  //          the pen and the eraser cannot disagree about which song they describe.
+  // KEYWORDS: current-layer, selection-clamp, no-eager-creation, null-when-empty, one-lookup
+  InkCaptureLayer? get _selectedInkLayer {
     final IRealLibrary? library = _library;
     if (library == null || library.songs.isEmpty) {
-      return false;
+      return null;
     }
     final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
         ? _selectedSong
         : 0;
-    return _inkLayers[library.songs[index].index]?.inkMode ?? false;
+    return _inkLayers[library.songs[index].index];
   }
 
   // PURPOSE: Return the session of the song currently selected, for the app bar, which has no song
@@ -432,6 +451,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       'redo': session.redoDepth,
       'seq': session.seq,
       'ink': layer.inkMode,
+      'eraser': layer.eraserMode,
+      'mode': layer.mode.token,
+      'erase': layer.inputReport['lastErase'],
       'scale': _lastPageScale,
       'contact': layer.lastPointWasInk,
       'flutters': layer.inputReport,
@@ -467,6 +489,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             'pts': stroke.points.length,
             'p0': <double>[stroke.points.first.x, stroke.points.first.y],
             't': stroke.points.last.t,
+            // THE CANONICAL FORM, because the fields above are a summary and an eraser
+            // verification has to compare the STROKE: a removal and an undo that restored a
+            // re-derived stroke with the same id and the same first point would agree with every
+            // summary field and disagree about the ink. This is the same JSON a `.chart` file
+            // carries, so what a driver reads here is what the document actually holds.
+            'canonical': stroke.toJson(),
           },
       ],
     };
@@ -778,8 +806,27 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
             tooltip: _inkOn
                 ? 'Drawing: the pen draws, a finger still selects'
-                : 'Selecting: the pen and a finger both select',
+                : (_eraserOn
+                      ? 'Pen off: the eraser is on'
+                      : 'Selecting: the pen and a finger both select'),
             onPressed: session == null ? null : () => _toggleInk(session),
+          ),
+          // --- ERASER ---------------------------------------------------------------------------
+          // The eraser stands next to the pen because the two are the two things a contact on the
+          // chart can do to the ink, and there is exactly one of them at a time: pressing it turns
+          // the pen off, and pressing the pen turns it off. It is disabled when there is no chart
+          // for the same reason the pen is, and its tooltip states the gesture in words — a tap on
+          // a stroke removes that whole stroke — because a musician cannot be expected to discover
+          // a mode from an icon. This button, `_toggleEraser` below `_toggleInk`, the `_eraserOn`
+          // getter beside `_inkOn`, the `eraser` keys in `_inkProbeState`, and the eraser branch of
+          // `_onPageTapUp` are the whole of this feature's footprint in this file.
+          IconButton(
+            key: const ValueKey<String>('viewer-eraser-toggle'),
+            icon: const Icon(Icons.auto_fix_normal),
+            tooltip: _eraserOn
+                ? 'Erasing: tap a stroke and its whole length goes'
+                : 'Eraser off',
+            onPressed: session == null ? null : () => _toggleEraser(session),
           ),
           IconButton(
             key: const ValueKey<String>('viewer-undo'),
@@ -877,6 +924,36 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     debugPrint(
       'viewer.ink.toggle song="${_titleFor(entry)}" on=$next '
       'strokes=${layer.strokeCount} session_matches=${identical(session, _sessionFor(entry))}',
+    );
+  }
+
+  // PURPOSE: Turn the ERASER on or off for the song on screen, which is the second half of the ink
+  //          switch pair: with it on, a contact the palm rule admits removes the whole stroke it
+  //          taps, and a contact it refuses does nothing at all — neither erase nor select.
+  // INPUTS: session — the session of the song on screen, used only to check which song the layer
+  //         belongs to, exactly as [_toggleInk] uses it.
+  // OUTPUTS: Nothing. Rebuilds so the two controls show the new mode. Turning the eraser on turns
+  //          the pen off and the other way round, because the layer holds one mode; the two buttons
+  //          therefore cannot both read as on.
+  // KEYWORDS: eraser-mode, toggle, pen-vs-eraser, rebuild, structured-log
+  void _toggleEraser(EditSession session) {
+    final IRealLibrary? library = _library;
+    if (library == null || library.songs.isEmpty) {
+      return;
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    final IRealSong entry = library.songs[index];
+    final InkCaptureLayer layer = _inkFor(entry);
+    final bool next = !layer.eraserMode;
+    layer.eraserMode = next;
+    setState(() {});
+    _publishInkState();
+    debugPrint(
+      'viewer.eraser.toggle song="${_titleFor(entry)}" on=$next '
+      'mode=${layer.mode.token} strokes=${layer.strokeCount} '
+      'session_matches=${identical(session, _sessionFor(entry))}',
     );
   }
 
@@ -1295,7 +1372,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapDown: (TapDownDetails details) => _onPageTapDown(layer, details),
-        onTapUp: (TapUpDetails details) => _onPageTapUp(page, details),
+        onTapUp: (TapUpDetails details) => _onPageTapUp(page, layer, details),
         onTapCancel: _onPageTapCancel,
         child: _layeredPage(page, song, layer, strokes, textCues),
       ),
@@ -1455,24 +1532,40 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     _tapWasInk = false;
   }
 
-  // PURPOSE: Turn a completed tap into a selection, and do nothing for a contact that drew.
+  // PURPOSE: Turn a completed tap into a selection, and do nothing for a contact that was consumed
+  //          by the ink layer — either because it drew a stroke or because the eraser is on.
   //
   //          IT RUNS AFTER THE STROKE WAS COMMITTED, and that ordering is what lets it repaint: a
   //          gesture is resolved only once every pointer handler for the lift has run, and the ink
   //          layer's own handler is on a widget ABOVE this recogniser in the hit-test path, so
-  //          `endStroke` has already appended the stroke to the document by the time this is called.
-  // INPUTS: page — the page the tap landed on. details — the tap, whose local position is in the
-  //         page's surface.
-  // OUTPUTS: Nothing. It rebuilds when the contact drew, so the new stroke is painted and the undo
-  //          control becomes live; it selects otherwise, and clears the selection on a miss.
-  // KEYWORDS: tap-up, commit-then-repaint, selection, fit-scale, no-select-after-stroke
-  void _onPageTapUp(PageLayout page, TapUpDetails details) {
+  //          `endStroke` has already appended the stroke to the document by the time this is called
+  //          — and `endErase` has already appended a deletion for the same reason.
+  //
+  //          WHY THE ERASER MODE SUPPRESSES SELECTION WHATEVER THE RULE DECIDED. With the eraser on,
+  //          a touch on the chart is aimed at the ink, not at the music: a stroke has no other
+  //          meaning, and a touch that missed the ink must not silently select the bar underneath
+  //          it. That is also the honest answer for a contact the palm rule REFUSED — the palm is
+  //          neither allowed to erase nor invited to select, so it leaves the chart exactly as it
+  //          found it. With the eraser off this branch is unchanged and everything selects as before.
+  // INPUTS: page — the page the tap landed on. layer — the ink layer of the song on screen, whose
+  //         mode is the only thing that can consume a tap without a stroke being drawn. details —
+  //         the tap, whose local position is in the page's surface.
+  // OUTPUTS: Nothing. It rebuilds when the contact was consumed, so a new stroke is painted, a
+  //          deletion shows, and the undo control becomes live; it selects otherwise, and clears the
+  //          selection on a miss.
+  // KEYWORDS: tap-up, commit-then-repaint, eraser-suppresses-selection, selection, fit-scale
+  void _onPageTapUp(
+    PageLayout page,
+    InkCaptureLayer layer,
+    TapUpDetails details,
+  ) {
     final bool drew = _tapWasInk;
+    final bool erasing = layer.eraserMode;
     _tapWasInk = false;
-    if (drew) {
-      // The contact laid ink: the document changed under this frame, so the page and the app bar are
-      // both out of date. No selection is made — the bar under a stroke is not what the musician
-      // asked for.
+    if (drew || erasing) {
+      // The contact was the ink layer's: the document may have changed under this frame, so the page
+      // and the app bar are both out of date. No selection is made — the bar under a stroke is not
+      // what the musician asked for, and under the eraser not even a miss is a selection.
       setState(() {});
       _publishInkState();
       return;

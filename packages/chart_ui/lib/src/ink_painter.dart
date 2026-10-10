@@ -117,9 +117,12 @@ class InkPainter extends CustomPainter {
     }
     final bool isHighlighter = stroke.tool == StrokeTool.highlighter;
     final Color color = _colorOf(stroke, isHighlighter: isHighlighter);
-    final double nib = stroke.size <= 0
-        ? (isHighlighter ? 18 : 3)
-        : stroke.size;
+    // THE ONE NIB RULE, SHARED WITH THE ERASER. `inkStrokeNibWidth` is what the eraser's hit test
+    // measures the drawn band with (see chart_core's `ink_hit.dart`), so computing the width here
+    // from a local ternary would be a second answer to one question — and its failure would be
+    // silent in the direction that matters, because a stroke would simply be harder to erase than
+    // it looks.
+    final double nib = inkStrokeNibWidth(stroke);
     final LayoutOffset origin = resolved.origin;
 
     if (points.length == 1) {

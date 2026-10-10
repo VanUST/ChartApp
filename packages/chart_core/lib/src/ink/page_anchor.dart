@@ -189,19 +189,18 @@ LayoutOffset pagePointToAnchorLocal(
   LayoutOffset origin,
 ) => LayoutOffset(pagePoint.x - origin.x, pagePoint.y - origin.y);
 
-// PURPOSE: Convert between a position measured on the SURFACE the page is drawn on and a position
-//          in the page's own engraved coordinates, in the one direction the capture side needs.
-//          [PageLayout.pagePointOf] is the other direction and lives on the layout, so this pair is
-//          the complete bridge and neither side re-derives the fit.
-// INPUTS: surfacePoint — a position from the top-left of the rectangle the page fills, in logical
-//         pixels. scale — the page's own `PageLayout.scale`, passed in rather than looked up so
-//         that a caller already holding the layout cannot accidentally pass a different one.
-// OUTPUTS: The position in the page's engraved coordinates. Multiplying instead of dividing, which
-//          is what makes it the inverse of `pagePointOf`; a scale of 1 returns the point untouched,
-//          so the ordinary page pays nothing.
-// KEYWORDS: surface-to-page, fit-scale, inverse-transform, capture, single-bridge
-/// Returns the engraved page position under [surfacePoint].
-LayoutOffset inkSurfaceToPage(LayoutOffset surfacePoint, double scale) =>
-    scale == 1
-    ? surfacePoint
-    : LayoutOffset(surfacePoint.x * scale, surfacePoint.y * scale);
+// NOTE ON THE SURFACE-TO-PAGE TRANSFORM, WHICH IS DELIBERATELY ABSENT FROM THIS FILE.
+//
+// There was once a function here, `inkSurfaceToPage(surfacePoint, scale)`, that multiplied the
+// surface point by the page scale and called itself the inverse of `PageLayout.pagePointOf`. That
+// comment was FALSE — `pagePointOf` DIVIDES by the scale — and the code that believed it anchored a
+// stroke to the cell at `surfacePoint * scale²` on a fitted page, some ten engraved pixels from the
+// nib that drew it. A second transform for one relationship is the defect; a comment asserting the
+// two agree is what let it survive review.
+//
+// The transform exists in exactly one place: [PageLayout.pagePointOf], which divides. Capture (see
+// `InkStrokeAssembler`), the page hit test (`hitTestPage`) and the eraser (`hitTestInkErase`) all
+// call it, and the painter is its inverse through `canvas.scale(pageScale, pageScale)`. Do not add a
+// helper beside this one: route the caller to the layout instead. The one direction this file does
+// own is the translation between the page and the anchor's own corner, above and in
+// [inkPointToPage], because that is a subtraction and not a scale.

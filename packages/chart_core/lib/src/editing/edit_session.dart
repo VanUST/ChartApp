@@ -1054,6 +1054,54 @@ class EditSession {
     return candidate;
   }
 
+  // --- Ink: the strokes a musician wrote on the chart -------------------------------------------
+  //
+  // The catalogue has carried `ink.stroke.add` and `ink.stroke.delete` since it was written, and
+  // the eraser is the operation the second one exists for. The ADD is written by the capture layer,
+  // which owns the live samples and the identity it mints for them; the DELETE is written here,
+  // next to the one writer, because it needs the stroke's POSITION in the document's list and only
+  // the document can answer that. The position matters: it is what the deletion's inverse restores
+  // the stroke to, so a stroke removed from the middle of the render order comes back in the middle
+  // and not on top of the ink it used to lie beneath.
+  //
+  // WHY THE STROKE IS REMOVED BY IDENTITY AND NOT BY POSITION. A position is a photograph of a
+  // list that an undo, a redo or another device's edit can change between the touch and the append.
+  // The id is the identity the capture layer minted and the identity the delete event carries, so
+  // the reducer can apply the removal even if earlier edits shifted the list — and the position is
+  // carried alongside it for the inverse alone, which is exactly how `InkStrokeDeleteEvent` is
+  // documented.
+
+  // PURPOSE: Remove one stroke from the document, which is the whole of what the eraser does: the
+  //          model removes WHOLE STROKES rather than nibbling pixels, so there is no partial erase
+  //          here and no stroke to store for one. See `oplog/ink.dart` for that decision.
+  // INPUTS: id — the identity of the stroke to remove, as the document currently holds it and as
+  //         the capture layer's hit test reported it.
+  // OUTPUTS: True when a deletion was appended, false when no stroke carries [id]. The event
+  //          carries the stroke IN FULL and the position it occupied, so an undo restores the exact
+  //          geometry — same id, same points, same anchor — at the exact place in the render order
+  //          rather than re-derived from anything. An id naming no stroke is refused rather than
+  //          appended as a no-op: a log row that changes nothing is still an offer to undo an edit
+  //          that did not happen.
+  // KEYWORDS: ink-erase, stroke-delete, whole-value, render-order, identity-not-position, undoable
+  /// Removes the stroke with [id], reporting whether the document held one.
+  bool eraseStroke(String id) {
+    final int index = _document.strokes.indexWhere(
+      (InkStroke stroke) => stroke.id == id,
+    );
+    if (index < 0) {
+      return false;
+    }
+    apply(
+      InkStrokeDeleteEvent(
+        docId: _docId,
+        seq: _seq,
+        index: index,
+        stroke: _document.strokes[index],
+      ),
+    );
+    return true;
+  }
+
   // --- The song's own metadata ------------------------------------------------------------------
   //
   // One event family covers all four fields, because they are one thing a musician edits: what the

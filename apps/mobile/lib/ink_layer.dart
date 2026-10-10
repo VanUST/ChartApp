@@ -15,8 +15,35 @@
 //          finishes, and answers [decideContact] so the widget can route a tap to selection instead.
 //          A stroke whose first point lies over no bar is dropped, counted, and reported; it is not
 //          attached to the nearest bar, because that would be a guess about intent.
-// KEYWORDS: ink-mode, pointer-routing, palm-rule, stylus-proximity, op-log-writer, commit,
-//           anchor-local, web-ink
+// KEYWORDS: ink-mode, eraser-mode, pointer-routing, palm-rule, stylus-proximity, op-log-writer,
+//           commit, erase-by-tap, anchor-local, web-ink
+//
+// WHY THE ERASER IS A MODE AND NOT A SECOND SWITCH, AND WHY IT REUSES THE PALM RULE. The model
+// removes whole strokes (`oplog/ink.dart`), so erasing is an operation on the stroke list and not a
+// kind of ink; the mode therefore sits on this layer beside the pen rather than being a third tool
+// that a stroke could be stored with. Admission reuses `InkPalmRule` unchanged, because the rule's
+// question is not "is this ink" but "is this a hand that means to act on the chart": a palm resting
+// on the glass while a pen is in play must neither draw a smear nor delete a marking, and a finger
+// with no pen in play must be able to erase exactly where it is able to draw. One rule for both
+// modes is what makes that statement checkable instead of two rules that drift.
+//
+// WHY THE ERASE GESTURE IS A TAP AND NOT A STROKE THROUGH THE INK. Touch a stroke, lift without
+// dragging, and that stroke is gone. The alternatives fail differently, and the differences are
+// what decided it:
+//   - One deliberate act removes one stroke. The musician sees each result before the next, and one
+//     undo restores exactly that stroke; a drag through several strokes appends several deletions
+//     in one motion and has to be walked back one at a time.
+//   - The aim question is asked at ONE point, with one answer the musician can predict (nearest
+//     stroke; on a near tie, the one drawn on top — see chart_core's `ink_hit.dart`). Along a drag
+//     the candidate set changes at every sample and no single point's answer is visible beforehand.
+//   - It does not fight the pager. A horizontal swipe to turn a page begins as a contact that may
+//     land on ink; a tap predicate (travel within [eraseTapSlopPx]) leaves the swipe alone, while a
+//     stroke-through eraser would delete a stroke whenever a page turn happened to start on one.
+//   - It costs nothing in reach: one touch removes a whole stroke, so a long line is one tap rather
+//     than a trace along its length.
+// The failure this buys is named rather than hidden: a stroke that is several marks to the musician
+// is one mark to the eraser, because whole-stroke removal is the model's decision and partial
+// erosion is deliberately not offered.
 //
 // WHAT THIS DOES NOT DO. It does not render: a committed stroke reaches the screen because the
 // document changed and the painter was rebuilt, and drawing it anywhere else would put the same
@@ -26,6 +53,33 @@ import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
+
+// PURPOSE: Name the tool a contact acts with, so that "ink is on" and "which tool is on" are one
+//          piece of state rather than two booleans with a fourth, ambiguous combination. It is not
+//          `StrokeTool`: that enum names the tools a STORED stroke can carry, and the eraser is
+//          deliberately not one of them because it removes strokes rather than becoming one.
+// INPUTS: None; it is a choice, not a measurement.
+// OUTPUTS: One of three values, and exactly one is live at a time. [off] is the state the app
+//          starts in, and switching between any two modes cancels whatever the previous one had
+//          half-drawn, which is why the transition lives in one private method rather than in two
+//          setters that could disagree.
+// KEYWORDS: ink-mode, pen, eraser, exclusive-modes, capture-state, no-ambiguous-combination
+/// The tool a contact acts with while the ink layer is active.
+enum InkMode {
+  /// Nothing acts on the ink: a pen and a finger both select.
+  off('off'),
+
+  /// A contact admitted by the rule lays down a stroke.
+  pen('pen'),
+
+  /// A contact admitted by the rule removes the whole stroke it touches.
+  eraser('eraser');
+
+  const InkMode(this.token);
+
+  /// Stable spelling used in a log line and in the published state.
+  final String token;
+}
 
 // PURPOSE: Report what one contact was and what was decided about it, so the widget routes a tap and
 //          a log line can be audited against the rule instead of restating a boolean.
@@ -123,8 +177,12 @@ class InkCaptureLayer {
   /// between two pen strokes is refused only because this was updated by the hover in between.
   double _lastStylusSeenMs = double.negativeInfinity;
 
-  /// Whether the musician has turned the pen on.
-  bool _inkMode = false;
+  /// The tool a contact acts with: off, the pen or the eraser.
+  ///
+  /// One value rather than two flags, because "pen on" and "eraser on" at once is not a state this
+  /// layer could act on: the two modes answer the same pointer the same way and the last one set
+  /// would silently win. See [InkMode].
+  InkMode _mode = InkMode.off;
 
   /// How many strokes this layer has taken up but refused for want of an anchor.
   int _dropped = 0;
@@ -138,8 +196,17 @@ class InkCaptureLayer {
   /// captured through the framework or needs its own raw listener.
   final _FlutterInputTally _flutterInput = _FlutterInputTally();
 
-  /// Whether strokes are currently captured.
-  bool get inkMode => _inkMode;
+  /// The mode in force: off, the pen or the eraser.
+  InkMode get mode => _mode;
+
+  /// Whether the PEN is the active tool, which is what the app bar's ink switch shows.
+  ///
+  /// False while the eraser is on: exactly one tool acts, and a switch that read "drawing" while a
+  /// contact would erase would be describing a mode the next contact will not honour.
+  bool get inkMode => _mode == InkMode.pen;
+
+  /// Whether the ERASER is the active tool.
+  bool get eraserMode => _mode == InkMode.eraser;
 
   /// How many strokes the document holds right now.
   int get strokeCount => _session.document.strokes.length;
@@ -178,11 +245,15 @@ class InkCaptureLayer {
   /// the other: a verification run resets both explicitly before it starts.
   Map<String, Object?> get inputReport => <String, Object?>{
     ..._flutterInput.toJson(),
-    'inkMode': _inkMode,
+    'mode': _mode.token,
+    'inkMode': inkMode,
+    'eraserMode': eraserMode,
     'documentStrokes': _session.document.strokes.length,
     'liveContacts': _assemblers.length,
     'droppedForWantOfAnchor': _dropped,
     'lastPointWasInk': _lastPointWasInk,
+    'eraseArmed': _erasePointer != null,
+    'lastErase': _lastErase,
   };
 
   /// Whether the most recent pointer-down was decided to lay ink.
@@ -194,6 +265,38 @@ class InkCaptureLayer {
 
   /// Whether the most recent pointer-down was decided to lay ink.
   bool get lastPointWasInk => _lastPointWasInk;
+
+  /// The pointer of the contact currently armed to erase, or null when none is.
+  ///
+  /// The eraser decides at the LIFT and not at the touch (see the file header), so the down has to
+  /// remember which contact it was, where it landed and whether it has since moved — three facts
+  /// that only the down can supply and only the up can act on.
+  int? _erasePointer;
+
+  /// Where the armed erase contact landed, in surface logical pixels, which is the point it aims at.
+  ///
+  /// The DOWN point and not the up: a tap that wobbled by a few pixels was aimed where it started,
+  /// and taking the lift point would let the aim drift with the hand rather than with the intent.
+  LayoutOffset? _eraseAim;
+
+  /// Whether the armed erase contact has travelled far enough to stop being a tap.
+  ///
+  /// A swipe to turn the page begins as a contact that may land on ink; this is what keeps such a
+  /// swipe from deleting the stroke it started on. Once set, the contact erases nothing even if the
+  /// hand comes back — the gesture was a drag, and a drag is not the eraser's act.
+  bool _eraseMoved = false;
+
+  /// How far a contact may travel and still count as a tap, in surface logical pixels.
+  ///
+  /// A judgement, stated rather than tuned: larger than the few logical pixels of tremor a resting
+  /// finger reports on the glass, and smaller than the travel of a deliberate page swipe, so the two
+  /// do not overlap in practice. Flutter's own `kTouchSlop` is 18 and this is deliberately below it,
+  /// because a touch that has moved a page's worth of pixels is unambiguously a drag.
+  static const double eraseTapSlopPx = 16;
+
+  /// What the last completed erase did, for a log line and for a driving tool that cannot reach
+  /// this object: the stroke removed, where it sat, and the distance that decided it.
+  Map<String, Object?>? _lastErase;
 
   /// The most recent contact widths the RAW browser stream reported, newest last.
   ///
@@ -268,22 +371,41 @@ class InkCaptureLayer {
     return best?.width ?? 0;
   }
 
-  /// Turns ink on or off, discarding anything half-drawn.
+  /// Turns the PEN on or off, which is the app bar's ink switch.
+  ///
+  /// Turning it on sets the mode to [InkMode.pen]; turning it off sets [InkMode.off]. It is a
+  /// separate setter from [eraserMode] so the two app-bar controls each name the mode they mean, and
+  /// both funnel through [_setMode], where the half-drawn-stroke rule has one home.
+  set inkMode(bool on) => _setMode(on ? InkMode.pen : InkMode.off);
+
+  /// Turns the ERASER on or off, which is the app bar's eraser switch.
+  ///
+  /// Turning it on sets the mode to [InkMode.eraser]; turning it off sets [InkMode.off]. Erasing is
+  /// not "ink with a different colour": it is an operation on the stroke list (see the file header),
+  /// so the eraser is a mode of this layer and not a [StrokeTool].
+  set eraserMode(bool on) => _setMode(on ? InkMode.eraser : InkMode.off);
+
+  /// Moves the layer to [next], discarding anything half-drawn and any armed erase.
   ///
   /// A half-drawn stroke is abandoned rather than kept: the mode changed under the musician's hand,
   /// and committing a stroke whose beginning was captured under another mode would be a mark they
-  /// did not finish making.
-  set inkMode(bool on) {
-    if (_inkMode == on) {
+  /// did not finish making. An armed erase is dropped for the same reason — the contact that armed
+  /// it was aimed at the old mode, and carrying it into the new one would delete a stroke on a lift
+  /// the musician never intended as an eraser gesture.
+  void _setMode(InkMode next) {
+    if (_mode == next) {
       return;
     }
-    _inkMode = on;
+    _mode = next;
     for (final InkStrokeAssembler assembler in _assemblers.values) {
       assembler.cancel();
     }
     _assemblers.clear();
     _live.clear();
-    debugPrint('ink.mode on=$on strokes=${_session.document.strokes.length}');
+    _clearErase();
+    debugPrint(
+      'ink.mode mode=${next.token} strokes=${_session.document.strokes.length}',
+    );
   }
 
   // PURPOSE: Answer what one contact is and what may be done with it, which is the single entrance
@@ -342,7 +464,7 @@ class InkCaptureLayer {
       kind: captureKind,
       width: decidingWidth,
       stylusInPlay: stylusInPlay(time),
-      inkModeOn: _inkMode,
+      inkModeOn: _mode != InkMode.off,
     );
   }
 
@@ -490,6 +612,141 @@ class InkCaptureLayer {
     assembler?.cancel();
     _live.clear();
     debugPrint('ink.stroke.cancel pointer=$pointer dropped=$_dropped');
+  }
+
+  // PURPOSE: Arm the eraser for one contact, which is the down half of the tap-on-stroke gesture:
+  //          from here the contact either lifts where it started — and erases — or travels far
+  //          enough to be a drag, and then erases nothing. Nothing is removed at the touch, because
+  //          a page swipe reaches this method before it can be told apart from a tap.
+  // INPUTS: pointer — the contact the rule admitted. position — where it landed, in the surface
+  //         logical pixels the hit test speaks.
+  // OUTPUTS: Nothing. [lastPointWasInk] becomes true, so the widget that routes a lift does not also
+  //          treat this contact as a selection. A second contact with the same pointer id replaces
+  //          the first, exactly as [beginStroke] does: one pointer id cannot be two contacts.
+  // KEYWORDS: erase-arm, tap-predicate, contact-tracking, selection-suppression
+  /// Arms the eraser for the contact [pointer] that landed at [position].
+  void beginErase({required int pointer, required LayoutOffset position}) {
+    _erasePointer = pointer;
+    _eraseAim = position;
+    _eraseMoved = false;
+    _lastPointWasInk = true;
+    debugPrint(
+      'ink.erase.arm pointer=$pointer '
+      'at=(${position.x.toStringAsFixed(1)},${position.y.toStringAsFixed(1)}) '
+      'strokes=${_session.document.strokes.length}',
+    );
+  }
+
+  // PURPOSE: Notice that an armed erase contact has stopped being a tap, so that the page swipe the
+  //          musician actually meant is not also an erasure.
+  // INPUTS: pointer — the contact. position — where it is now, in surface logical pixels.
+  // OUTPUTS: Nothing. Once armed, the contact erases nothing on its lift; a move for a contact that
+  //          was not armed, or was refused by the rule, is dropped silently.
+  // KEYWORDS: erase-disarm, tap-slop, drag-not-erase, page-swap-safety
+  /// Disarms the eraser when the contact has travelled past [eraseTapSlopPx].
+  void moveErase({required int pointer, required LayoutOffset position}) {
+    final LayoutOffset? aim = _eraseAim;
+    if (_erasePointer != pointer || aim == null || _eraseMoved) {
+      return;
+    }
+    final double dx = position.x - aim.x;
+    final double dy = position.y - aim.y;
+    if (dx * dx + dy * dy > eraseTapSlopPx * eraseTapSlopPx) {
+      _eraseMoved = true;
+      debugPrint(
+        'ink.erase.disarm pointer=$pointer travelled_past=${eraseTapSlopPx.toStringAsFixed(0)}',
+      );
+    }
+  }
+
+  // PURPOSE: Finish an erase contact, which is where the tap is turned into a removal: the stroke
+  //          the aim point is on is deleted through the operation log, so undo restores it exactly.
+  //          It is the erase counterpart of [endStroke] and the last place the eraser touches the
+  //          document.
+  // INPUTS: pointer — the contact that is lifting. page — the layout on screen, which resolves every
+  //         stroke's anchor and carries the scale between the touch and the engraved page.
+  // OUTPUTS: The [InkEraseHit] that was removed, or null when nothing was removed: the pointer was
+  //          not armed, the contact had travelled too far, no stroke was within the aim band, or
+  //          the document no longer held the stroke the hit named. All four are ordinary outcomes
+  //          and none of them appends an event — a deletion of something that is not there would be
+  //          a log row that changes nothing. The [record] of the last erase is kept for a log line
+  //          and for the published state.
+  // KEYWORDS: erase-commit, hit-test, op-log-delete, whole-stroke, null-when-nothing, undoable
+  /// Ends an erase contact, deleting the stroke under its aim point, and returns what it removed.
+  InkEraseHit? endErase({required int pointer, required PageLayout page}) {
+    if (_erasePointer != pointer) {
+      return null;
+    }
+    final LayoutOffset? aim = _eraseAim;
+    final bool moved = _eraseMoved;
+    _clearErase();
+    if (aim == null) {
+      return null;
+    }
+    if (moved) {
+      return null;
+    }
+    final List<InkStroke> strokes = _session.document.strokes;
+    final InkEraseHit? hit = hitTestInkErase(
+      page: page,
+      strokes: strokes,
+      surfacePoint: aim,
+    );
+    if (hit == null) {
+      _lastErase = <String, Object?>{
+        'id': null,
+        'index': null,
+        'distance': null,
+        'aim': <double>[aim.x, aim.y],
+        'strokes': strokes.length,
+      };
+      debugPrint(
+        'ink.erase.miss pointer=$pointer '
+        'aim=(${aim.x.toStringAsFixed(1)},${aim.y.toStringAsFixed(1)}) '
+        'strokes=${strokes.length}',
+      );
+      return null;
+    }
+    final bool removed = _session.eraseStroke(hit.stroke.id);
+    _lastErase = <String, Object?>{
+      'id': hit.stroke.id,
+      'index': hit.index,
+      'distance': hit.surfaceDistance,
+      'aim': <double>[aim.x, aim.y],
+      'strokes': _session.document.strokes.length,
+    };
+    debugPrint(
+      'ink.erase.stroke pointer=$pointer id=${hit.stroke.id} '
+      'index=${hit.index} '
+      'distance=${hit.surfaceDistance.toStringAsFixed(3)} removed=$removed '
+      'strokes=${_session.document.strokes.length} seq=${_session.seq} '
+      'aim=(${aim.x.toStringAsFixed(1)},${aim.y.toStringAsFixed(1)})',
+    );
+    return removed ? hit : null;
+  }
+
+  // PURPOSE: Drop an armed erase contact without deleting anything, which is what a platform
+  //          pointer-cancel means and what a mode change does to a contact that was armed under the
+  //          old mode.
+  // INPUTS: pointer — the contact that was cancelled.
+  // OUTPUTS: Nothing. The aim and the travel flag are cleared, and the last-erase record is left as
+  //          it was, because a cancelled contact did not erase anything and overwriting the record
+  //          would describe a removal that never happened.
+  // KEYWORDS: erase-cancel, discard, pointer-cancel, no-record
+  /// Abandons an armed erase contact without deleting anything.
+  void cancelErase(int pointer) {
+    if (_erasePointer != pointer) {
+      return;
+    }
+    _clearErase();
+    debugPrint('ink.erase.cancel pointer=$pointer');
+  }
+
+  /// Clears the armed-erase state.
+  void _clearErase() {
+    _erasePointer = null;
+    _eraseAim = null;
+    _eraseMoved = false;
   }
 
   // PURPOSE: Rebuild the live preview from the open assemblers, so the stroke under the pen is

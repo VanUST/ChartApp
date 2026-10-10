@@ -13,10 +13,11 @@
 // its snapshot and its operation tail — to bytes and back, and the two editing values that join
 // those: the chord palette a cell offers, and the session that applies an edit through the log.
 // The ink domain joins them at the same level: the canonical stroke form is already in the
-// catalogue above, and `src/ink/` adds the two pure decisions a live capture needs — whether a
-// contact may draw (`InkPalmRule`) and where a stroke's anchor landed on a page
-// (`resolveEventAnchor`) — plus the assembler that turns live samples into a canonical stroke,
-// so all three are checkable with `dart test` and none of them needs a device.
+// catalogue above, and `src/ink/` adds the pure decisions a live capture needs — whether a
+// contact may draw (`InkPalmRule`), where a stroke's anchor landed on a page
+// (`resolveEventAnchor`) and which stroke a touch is on when the eraser asks (`hitTestInkErase`)
+// — plus the assembler that turns live samples into a canonical stroke, so all of them are
+// checkable with `dart test` and none of them needs a device.
 //
 // The song model stores the WRITTEN form only. The order a tune is played in — repeats,
 // alternative endings, navigation — is a pure function over this model, so there is no second
@@ -42,6 +43,7 @@ export 'src/chord.dart';
 export 'src/container/chart_file.dart';
 export 'src/editing/chord_palette.dart';
 export 'src/editing/ink_stroke_builder.dart';
+export 'src/ink/ink_hit.dart';
 export 'src/ink/page_anchor.dart';
 export 'src/ink/palm_rule.dart';
 export 'src/ireal/chord_parser.dart';

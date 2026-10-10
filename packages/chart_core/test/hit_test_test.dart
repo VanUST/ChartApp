@@ -200,8 +200,10 @@ void main() {
 
     test('a fitted page divides by its scale, which is what makes the difference visible', () {
       // 300 bars cannot fit one 1200x900 page at full size, so FIT shrinks it and the page keeps a
-      // scale below 1. The conversion is the inverse of the painter's canvas.scale, so it multiplies
-      // the surface point UP into the larger engraved space.
+      // scale below 1. The conversion is the inverse of the painter's `canvas.scale(scale, scale)`,
+      // so it DIVIDES the surface point back into the larger engraved space. It used to say that it
+      // "multiplies the surface point UP" here; that was the same false claim that made the pen
+      // capture path multiply, and the two disagreed by a factor of the scale.
       final Song long = Song(
         title: 'Long',
         sections: <Section>[sectionOf('sec-a', 'A', 300)],

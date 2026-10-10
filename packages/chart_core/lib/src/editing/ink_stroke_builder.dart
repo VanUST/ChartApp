@@ -125,21 +125,21 @@ class InkStrokeAssembler {
     if (_anchor == null || _samples.isEmpty) {
       return const <InkPoint>[];
     }
-    final double scale = page.scale;
     final bool anyPressure = _samples.any((InkSample s) => s.pressure > 0);
     return <InkPoint>[
       for (final InkSample sample in _samples)
-        _localPoint(sample, scale, anyPressure: anyPressure),
+        _localPoint(sample, page, anyPressure: anyPressure),
     ];
   }
 
   // PURPOSE: Open the stroke and resolve, once, the anchor every later sample is measured against.
   // INPUTS: page — the layout the stroke is being drawn on, in engraved coordinates, which is what
   //         the hit test speaks. surfacePoint — the stroke's first position on the surface the page
-  //         is drawn on, from which the page point is derived through the page's own scale. pressure
-  //         and time — the first sample's values, in `[0, 1]` and milliseconds from an arbitrary
-  //         origin. The absolute origin does not matter: only differences between samples are
-  //         stored, which is what keeps a clock reset from corrupting a stroke.
+  //         is drawn on, from which the page point is derived through the page's own
+  //         [PageLayout.pagePointOf]. pressure and time — the first sample's values, in `[0, 1]` and
+  //         milliseconds from an arbitrary origin. The absolute origin does not matter: only
+  //         differences between samples are stored, which is what keeps a clock reset from
+  //         corrupting a stroke.
   // OUTPUTS: True when an anchor resolved and the stroke is open; false when the first point lies
   //          over no bar, in which case nothing was recorded and [end] would produce null. A
   //          pen stroke that starts in the margin between two systems is refused rather than
@@ -152,7 +152,7 @@ class InkStrokeAssembler {
     required double pressure,
     required double time,
   }) {
-    final LayoutOffset pagePoint = inkSurfaceToPage(surfacePoint, page.scale);
+    final LayoutOffset pagePoint = page.pagePointOf(surfacePoint);
     final ChartHit? hit = hitTestPage(page, pagePoint);
     if (hit == null) {
       _begun = false;
@@ -232,11 +232,10 @@ class InkStrokeAssembler {
       _reset();
       return null;
     }
-    final double scale = page.scale;
     final bool anyPressure = _samples.any((InkSample s) => s.pressure > 0);
     final List<InkPoint> points = <InkPoint>[
       for (final InkSample sample in _samples)
-        _localPoint(sample, scale, anyPressure: anyPressure),
+        _localPoint(sample, page, anyPressure: anyPressure),
     ];
     if (points.length == 1) {
       points.add(points.first);
@@ -272,21 +271,26 @@ class InkStrokeAssembler {
 
   // PURPOSE: Convert one surface sample into the stored form: a position measured from the anchor's
   //          own origin, in the page's engraved units, with the stroke-relative time.
-  // INPUTS: sample — the captured sample. scale — the page's scale, which maps the surface onto the
-  //         engraved page. anyPressure — whether any sample of this stroke reported pressure, which
-  //         is passed in rather than recomputed per point because the answer is a property of the
-  //         whole stroke and recomputing it here would give a per-point answer.
-  // OUTPUTS: An [InkPoint]. Both coordinates go through [inkSurfaceToPage] first and subtract the
-  //          same origin, which is why the two must not be computed by different routes.
-  // KEYWORDS: point-conversion, anchor-local, scale, single-route
+  // INPUTS: sample — the captured sample. page — the layout being drawn on, which carries the single
+  //         surface-to-page transform as [PageLayout.pagePointOf]; the page is passed rather than its
+  //         `scale` because a caller holding only the factor would have to re-derive the division
+  //         here, and a second rule for one transform is exactly how a stroke and its renderer drift
+  //         apart by a factor of the scale. anyPressure — whether any sample of this stroke reported
+  //         pressure, which is passed in rather than recomputed per point because the answer is a
+  //         property of the whole stroke and recomputing it here would give a per-point answer.
+  // OUTPUTS: An [InkPoint]. The sample's surface position goes through the page's own
+  //          [PageLayout.pagePointOf] and only then subtracts [inkPointToPage]'s inverse, so capture
+  //          and the hit test that admitted the stroke are literally the same arithmetic. On a fitted
+  //          page that transform DIVIDES by the scale — it does not multiply — because the painter
+  //          reaches the surface by multiplying the engraved geometry up (`canvas.scale`).
+  // KEYWORDS: point-conversion, anchor-local, pagePointOf, single-route, no-second-transform
   InkPoint _localPoint(
     InkSample sample,
-    double scale, {
+    PageLayout page, {
     required bool anyPressure,
   }) {
-    final LayoutOffset pagePoint = inkSurfaceToPage(
+    final LayoutOffset pagePoint = page.pagePointOf(
       LayoutOffset(sample.x, sample.y),
-      scale,
     );
     final LayoutOffset local = pagePointToAnchorLocal(pagePoint, _anchorOrigin);
     return InkPoint(

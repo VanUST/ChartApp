@@ -9,8 +9,12 @@
 // OUTPUTS: The child, wrapped in a hit-testing region that reports pointer events to the layer. It
 //          never prevents a default or stops an event, so the gesture arena above it still resolves
 //          a gesture normally; the layer's decision, exposed to the caller through
-//          `decideContact`, is what separates a contact that draws from one that selects.
-// KEYWORDS: ink-surface, listener, pointer-capture, hit-test-opaque, cancel-forwarding, ink-mode
+//          `decideContact`, is what separates a contact that draws from one that selects. Which act
+//          an ADMITTED contact begins — laying a stroke or arming the eraser — is read from the
+//          layer's own mode here and decided nowhere else, so the widget cannot hold a second copy
+//          of it that drifts.
+// KEYWORDS: ink-surface, listener, pointer-capture, hit-test-opaque, cancel-forwarding, ink-mode,
+//           eraser-mode, pen-vs-eraser
 import 'package:chart_core/chart_core.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
@@ -75,6 +79,17 @@ class RawPointerCapture extends StatelessWidget {
     if (!decision.mayInk) {
       return;
     }
+    // THE MODE DECIDES WHICH ACT THE ADMITTED CONTACT BEGINS, and it is decided here, once, from
+    // the layer's own mode rather than from a second copy of it in this widget. Erasing does not
+    // happen at the touch: the layer arms it and acts on the lift, so that a swipe which starts on
+    // a stroke can still turn the page without deleting it (see `InkCaptureLayer`'s header).
+    if (layer.eraserMode) {
+      layer.beginErase(
+        pointer: event.pointer,
+        position: InkInputMapper.positionOf(event),
+      );
+      return;
+    }
     layer.beginStroke(
       pointer: event.pointer,
       page: page,
@@ -86,6 +101,13 @@ class RawPointerCapture extends StatelessWidget {
   }
 
   void _onMove(PointerMoveEvent event) {
+    if (layer.eraserMode) {
+      layer.moveErase(
+        pointer: event.pointer,
+        position: InkInputMapper.positionOf(event),
+      );
+      return;
+    }
     layer.addSample(
       pointer: event.pointer,
       page: page,
@@ -96,11 +118,19 @@ class RawPointerCapture extends StatelessWidget {
   }
 
   void _onUp(PointerUpEvent event) {
+    if (layer.eraserMode) {
+      layer.endErase(pointer: event.pointer, page: page);
+      return;
+    }
     layer.endStroke(pointer: event.pointer, page: page);
   }
 
   void _onCancel(PointerCancelEvent event) {
+    // Both are asked, and each is a no-op for a pointer it is not tracking: the mode can change
+    // while a contact is down, and a cancel for whichever half was actually begun must not be lost
+    // to a mode that is no longer the one that began it.
     layer.cancelStroke(event.pointer);
+    layer.cancelErase(event.pointer);
   }
 
   void _onHover(PointerHoverEvent event) {
