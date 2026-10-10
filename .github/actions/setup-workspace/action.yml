@@ -1,0 +1,42 @@
+# PURPOSE: Put every job that runs Melos on the same footing, so that no job can be written which
+#          forgets one of the two things Melos needs here: the pinned Flutter SDK reachable at the
+#          path the root pubspec names, and a resolved workspace.
+# INPUTS: None. The calling job must already have installed the pinned Flutter SDK and put it on
+#         PATH, and must have checked the repository out.
+# OUTPUTS: `.fvm/flutter_sdk` linked to that SDK, MELOS_SDK_PATH exported into the job environment,
+#          and the workspace resolved. Idempotent, so calling it twice is harmless.
+# KEYWORDS: ci, composite-action, melos-sdk-path, fvm-link, workspace-setup
+#
+# WHY THIS IS AN ACTION RATHER THAN TWO STEPS IN EACH JOB.
+#
+# The root pubspec sets `sdkPath: .fvm/flutter_sdk` so that a local run cannot silently use a
+# different Flutter than the one .fvmrc pins. CI does not use FVM, so something has to satisfy that
+# path. The first version of this workflow did that with two steps in the verify job — and the iOS
+# job ran `melos run verify` without them, so it failed on EVERY run with
+#
+#   pubspec.yaml: SDK path is not valid. Could not find dart tool at .fvm/flutter_sdk/bin/dart
+#
+# while the other jobs passed, and the red result said nothing about the code. Two jobs that must
+# do the same thing should not each have to remember it; that is a bug that reappears the next time
+# a job is added. Reproduced locally by hiding the .fvm link and running the gate, which shows the
+# identical message.
+name: Set up the ChartApp workspace
+description: Point Melos at the pinned Flutter SDK, then resolve the workspace.
+
+runs:
+  using: composite
+  steps:
+    - name: Point Melos at the pinned SDK
+      shell: bash
+      # MELOS_SDK_PATH takes precedence over the pubspec's sdkPath, so it is exported as well as
+      # linked: the link satisfies the path for anything that reads the pubspec directly, and the
+      # variable makes the intent explicit for Melos itself.
+      run: |
+        root=$(flutter --version --machine | python3 -c 'import json,sys; print(json.load(sys.stdin)["flutterRoot"])')
+        mkdir -p .fvm
+        ln -sfn "$root" .fvm/flutter_sdk
+        echo "MELOS_SDK_PATH=$root" >> "$GITHUB_ENV"
+
+    - name: Resolve the workspace
+      shell: bash
+      run: flutter pub get
