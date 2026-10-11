@@ -1,0 +1,136 @@
+﻿Resolving dependencies in `C:\projects\ChartApp`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (109.0.0 available)
+  analyzer 13.3.0 (14.5.0 available)
+  build_runner 2.15.1 (2.16.2 available)
+  cupertino_icons 1.0.9 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  package_config 2.2.0 (3.0.0 available)
+  platform 3.1.6 (3.2.0 available)
+  source_gen 4.2.4 (4.3.0 available)
+  test 1.31.1 (1.33.0 available)
+  test_api 0.7.12 (0.7.15 available)
+  test_core 0.6.18 (0.6.21 available)
+Got dependencies in `C:\projects\ChartApp`!
+11 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading C:/projects/ChartApp/apps/mobile/tool/probe_native_path.dart
+00:00 +0: the native path, in the strings a musician reads
+Shell: probe.constants chartSourceIsFilePath=true
+Shell: probe.constants chartSourceSaveMode=namedPath
+Shell: probe.constants iRealSourceIsFilePath=true
+Shell: probe.constants defaultIRealPath_exists=true
+Shell: probe.chart.locale=ru
+Shell: probe.chart.tooltip="Сохранить или открыть файл .chart"
+Shell: probe.chart.field_label="Файл .chart"
+Shell: probe.chart.dialog.ru count=5
+Shell: probe.chart.dialog.ru[0]="Файл чарта"
+Shell: probe.chart.dialog.ru[1]="Файл .chart"
+Shell: probe.chart.dialog.ru[2]="Открыть .chart"
+Shell: probe.chart.dialog.ru[3]="Сохранить"
+Shell: probe.chart.dialog.ru[4]="Закрыть"
+Shell: probe.chart.initial_path_offered=probe.chart
+viewer.chart.save.start mode=namedPath path_chars=72
+viewer.chart.save.ok mode=namedPath bytes=884 operations=0 warnings=0
+Shell: probe.chart.file_exists_after_save=true bytes=884
+Shell: probe.chart.saved.ru count=6
+Shell: probe.chart.saved.ru[0]="Файл чарта"
+Shell: probe.chart.saved.ru[1]="Файл .chart"
+Shell: probe.chart.saved.ru[2]="Сохранено 884 байта в C:\Users\1\AppData\Local\Temp\chartapp-native-probe-eb173e24\probe.chart · 0 операций."
+Shell: probe.chart.saved.ru[3]="Открыть .chart"
+Shell: probe.chart.saved.ru[4]="Сохранить"
+Shell: probe.chart.saved.ru[5]="Закрыть"
+Shell: probe.chart.empty_open_status.ru="Укажите файл .chart, который открыть." shown=true
+viewer.chart.open.start path_chars=72
+viewer.chart.open.ok bars=1 operations=0 warnings=0
+Shell: probe.chart.opened.ru count=6
+Shell: probe.chart.opened.ru[0]="Файл чарта"
+Shell: probe.chart.opened.ru[1]="Файл .chart"
+Shell: probe.chart.opened.ru[2]="Открыт «Ракета» · 0 операций."
+Shell: probe.chart.opened.ru[3]="Открыть .chart"
+Shell: probe.chart.opened.ru[4]="Сохранить"
+Shell: probe.chart.opened.ru[5]="Закрыть"
+Shell: probe.chart.opened_titles.ru=[Ракета]
+Shell: probe.setlist.locale=ru
+Shell: probe.setlist.field_label="Файл .setlist"
+Shell: probe.setlist.dialog.ru count=5
+Shell: probe.setlist.dialog.ru[0]="Файл программы"
+Shell: probe.setlist.dialog.ru[1]="Файл .setlist"
+Shell: probe.setlist.dialog.ru[2]="Открыть .setlist"
+Shell: probe.setlist.dialog.ru[3]="Сохранить"
+Shell: probe.setlist.dialog.ru[4]="Закрыть"
+viewer.setlist.save.start mode=namedPath path_chars=74
+viewer.setlist.save.ok mode=namedPath bytes=250 entries=0 operations=0
+Shell: probe.setlist.file_exists_after_save=true bytes=250
+Shell: probe.setlist.saved.ru count=6
+Shell: probe.setlist.saved.ru[0]="Файл программы"
+Shell: probe.setlist.saved.ru[1]="Файл .setlist"
+Shell: probe.setlist.saved.ru[2]="Сохранено 250 байт в C:\Users\1\AppData\Local\Temp\chartapp-native-probe-eb173e24\probe.setlist · 0 записей · 0 операций."
+Shell: probe.setlist.saved.ru[3]="Открыть .setlist"
+Shell: probe.setlist.saved.ru[4]="Сохранить"
+Shell: probe.setlist.saved.ru[5]="Закрыть"
+Shell: probe.untitled_file.locale=ru
+Shell: probe.untitled_file.field_text="untitled.chart"
+Shell: probe.untitled_file.catalogue_word="Без названия"
+Shell: probe.programme.locale=ru
+Shell: probe.programme.row_title="Без названия"
+Shell: probe.programme.picker_title="Без названия"
+Shell: probe.programme.picker_title_is_catalogue_untitled=true
+Shell: probe.chart.locale=en
+Shell: probe.chart.tooltip="Save or open a .chart file"
+Shell: probe.chart.field_label=".chart file"
+Shell: probe.chart.dialog.en count=5
+Shell: probe.chart.dialog.en[0]="Chart file"
+Shell: probe.chart.dialog.en[1]=".chart file"
+Shell: probe.chart.dialog.en[2]="Open .chart"
+Shell: probe.chart.dialog.en[3]="Save"
+Shell: probe.chart.dialog.en[4]="Close"
+Shell: probe.chart.initial_path_offered=probe.chart
+viewer.chart.save.start mode=namedPath path_chars=72
+viewer.chart.save.ok mode=namedPath bytes=884 operations=0 warnings=0
+Shell: probe.chart.file_exists_after_save=true bytes=884
+Shell: probe.chart.saved.en count=6
+Shell: probe.chart.saved.en[0]="Chart file"
+Shell: probe.chart.saved.en[1]=".chart file"
+Shell: probe.chart.saved.en[2]="Saved 884 bytes to C:\Users\1\AppData\Local\Temp\chartapp-native-probe-eb173e24\probe.chart · 0 operations."
+Shell: probe.chart.saved.en[3]="Open .chart"
+Shell: probe.chart.saved.en[4]="Save"
+Shell: probe.chart.saved.en[5]="Close"
+Shell: probe.chart.empty_open_status.en="Name a .chart file to open." shown=true
+viewer.chart.open.start path_chars=72
+viewer.chart.open.ok bars=1 operations=0 warnings=0
+Shell: probe.chart.opened.en count=6
+Shell: probe.chart.opened.en[0]="Chart file"
+Shell: probe.chart.opened.en[1]=".chart file"
+Shell: probe.chart.opened.en[2]="Opened "Ракета" · 0 operations."
+Shell: probe.chart.opened.en[3]="Open .chart"
+Shell: probe.chart.opened.en[4]="Save"
+Shell: probe.chart.opened.en[5]="Close"
+Shell: probe.chart.opened_titles.en=[Ракета]
+Shell: probe.setlist.locale=en
+Shell: probe.setlist.field_label=".setlist file"
+Shell: probe.setlist.dialog.en count=5
+Shell: probe.setlist.dialog.en[0]="Programme file"
+Shell: probe.setlist.dialog.en[1]=".setlist file"
+Shell: probe.setlist.dialog.en[2]="Open .setlist"
+Shell: probe.setlist.dialog.en[3]="Save"
+Shell: probe.setlist.dialog.en[4]="Close"
+viewer.setlist.save.start mode=namedPath path_chars=74
+viewer.setlist.save.ok mode=namedPath bytes=250 entries=0 operations=0
+Shell: probe.setlist.file_exists_after_save=true bytes=250
+Shell: probe.setlist.saved.en count=6
+Shell: probe.setlist.saved.en[0]="Programme file"
+Shell: probe.setlist.saved.en[1]=".setlist file"
+Shell: probe.setlist.saved.en[2]="Saved 250 bytes to C:\Users\1\AppData\Local\Temp\chartapp-native-probe-eb173e24\probe.setlist · 0 entries · 0 operations."
+Shell: probe.setlist.saved.en[3]="Open .setlist"
+Shell: probe.setlist.saved.en[4]="Save"
+Shell: probe.setlist.saved.en[5]="Close"
+Shell: probe.untitled_file.locale=en
+Shell: probe.untitled_file.field_text="untitled.chart"
+Shell: probe.untitled_file.catalogue_word="Untitled"
+Shell: probe.programme.locale=en
+Shell: probe.programme.row_title="Untitled"
+Shell: probe.programme.picker_title="Untitled"
+Shell: probe.programme.picker_title_is_catalogue_untitled=true
+Shell: probe.done
+00:02 +1: All tests passed!

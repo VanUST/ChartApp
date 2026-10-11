@@ -184,11 +184,20 @@ class _SetlistSheetState extends State<SetlistSheet> {
   //          the importer's positional id.
   // INPUTS: item — the entry.
   // OUTPUTS: The title the resolver gave, or the catalogue's `(missing chart)` when it answered
-  //          null. The missing wording lives here because it is UI text; WHICH entries are missing
-  //          is the resolver's answer and is not second-guessed.
-  // KEYWORDS: title-resolution, missing-chart, honest-fallback, one-wording, localized
-  String _titleFor(SetlistItem item) =>
-      widget.titleFor(item) ?? AppLocalizations.of(context).setlistMissingChart;
+  //          null. An EMPTY title is a chart that has no name, and the catalogue words that too:
+  //          both fallbacks live here because they are UI text, while WHICH entries are missing is
+  //          the resolver's answer and is not second-guessed. The two are different facts and are
+  //          said differently — a nameless chart is in the programme, a missing one is not in the
+  //          library.
+  // KEYWORDS: title-resolution, missing-chart, empty-name, honest-fallback, one-wording, localized
+  String _titleFor(SetlistItem item) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String? resolved = widget.titleFor(item);
+    if (resolved == null) {
+      return l10n.setlistMissingChart;
+    }
+    return resolved.isEmpty ? l10n.untitled : resolved;
+  }
 
   // PURPOSE: Count the entries that name a chart this library does not hold, so the sheet can say
   //          how many there are above the list instead of making the musician count rows.
@@ -615,17 +624,26 @@ class _SetlistSheetState extends State<SetlistSheet> {
             itemBuilder: (BuildContext context, int index) {
               final IRealSong song = widget.songs[index];
               // The picker names each chart through the SAME resolver a row uses, by asking it
-              // about the entry this tap would make. The loaded title is only the fallback for a
-              // resolver that cannot see the library, so a chart renamed in the editor is listed
+              // about the entry this tap would make. The chart's own title is only the fallback for
+              // a resolver that cannot see the library, so a chart renamed in the editor is listed
               // under the name the editor gave it rather than under the imported one.
-              final String shown =
-                  widget.titleFor(
-                    SetlistItem(
-                      documentId: song.song.id,
-                      chartIdentity: song.identity,
-                    ),
-                  ) ??
-                  song.title;
+              //
+              // THE FALLBACK FOR A NAMELESS CHART IS THE CATALOGUE'S. The resolver hands back the
+              // document's own title, which is empty for a chart the export left unnamed, and the
+              // word shown for that is interface text: it is said in `Без названия` on a Russian
+              // tablet and `Untitled` in English, never in one fixed language. That is why this
+              // reads the raw `song.song.title` and not a display accessor which might have chosen
+              // a language of its own.
+              final String? resolved = widget.titleFor(
+                SetlistItem(
+                  documentId: song.song.id,
+                  chartIdentity: song.identity,
+                ),
+              );
+              final String raw = (resolved == null || resolved.isEmpty)
+                  ? song.song.title
+                  : resolved;
+              final String shown = raw.isEmpty ? l10n.untitled : raw;
               return ListTile(
                 key: ValueKey<String>('setlist-add-$index'),
                 dense: true,

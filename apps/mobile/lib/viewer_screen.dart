@@ -1289,19 +1289,26 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // INPUTS: item — the entry, which is resolved through [_songForItem] rather than by either of its
   //         ids directly, because which id is authoritative depends on whether the entry carries an
   //         identity.
-  // OUTPUTS: The loaded (or edited) title, or null when the entry resolves to no loaded song. NULL
-  //          IS THE MISSING CASE and not an empty name: the sheet renders its own words for it, and
-  //          the entry itself is untouched — it is still in the running order, can still be edited
-  //          and deleted, and is saved again exactly as it stands. A silently dropped row would lose
-  //          a tune the musician put in the programme, and a blank one would look like a chart with
-  //          no name.
-  // KEYWORDS: title-resolution, chart-identity, rename-aware, missing-chart, programme-sheet
+  // OUTPUTS: The loaded (or edited) title EXACTLY AS THE DOCUMENT HOLDS IT — the empty string for a
+  //          chart that has no name — or null when the entry resolves to no loaded song. NULL IS THE
+  //          MISSING CASE and not an empty name: the sheet renders `(missing chart)` for null and its
+  //          own localized fallback for the empty string, and the entry itself is untouched — it is
+  //          still in the running order, can still be edited and deleted, and is saved again exactly
+  //          as it stands. A silently dropped row would lose a tune the musician put in the
+  //          programme, and a blank one would look like a chart with no name.
+  // KEYWORDS: title-resolution, chart-identity, rename-aware, missing-chart, programme-sheet,
+  //           empty-is-not-null, raw-title
   String? _titleForItem(SetlistItem item) {
     final IRealSong? found = _songForItem(item);
-    // The ENGLISH accessor on purpose: `titleFor` is handed to the programme sheet, which is not
-    // translated yet (see the unfinished-interface list in `docs/sdd.md`), and a name that fell back
-    // to `Без названия` inside an otherwise English sheet would be worse than a consistent one.
-    return found == null ? null : _rawTitleFor(found);
+    if (found == null) {
+      return null;
+    }
+    // NO WORD FOR AN UNNAMED CHART IS INVENTED HERE. The programme sheet draws every name this
+    // application shows for a chart, so it is the side that owns the interface fallback, and it is
+    // the only side that can reach a catalogue at the moment a name is drawn. Returning the raw
+    // title is what lets a rename show through and a nameless chart reach the sheet as nameless
+    // rather than as an English `Untitled`.
+    return _sessions[found.index]?.song.title ?? found.song.title;
   }
 
   @override
@@ -2693,13 +2700,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          sheet for a bar.
   // INPUTS: context — the build context, for the text theme. song — the chart on screen, read to
   //         number the bar the way a musician counts it.
-  // OUTPUTS: A one-line widget. With a selection it reads `selected: bar 12 cell 2`; without one it
-  //          invites a tap. A bar-level selection says so instead of inventing a cell number, and it
-  //          leads to the FORM sheet rather than to the chord palette, because a bar and its
-  //          section are what the form operations act on and a bar-level selection names both.
-  //          The hint beside the label states the affordance in words, since a label that changes
-  //          what it is when touched is not discoverable on its own.
-  // KEYWORDS: selection-label, edit-entry, falsifiable-feedback, musician-numbering, empty-state
+  // OUTPUTS: The selection line as ONE TO THREE WRAPPED ROWS. With a selection it reads
+  //          `selected: bar 12 cell 2`; without one it invites a tap. A bar-level selection says so
+  //          instead of inventing a cell number, and it leads to the FORM sheet rather than to the
+  //          chord palette, because a bar and its section are what the form operations act on and a
+  //          bar-level selection names both. The hint beside the label states the affordance in
+  //          words, since a label that changes what it is when touched is not discoverable on its
+  //          own. Nothing here can ellipsize: when the two parts do not share a row the hint moves
+  //          to the next row whole, at full size.
+  // KEYWORDS: selection-label, edit-entry, falsifiable-feedback, musician-numbering, empty-state,
+  //           wrap-not-ellipsis, full-instruction
   Widget _buildSelectionLine(BuildContext context, Song song) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final ChartHit? hit = _selection;
@@ -2724,34 +2734,31 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
     );
-    final Widget label = Row(
-      mainAxisSize: MainAxisSize.min,
+    final Widget label = Wrap(
+      // The two parts are separate runs on purpose: they are different facts (what is selected, and
+      // what a tap will do), the second one is the ACTION, and an action cut short is the defect
+      // this layout exists to remove.
+      spacing: 8,
       children: <Widget>[
-        // FLEXIBLE, so a narrow pane truncates the line instead of overflowing it. The row is
-        // unbounded in width — it sits in an Align — and the position it states grows with the bar
-        // number and the hint beside it, so on a phone-width pane the two together are wider than
-        // the chart: measured at 415 logical pixels of available width against 591 wanted. A label
-        // that overflows is not a cosmetic problem in a widget test, it is a red-and-black bar over
-        // the chart in the application.
-        Flexible(
-          child: Text(
-            text,
-            key: const ValueKey<String>('viewer-selection-label'),
-            style: style,
-            overflow: TextOverflow.ellipsis,
-          ),
+        // A WRAP AND NOT A ROW OF FLEXIBLES. The line was a Row of two `Flexible` texts with
+        // `TextOverflow.ellipsis`, and at 412 logical pixels in Russian the hint received about half
+        // the pane and printed `— коснитесь, чтобы сменить а…`: the half a musician needs to read
+        // was the half removed. Neither ellipsis nor a scale-down is acceptable here — an
+        // instruction has to be complete, and text shrunk to fit is not readable on a music stand —
+        // so the line wraps instead. The cost is named: on a phone-width pane in Russian the hint
+        // takes a second row, and the chart in the `Expanded` below gives up that row's height. That
+        // is the honest price of a longer language, and it is smaller than hiding the instruction.
+        Text(
+          text,
+          key: const ValueKey<String>('viewer-selection-label'),
+          style: style,
         ),
-        if (onTap != null) ...<Widget>[
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              hint,
-              key: const ValueKey<String>('viewer-selection-edit-hint'),
-              style: Theme.of(context).textTheme.bodySmall,
-              overflow: TextOverflow.ellipsis,
-            ),
+        if (onTap != null)
+          Text(
+            hint,
+            key: const ValueKey<String>('viewer-selection-edit-hint'),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
-        ],
       ],
     );
     return Padding(

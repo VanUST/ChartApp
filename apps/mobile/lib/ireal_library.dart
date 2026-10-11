@@ -67,23 +67,21 @@ class IRealSong {
   String get identity =>
       chartIdentity.isEmpty ? chartIdentityOf(song) : chartIdentity;
 
-  /// The title to show, which is `Untitled` when the payload carries an empty title field.
-  String get title => songDisplayTitle(song);
+  /// The chart's own title, exactly as the payload wrote it — possibly empty.
+  ///
+  /// This is DATA, and the accessor never invents a word for it. A chart whose export carried no
+  /// title is a chart with an empty title; every place that DRAWS a name supplies its own localized
+  /// fallback, and [toString] — which is read by tools, not by musicians — uses the lowercase
+  /// `untitled` marker the rest of the model's diagnostics use. An English word baked in here would
+  /// be interface text living in a data type, and it would reach the screen in the language of
+  /// whoever wrote the helper rather than in the language of the person reading it.
+  String get title => song.title;
 
   @override
   String toString() =>
-      'IRealSong($index, "$title", ${song.writtenBarCount} bar(s))';
+      'IRealSong($index, "${title.isEmpty ? 'untitled' : title}", '
+      '${song.writtenBarCount} bar(s))';
 }
-
-// PURPOSE: Give the name to SHOW for a song, so the one fallback every place a name is printed needs
-//          is decided once instead of being repeated at each call site and eventually drifting.
-// INPUTS: song — any song, whose title may be empty.
-// OUTPUTS: The title, or `Untitled` when it is empty. Never null and never the empty string, so a
-//          status line that prints this can never print nothing where a name belongs.
-// KEYWORDS: title, fallback, untitled, display-name, one-place
-/// Returns [song]'s title, or `Untitled` when it carries none.
-String songDisplayTitle(Song song) =>
-    song.title.isEmpty ? 'Untitled' : song.title;
 
 /// Every song one payload holds, plus the name of the playlist it came from.
 class IRealLibrary {

@@ -87,8 +87,10 @@ String chartPathBeside(String sourcePath) =>
 // INPUTS: title — the song's own title, which may be empty, may contain characters a filesystem
 //         refuses, and may already end in `.chart`.
 // OUTPUTS: The title with every character illegal in a file name replaced by `_` and `.chart`
-//          appended, or `untitled.chart` when nothing usable is left. The sanitizing rule itself
-//          lives in [documentFileNameFor], shared with the `.setlist` dialog.
+//          appended, or `untitled.chart` when nothing usable is left — an ASCII token in every
+//          language, because a file name travels and a label does not (see [documentFileNameFor]).
+//          The sanitizing rule itself lives in [documentFileNameFor], shared with the `.setlist`
+//          dialog.
 // KEYWORDS: file-name, download, suggested-name, sanitize, empty-title, shared-rule
 /// Returns a usable `.chart` file name for a song called [title].
 String chartFileNameFor(String title) =>
@@ -461,9 +463,10 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
         _busy = false;
         _status = _withSuffix(
           l10n.chartFileOpened(
-            // The catalogue's own fallback for a nameless tune, not `songDisplayTitle`'s English
-            // one: that helper's words are a default for the interface and belong to the same
-            // catalogue as everything else this dialog prints.
+            // The catalogue's own fallback for a nameless tune. The library hands back the
+            // document's title exactly as it stands — empty when the export carried none — because
+            // a word for "no name" is interface text and belongs to the same catalogue as
+            // everything else this dialog prints, not to a data type.
             shown.title.isEmpty ? l10n.untitled : shown.title,
             l10n.operationCount(decoded.file.events.length),
           ),
