@@ -10,14 +10,16 @@
 //          what keep the remark off the chord beneath it.
 // INPUTS: A list of [ResolvedTextCue] — each carrying a document cue, the origin of the row the
 //         layout reserved for it, and the box it occupies there, all in the page's engraved
-//         coordinates — the page's own [pageScale], and the style and plate colour the layer draws
-//         with.
+//         coordinates — the page's own [pageScale], the musician's view ([pageZoom] and [pagePan]),
+//         and the style and plate colour the layer draws with.
 // OUTPUTS: [paint] writes into the canvas and returns nothing. A cue with no words draws nothing at
 //          all, not even its plate; see [TextCuePainter] for why. Everything is drawn inside the
 //          page's clip, so a cue that runs past the page edge cannot bleed into a neighbouring page
-//          of a `PageView`.
+//          of a `PageView`. The view is applied as one outer translate and scale, in the same order
+//          `ChartPainter` and `InkPainter` apply it, so a zoomed page moves the words with the bar
+//          they annotate.
 // KEYWORDS: text-cue-renderer, custom-painter, placed-row, surface-legibility, page-scale,
-//           draw-order, plate
+//           view-zoom, view-pan, draw-order, plate
 //
 // WHY THE LETTERS FOLLOW THE PAGE DOWN TO A FLOOR OF THEIR OWN.
 //
@@ -27,7 +29,9 @@
 // `InkPainter` apply, and the reason a cue survives a FITTED page, a transposition and a round
 // trip. That multiplication is not optional: it is what puts the words on the bar. Only the X half
 // of it is now the anchor's own column; the Y half is the reserved row, which is what keeps the
-// plate off the chord beneath it.
+// plate off the chord beneath it. The musician's own zoom and pan are applied ON TOP of that one
+// multiplication, by the canvas, so the words travel with their bar under a two-finger gesture
+// exactly as they travel under a page mode change.
 //
 // The LETTERS are scaled too, but only down to `textCueMinLegibleScale`, and the two floors are
 // different numbers on purpose. Owner decision D13 lets FIT shrink a whole song onto one page and
@@ -111,12 +115,14 @@ class ResolvedTextCue {
 class TextCuePainter extends CustomPainter {
   /// Creates a painter for the cues that belong on one page.
   ///
-  /// [pageScale] must be the same `PageLayout.scale` the `ChartPainter` drawing this page was
-  /// given, because the two layers are positioned by the same transform and a mismatch would slide
-  /// every cue off the bar it names.
+  /// [pageScale], [pageZoom] and [pagePan] must be the same three numbers the `ChartPainter`
+  /// drawing this page was given, because the two layers are positioned by the same transform and a
+  /// mismatch would slide every cue off the bar it names.
   const TextCuePainter({
     required this.cues,
     required this.pageScale,
+    this.pageZoom = 1,
+    this.pagePan = LayoutOffset.zero,
     this.textStyle = defaultTextStyle,
     this.plateColor = defaultPlateColor,
   });
@@ -168,6 +174,15 @@ class TextCuePainter extends CustomPainter {
   /// Applied to each cue's POSITION in full, and to its LETTERS down to [minLegibleScale].
   final double pageScale;
 
+  /// The musician's magnification, applied to the whole layer exactly as `ChartPainter` applies it.
+  ///
+  /// It is NOT folded into [pageScale] before the legibility floor is applied: zooming in must never
+  /// make a cue's letters smaller, and it never does, because the floor is a floor.
+  final double pageZoom;
+
+  /// The musician's pan in surface logical pixels, applied to the whole layer.
+  final LayoutOffset pagePan;
+
   /// The style the words are drawn with, in logical pixels at a page scale of 1.
   final TextStyle textStyle;
 
@@ -201,6 +216,16 @@ class TextCuePainter extends CustomPainter {
     }
     canvas.save();
     canvas.clipRect(Offset.zero & size);
+    // THE VIEW GOES ON FIRST, and in the same order `ChartPainter` and `InkPainter` apply it, so the
+    // three layers cannot drift apart under a zoom: `drawn = pagePoint * (pageScale * pageZoom) +
+    // pagePan`. The cue's own arithmetic below still multiplies by [pageScale] alone — the view
+    // multiplies the result — which is why zooming in cannot make the letters smaller.
+    if (pagePan != LayoutOffset.zero) {
+      canvas.translate(pagePan.x, pagePan.y);
+    }
+    if (pageZoom != 1) {
+      canvas.scale(pageZoom, pageZoom);
+    }
     for (final ResolvedTextCue resolved in cues) {
       _paintCue(canvas, resolved);
     }
@@ -258,6 +283,8 @@ class TextCuePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant TextCuePainter oldDelegate) =>
       oldDelegate.pageScale != pageScale ||
+      oldDelegate.pageZoom != pageZoom ||
+      oldDelegate.pagePan != pagePan ||
       oldDelegate.textStyle != textStyle ||
       oldDelegate.plateColor != plateColor ||
       !_sameCues(oldDelegate.cues, cues);

@@ -170,7 +170,11 @@ class InkStrokeAssembler {
   //          staff are all writable, and [anchorBasis] reports which of the three rules applied.
   //          FOLLOWING A TAP WITH A DRAG IS NOT A FAILURE CASE: a musical mark begun in a margin
   //          and continued across a bar is one stroke with one anchor, taken from where it began.
-  // KEYWORDS: begin, anchor-resolution, one-rule, page-point, margin-writing, nearest-bar
+  //          THE PAGE CARRIES THE MUSICIAN'S ZOOM AND PAN, so a pen that writes while the chart is
+  //          magnified is anchored to the cell under the nib and not to the cell under the same
+  //          surface pixel on an unmagnified page; there is no view argument here to pass, which is
+  //          what stops a caller from forgetting one.
+  // KEYWORDS: begin, anchor-resolution, one-rule, page-point, margin-writing, nearest-bar, view-zoom
   /// Opens the stroke against the anchor of [surfacePoint], reporting whether one resolved.
   bool begin({
     required PageLayout page,

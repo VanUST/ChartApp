@@ -1,24 +1,26 @@
 // PURPOSE: Draw the scene bar — the one line a musician reads on stage: where they are in the
 //          playlist, how fast the tune is, what it is, what key it is being shown in, how many
-//          repeats it carries, and whether the whole song is on one page. Every reading control
-//          lives here so the performance surface has one place to look, and the key badge is the
-//          handle that opens the twelve-key grid.
+//          repeats it carries, whether the whole song is on one page, and how far the chart is
+//          magnified. Every reading control lives here so the performance surface has one place to
+//          look, and the key badge is the handle that opens the twelve-key grid.
 // INPUTS: The displayed position, the displayed song (already transposed for the screen), the
-//         interval it was transposed by, the current page mode, the callbacks that open the key
-//         grid and change the mode, and [SceneBar.compact] — whether this is the narrow form. The
-//         caller decides that from the WINDOW width, because the bar itself is drawn in a pane
-//         narrower than the window whenever the song list is a permanent column.
+//         interval it was transposed by, the current page mode, the current view zoom, the callbacks
+//         that open the key grid, change the mode and move the view, and [SceneBar.compact] —
+//         whether this is the narrow form. The caller decides that from the WINDOW width, because
+//         the bar itself is drawn in a pane narrower than the window whenever the song list is a
+//         permanent column.
 // OUTPUTS: A dark, high-contrast bar. In the full form it carries position, tempo, style, key,
-//          repeats and the page-mode toggle, wrapping onto more lines rather than clipping or
-//          scrolling. In the compact form it carries the four fields a performer reads off before
-//          starting — position, tempo, the key badge (still the transpose handle) and the page-mode
-//          toggle — and defers the two reference readings, STYLE and REPEATS, behind one `more`
+//          repeats, the page-mode toggle and — when the caller supplies the view callbacks — the
+//          zoom control, wrapping onto more lines rather than clipping or scrolling. In the compact
+//          form it carries the four fields a performer reads off before starting — position, tempo,
+//          the key badge (still the transpose handle) and the page-mode toggle — plus the zoom
+//          control, and defers the two reference readings, STYLE and REPEATS, behind one `more`
 //          control in the same bar. Nothing is removed from the widget tree without a control that
 //          reaches it: the deferred menu shows both values and the STYLE row still opens the same
 //          song-info sheet the full bar's STYLE field opens. The key badge's label is IDENTICAL in
 //          both forms, because the reading is the reading and only its size changes.
 // KEYWORDS: scene-bar, performance-surface, pos-over-n, bpm, style, key-badge, repeats,
-//           fit-pages-toggle, dark-surface, arm-length, compact-form, deferred-fields
+//           fit-pages-toggle, zoom-control, dark-surface, arm-length, compact-form, deferred-fields
 //
 // WHY IT IS DARK AND LARGE. This is the surface a musician reads in a dark room from an arm's
 // length away, so the bar carries its own colours instead of following the application theme, and
@@ -127,6 +129,10 @@ class SceneBar extends StatelessWidget {
     required this.onEditTempo,
     required this.onEditStyle,
     this.compact = false,
+    this.zoom = 1,
+    this.onZoomIn,
+    this.onZoomOut,
+    this.onZoomReset,
   });
 
   /// Whether this bar is the narrow form: four readings and a control, instead of six.
@@ -162,6 +168,30 @@ class SceneBar extends StatelessWidget {
 
   /// Called when the STYLE field is pressed, to edit the style where it is read.
   final VoidCallback onEditStyle;
+
+  /// The magnification the chart is currently shown at, where 1 is the page mode's own view.
+  ///
+  /// It is a READING as well as a handle: the number is the only thing that tells a musician who
+  /// has pinched the chart that he is looking at it through a zoom rather than at a chart that has
+  /// changed. It never falls below 1, because at 1 the page already fills the pane.
+  final double zoom;
+
+  /// Called to magnify the chart one step, or null on a bar that draws no zoom control.
+  ///
+  /// The whole control is drawn only when [onZoomReset] is non-null, so a caller that builds a bar
+  /// for one field — a widget test, a render harness — gets exactly the bar it built before the view
+  /// existed. That is deliberate: the zoom belongs to the VIEWER's state, and a bar constructed
+  /// without it has no view to change.
+  final VoidCallback? onZoomIn;
+
+  /// Called to shrink the chart one step, or null when no zoom control is drawn.
+  final VoidCallback? onZoomOut;
+
+  /// Called to return the chart to its page mode's own view, or null when none is drawn.
+  ///
+  /// This is the "how he gets back" control of D33: after a two-finger pan the musician has no
+  /// scrollbar and no edges in view, so the way back to a known place has to be a named control.
+  final VoidCallback? onZoomReset;
 
   @override
   Widget build(BuildContext context) {
@@ -222,6 +252,14 @@ class SceneBar extends StatelessWidget {
     ),
     _separator(large: true),
     _PageModeToggle(mode: pageMode, onChanged: onPageModeChanged, l10n: l10n),
+    if (onZoomReset != null)
+      _ZoomControl(
+        zoom: zoom,
+        onZoomIn: onZoomIn,
+        onZoomOut: onZoomOut,
+        onReset: onZoomReset!,
+        l10n: l10n,
+      ),
   ];
 
   /// The four readings the compact bar keeps, plus the one control that reaches what it deferred.
@@ -262,6 +300,15 @@ class SceneBar extends StatelessWidget {
       compact: true,
       l10n: l10n,
     ),
+    if (onZoomReset != null)
+      _ZoomControl(
+        zoom: zoom,
+        onZoomIn: onZoomIn,
+        onZoomOut: onZoomOut,
+        onReset: onZoomReset!,
+        compact: true,
+        l10n: l10n,
+      ),
     // No rule before the deferred-readings control: a separating line belongs between two VALUES,
     // and this stands beside the toggle as a control rather than as a reading of its own.
     _DeferredFields(
@@ -571,6 +618,156 @@ class _DeferredFields extends StatelessWidget {
         child: Text(l10n.sceneDeferredRepeatsRow(repeats)),
       ),
     ],
+  );
+}
+
+/// The zoom control: one step out, the current magnification (which is also the reset), one step in.
+///
+/// WHY IT IS HERE AND NOT IN A MENU. D33 asks for a zoom reachable through the interface beside the
+/// touch gesture, and D34 gives the GESTURE to two fingers — but two fingers are also how the page
+/// is turned, and a musician who has pinched the chart has no scrollbar and no page edges on screen
+/// to tell him where he is. The reset has to be visible and named, and a reading that cannot be
+/// corrected where it is read is text rather than a control. The three keys are the same keys in both
+/// forms of the bar, because the view is not a reading the narrow form may defer: it is the state
+/// the chart under the bar is drawn in.
+class _ZoomControl extends StatelessWidget {
+  /// Creates the control for [zoom].
+  const _ZoomControl({
+    required this.zoom,
+    required this.onZoomIn,
+    required this.onZoomOut,
+    required this.onReset,
+    required this.l10n,
+    this.compact = false,
+  });
+
+  /// The magnification in force, at or above 1.
+  final double zoom;
+
+  /// Called by the `+` half, or null when the bar was built without one.
+  final VoidCallback? onZoomIn;
+
+  /// Called by the `−` half, or null when the bar was built without one.
+  final VoidCallback? onZoomOut;
+
+  /// Called by the middle, which returns the view to the page mode's own.
+  final VoidCallback onReset;
+
+  /// The catalogue, for the caption and the three tooltips.
+  final AppLocalizations l10n;
+
+  /// Whether this control is drawn at the narrow form's smaller size.
+  final bool compact;
+
+  /// The number a musician reads: the magnification, written as notation rather than as a word.
+  ///
+  /// A `×` and a number are the same in every language (owner decision D27), so this is deliberately
+  /// NOT a catalogue entry: translating it would be translating arithmetic. One decimal is shown
+  /// below 2 and one above it too, so the label is the same shape at every step and `×1.0` and `×4.0`
+  /// are read the same way.
+  String get label => '×${zoom.toStringAsFixed(1)}';
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const ValueKey<String>('scene-bar-zoom'),
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Text(
+        l10n.sceneCaptionZoom,
+        style: TextStyle(
+          color: sceneBarCaptionColor,
+          fontSize: compact ? 9 : 11,
+          letterSpacing: 1.2,
+        ),
+      ),
+      Row(
+        // SHRINK-WRAPPED for the same reason the page-mode toggle is: a `Row` inside the bar's
+        // `Wrap` defaults to `MainAxisSize.max` and would claim the whole bar, pushing everything
+        // after it onto a line of its own.
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _ZoomButton(
+            fieldKey: 'scene-bar-zoom-out',
+            glyph: '−',
+            tooltip: l10n.zoomOutTooltip,
+            onTap: onZoomOut,
+            compact: compact,
+          ),
+          _ZoomButton(
+            fieldKey: 'scene-bar-zoom-reset',
+            glyph: label,
+            tooltip: l10n.zoomResetTooltip,
+            onTap: onReset,
+            compact: compact,
+          ),
+          _ZoomButton(
+            fieldKey: 'scene-bar-zoom-in',
+            glyph: '+',
+            tooltip: l10n.zoomInTooltip,
+            onTap: onZoomIn,
+            compact: compact,
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+/// One button of the zoom control.
+class _ZoomButton extends StatelessWidget {
+  /// Creates a button showing [glyph], with a [tooltip] and an [onTap].
+  const _ZoomButton({
+    required this.fieldKey,
+    required this.glyph,
+    required this.tooltip,
+    required this.onTap,
+    required this.compact,
+  });
+
+  /// The widget key the tests and the driving harness find this button by.
+  final String fieldKey;
+
+  /// The one or two characters drawn on it: a sign, or the magnification itself.
+  final String glyph;
+
+  /// What the button does, said in words for a reader who cannot see the glyph.
+  final String tooltip;
+
+  /// What a press does, or null when this half is not offered at this zoom.
+  final VoidCallback? onTap;
+
+  /// Whether this button is drawn at the narrow form's smaller size.
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: InkWell(
+      key: ValueKey<String>(fieldKey),
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 7 : 10,
+          vertical: compact ? 3 : 6,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: onTap == null ? sceneBarCaptionColor : sceneBarAccent,
+            width: 1.5,
+          ),
+        ),
+        child: Text(
+          glyph,
+          style: TextStyle(
+            color: onTap == null ? sceneBarCaptionColor : sceneBarTextColor,
+            fontSize: compact ? 13 : 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    ),
   );
 }
 

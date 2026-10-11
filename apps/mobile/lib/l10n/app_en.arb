@@ -232,6 +232,18 @@
   "sceneModePages": "PAGES",
   "@sceneModePages": { "description": "The page-mode toggle's label for the song paginated." },
 
+  "sceneCaptionZoom": "ZOOM",
+  "@sceneCaptionZoom": { "description": "The scene bar's caption over the zoom control. The magnification itself is a multiplication sign and a number, which is notation and is not translated." },
+
+  "zoomInTooltip": "Zoom in",
+  "@zoomInTooltip": { "description": "The tooltip of the scene bar's button that magnifies the chart one step." },
+
+  "zoomOutTooltip": "Zoom out",
+  "@zoomOutTooltip": { "description": "The tooltip of the scene bar's button that shrinks the chart one step, without going below the page mode's own view." },
+
+  "zoomResetTooltip": "Back to the whole page",
+  "@zoomResetTooltip": { "description": "The tooltip of the scene bar's middle zoom button, which returns the chart to the view its page mode gives it — the way back after a two-finger pan." },
+
   "sceneDeferredTooltip": "Style and repeats",
   "@sceneDeferredTooltip": { "description": "The tooltip of the narrow scene bar's control for the two deferred readings." },
 

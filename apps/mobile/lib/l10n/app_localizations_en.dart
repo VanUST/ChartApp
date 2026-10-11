@@ -261,6 +261,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sceneModePages => 'PAGES';
 
   @override
+  String get sceneCaptionZoom => 'ZOOM';
+
+  @override
+  String get zoomInTooltip => 'Zoom in';
+
+  @override
+  String get zoomOutTooltip => 'Zoom out';
+
+  @override
+  String get zoomResetTooltip => 'Back to the whole page';
+
+  @override
   String get sceneDeferredTooltip => 'Style and repeats';
 
   @override

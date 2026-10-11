@@ -1,0 +1,483 @@
+// PURPOSE: Verify owner decision D34 end to end on the real widgets: two fingers together move the
+//          chart and a pinch magnifies it, ONE finger does neither, the zoom control in the scene
+//          bar moves the view and takes it back to the whole page, a chord tap names the same cell
+//          at every zoom, and — the acceptance test — THE PEN STILL WRITES when the page is
+//          magnified, landing on the cell under the nib with the same stored anchor-local point it
+//          would have produced on an unmagnified page.
+//
+//          WHY TWO SYNTHETIC POINTERS AND NOT A DEVICE. `adb shell input` drives ONE pointer: it has
+//          a single pointer id and no way to hold two contacts down at once, so a genuine two-finger
+//          gesture cannot be injected over adb at all. This file is therefore the instrument for the
+//          GESTURE, and the device run recorded in `docs/sdd.md` A63 is the instrument for the PEN.
+//          Saying which instrument produced which claim is the point; a screenshot of a pan no adb
+//          run produced would have been worth less than this sentence.
+//
+//          WHY EVERY AIM IS THE PAGE'S OWN CENTRE. A zoom made by the scene bar's control keeps the
+//          page point under the middle of the pane still, so the page's centre is a point that stays
+//          in view at every zoom and at every pan the clamp allows. Aiming there makes the same cell
+//          reachable at 1x, 2x and 4x, which is exactly what the three claims need: a hit test that
+//          names the same cell, a pen that lands on that cell, and a stored point that is the same
+//          number at every magnification.
+//
+//          WHY THE ASSERTIONS ARE NUMBERS. "The zoom changed" is satisfied by a zoom that changed to
+//          the wrong value, and "the pen wrote" is satisfied by a stroke anchored to the wrong bar.
+//          The claims here are the anchor's address, the stored anchor-local point (which must be
+//          the SAME value at every zoom), and the page's own view fields.
+// INPUTS: None. The chart is synthetic and the layout is deterministic, so this runs on any machine
+//         with no device and no font.
+// OUTPUTS: Pass/fail per behaviour, plus the numbers each one rests on — the view before and after
+//          each gesture, the cell the pen aimed at, the anchor it received, the stored point, and
+//          the same stored point on an unmagnified page — printed so the arithmetic can be read
+//          rather than only trusted.
+// KEYWORDS: test, widget, two-finger, pan, pinch, view-transform, zoom, pen-at-zoom, hit-test,
+//           synthetic-pointers, d33, d34
+import 'dart:io';
+
+import 'package:chart_core/chart_core.dart';
+import 'package:chart_ui/chart_ui.dart';
+import 'package:chartapp/ink_capture_surface.dart';
+import 'package:chartapp/ireal_library.dart';
+import 'package:chartapp/l10n/app_localizations.dart';
+import 'package:chartapp/viewer_screen.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart' hide Key;
+import 'package:flutter_test/flutter_test.dart';
+
+/// The pane the viewer is pumped at for the view cases.
+///
+/// It is the size `ink_mode_test.dart` already uses for the interaction cases, so the page mode, the
+/// engraving and the cells are the same ones that file asserts about: a regression here cannot
+/// quietly be a regression in the fixture.
+const Size _paneSize = Size(900, 1000);
+
+/// A twelve-bar two-section chart, laid out deterministically by the package's default metrics.
+Song viewChart() => Song(
+  id: 'view-transform',
+  title: 'View transform',
+  composer: 'ChartApp',
+  style: 'Medium Swing',
+  key: Key.cMajor,
+  tempo: 120,
+  sections: <Section>[
+    for (final String label in <String>['A', 'B'])
+      Section(
+        id: label,
+        label: SectionLabel.letter(label),
+        bars: <Bar>[
+          for (int index = 0; index < 6; index++)
+            Bar(
+              chords: <BeatChord>[
+                BeatChord(
+                  chord: Chord(
+                    root: ChordRoot(index),
+                    quality: ChordQuality.majorSeventh,
+                  ),
+                  beat: 0,
+                ),
+              ],
+            ),
+        ],
+      ),
+  ],
+);
+
+/// A one-song library holding [song].
+IRealLibrary libraryOf(Song song) => IRealLibrary(
+  playlistName: '',
+  songs: <IRealSong>[IRealSong(index: 0, song: song)],
+);
+
+/// Pumps the viewer with [song] loaded through an injected loader.
+Future<void> pumpViewer(
+  WidgetTester tester,
+  Song song, {
+  Size size = _paneSize,
+}) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: IRealViewerScreen(
+        loader: (String path) async => libraryOf(song),
+        initialPath: 'synthetic',
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// The chart painter currently on screen.
+ChartPainter chartPainter(WidgetTester tester) {
+  final Finder finder = find.byWidgetPredicate(
+    (Widget widget) => widget is CustomPaint && widget.painter is ChartPainter,
+  );
+  return tester.widget<CustomPaint>(finder).painter! as ChartPainter;
+}
+
+/// The ink painter currently on screen.
+InkPainter inkPainter(WidgetTester tester) {
+  final Finder finder = find.byWidgetPredicate(
+    (Widget widget) => widget is CustomPaint && widget.painter is InkPainter,
+  );
+  return tester.widget<CustomPaint>(finder).painter! as InkPainter;
+}
+
+/// The surface that receives pointer events for the page currently shown.
+Finder pageSurfaceFinder() => find.byType(RawPointerCapture).first;
+
+/// Switches the ink mode by pressing the app bar's own control.
+Future<void> setInkMode(WidgetTester tester, bool on) async {
+  final IconButton button = tester.widget<IconButton>(
+    find.byKey(const ValueKey<String>('viewer-ink-toggle')),
+  );
+  if (button.tooltip!.startsWith('Drawing') == on) {
+    return;
+  }
+  await tester.tap(find.byKey(const ValueKey<String>('viewer-ink-toggle')));
+  await tester.pumpAndSettle();
+}
+
+/// The surface position of a point given in the page's engraved coordinates, at the page's view.
+///
+/// It is the page's own forward transform — the one `pagePointOf` inverts — rather than a copy of
+/// the arithmetic, so a gesture aimed through this helper is aimed through the same transform the
+/// pen is routed by.
+Offset surfaceOf(WidgetTester tester, PageLayout page, Offset pagePoint) {
+  final LayoutOffset surface = page.surfacePointOf(
+    LayoutOffset(pagePoint.dx, pagePoint.dy),
+  );
+  return Offset(surface.x, surface.y);
+}
+
+/// The global position of a point given in the page's engraved coordinates.
+Offset pagePointToGlobal(
+  WidgetTester tester,
+  PageLayout page,
+  Offset pagePoint,
+) =>
+    tester.getTopLeft(pageSurfaceFinder()) + surfaceOf(tester, page, pagePoint);
+
+/// Draws one stroke from [pageStart] to [pageEnd], in the page's engraved coordinates, with a pen.
+///
+/// [startMs] is the timestamp the contact begins at, and it is REQUIRED rather than defaulting to
+/// zero: a stroke's identity is derived from its anchor AND the millisecond it began (see
+/// `InkCaptureLayer._nextStrokeId`), so two strokes a test draws on one cell with the default
+/// timestamp would share an id and the document would refuse the second. Naming the start time is
+/// what lets this file draw three strokes on the same cell — which is what makes their stored points
+/// comparable — without depending on the undo path to clear the id in between.
+Future<void> drawStroke(
+  WidgetTester tester,
+  PageLayout page, {
+  required Offset pageStart,
+  required Offset pageEnd,
+  required int startMs,
+}) async {
+  final TestGesture gesture = await tester.createGesture(
+    kind: PointerDeviceKind.stylus,
+  );
+  await gesture.down(
+    pagePointToGlobal(tester, page, pageStart),
+    timeStamp: Duration(milliseconds: startMs),
+  );
+  await tester.pump(const Duration(milliseconds: 8));
+  for (int step = 1; step <= 4; step++) {
+    await gesture.moveTo(
+      pagePointToGlobal(
+        tester,
+        page,
+        Offset.lerp(pageStart, pageEnd, step / 4)!,
+      ),
+      timeStamp: Duration(milliseconds: startMs + 8 * step),
+    );
+    await tester.pump(const Duration(milliseconds: 8));
+  }
+  await gesture.up(timeStamp: Duration(milliseconds: startMs + 8 * 5));
+  await tester.pumpAndSettle();
+}
+
+/// The point at the middle of the page, in the page's own engraved coordinates.
+///
+/// This is the point a zoom made from the scene bar holds still, so it stays in view at every
+/// magnification and every legal pan; see the file header.
+Offset pageCentreOf(PageLayout page) =>
+    Offset(page.size.width / 2, page.size.height / 2);
+
+/// One text line describing the view, for the numbers each test prints.
+String viewOf(PageLayout page) =>
+    'zoom=${page.zoom.toStringAsFixed(4)} '
+    'pan=(${page.pan.x.toStringAsFixed(2)},${page.pan.y.toStringAsFixed(2)}) '
+    'drawn_scale=${page.drawnScale.toStringAsFixed(4)}';
+
+void main() {
+  testWidgets('two fingers pan and pinch; one finger does neither', (
+    WidgetTester tester,
+  ) async {
+    await pumpViewer(tester, viewChart());
+    final ChartPainter plain = chartPainter(tester);
+    expect(plain.page.zoom, 1, reason: 'a chart opens at the identity view');
+
+    // The pane's own rectangle, so the two touches land inside the chart rather than on the bars
+    // around it.
+    final Offset centre = tester.getRect(pageSurfaceFinder()).center;
+    const double apart = 60;
+    const double spread = 140;
+
+    // --- ONE FINGER DOES NOTHING TO THE VIEW ----------------------------------------------------
+    final TestGesture single = await tester.startGesture(centre, pointer: 11);
+    await tester.pump();
+    await single.moveBy(const Offset(30, 25));
+    await tester.pump();
+    await single.up();
+    await tester.pumpAndSettle();
+    final PageLayout afterOne = chartPainter(tester).page;
+    expect(
+      afterOne.zoom,
+      1,
+      reason: 'one finger is not the view gesture (owner decision D34)',
+    );
+    expect(afterOne.pan, LayoutOffset.zero);
+    stdout.writeln(
+      'view.test.one_finger pointer_count=1 ${viewOf(afterOne)} unchanged=true',
+    );
+
+    // --- TWO FINGERS: A PINCH OUT MAGNIFIES -----------------------------------------------------
+    final TestGesture first = await tester.startGesture(
+      centre - const Offset(apart, 0),
+      pointer: 21,
+    );
+    final TestGesture second = await tester.startGesture(
+      centre + const Offset(apart, 0),
+      pointer: 22,
+    );
+    await tester.pump();
+    // Move them apart in equal steps, so the focal point stays where it started and the sample is a
+    // pinch rather than a pinch with a pan in it.
+    for (int step = 0; step < 4; step++) {
+      await first.moveBy(const Offset(-20, 0));
+      await second.moveBy(const Offset(20, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final PageLayout pinched = chartPainter(tester).page;
+    // The span went from 60 to 140, a factor of 7/3.
+    expect(
+      pinched.zoom,
+      closeTo(spread / apart, 0.05),
+      reason: 'the pinch factor must be the ratio of the two spans',
+    );
+    stdout.writeln(
+      'view.test.pinch pointers=2 span_from=$apart span_to=$spread '
+      '${viewOf(pinched)}',
+    );
+
+    // --- AND WHILE STILL DOWN, THE SAME TWO FINGERS PAN ------------------------------------------
+    const Offset pan = Offset(-50, -30);
+    await first.moveBy(pan);
+    await second.moveBy(pan);
+    await tester.pump(const Duration(milliseconds: 16));
+    final PageLayout panned = chartPainter(tester).page;
+    expect(
+      panned.zoom,
+      closeTo(pinched.zoom, 1e-9),
+      reason: 'a translation of the fingers must not change the scale',
+    );
+    expect(
+      panned.pan.x,
+      lessThan(pinched.pan.x - 1),
+      reason: 'moving both fingers left must move the chart left',
+    );
+    expect(panned.pan.y, lessThan(pinched.pan.y - 1));
+    stdout.writeln(
+      'view.test.pan pointers=2 focal_delta=(${pan.dx},${pan.dy}) '
+      '${viewOf(panned)}',
+    );
+
+    await first.up();
+    await second.up();
+    await tester.pumpAndSettle();
+
+    // --- THE SCENE BAR'S CONTROL IS THE WAY BACK ------------------------------------------------
+    await tester.tap(
+      find.byKey(const ValueKey<String>('scene-bar-zoom-reset')),
+    );
+    await tester.pumpAndSettle();
+    final PageLayout reset = chartPainter(tester).page;
+    expect(reset.zoom, 1);
+    expect(reset.pan, LayoutOffset.zero);
+    stdout.writeln('view.test.reset ${viewOf(reset)}');
+  });
+
+  testWidgets('the zoom buttons step the view and the reset returns it', (
+    WidgetTester tester,
+  ) async {
+    await pumpViewer(tester, viewChart());
+    await tester.tap(find.byKey(const ValueKey<String>('scene-bar-zoom-in')));
+    await tester.pumpAndSettle();
+    final PageLayout once = chartPainter(tester).page;
+    expect(once.zoom, greaterThan(1));
+    await tester.tap(find.byKey(const ValueKey<String>('scene-bar-zoom-in')));
+    await tester.pumpAndSettle();
+    final PageLayout twice = chartPainter(tester).page;
+    expect(twice.zoom, greaterThan(once.zoom));
+    await tester.tap(find.byKey(const ValueKey<String>('scene-bar-zoom-out')));
+    await tester.pumpAndSettle();
+    final PageLayout onceAgain = chartPainter(tester).page;
+    expect(onceAgain.zoom, closeTo(once.zoom, 1e-9));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('scene-bar-zoom-reset')),
+    );
+    await tester.pumpAndSettle();
+    final PageLayout reset = chartPainter(tester).page;
+    expect(reset.zoom, 1);
+    expect(reset.pan, LayoutOffset.zero);
+    stdout.writeln(
+      'view.test.buttons once=${once.zoom.toStringAsFixed(4)} '
+      'twice=${twice.zoom.toStringAsFixed(4)} '
+      'back=${onceAgain.zoom.toStringAsFixed(4)} ${viewOf(reset)}',
+    );
+  });
+
+  testWidgets('the pen writes at every zoom, on the cell under the nib', (
+    WidgetTester tester,
+  ) async {
+    await pumpViewer(tester, viewChart());
+    await setInkMode(tester, true);
+
+    // WHICH BAR IS AIMED AT IS DECIDED BY THE LAYOUT, NOT BY A CONSTANT: the point aimed at is the
+    // middle of the page, and the hit test that reads it is the same one a tap uses. Asking the
+    // layout which cell that point is over means the aim is correct at every zoom by construction.
+    final PageLayout plain = chartPainter(tester).page;
+    final ChartHit aimed = hitTestPage(
+      plain,
+      LayoutOffset(pageCentreOf(plain).dx, pageCentreOf(plain).dy),
+    )!;
+    final PlacedBar bar = aimed.bar;
+    final PlacedCell cell = aimed.cell!;
+    final Offset target = pageCentreOf(plain);
+    final Offset fromCorner = Offset(
+      target.dx - cell.bounds.left,
+      target.dy - cell.bounds.top,
+    );
+
+    Offset? storedAtIdentity;
+    int level = 0;
+    for (final double requested in <double>[1, 2, 4]) {
+      level++;
+      // Put the view at (at least) the requested zoom through the scene bar's own controls, which is
+      // the interface path D33 asks for; the pinch is exercised by the first test.
+      while (chartPainter(tester).page.zoom < requested - 1e-6) {
+        await tester.tap(
+          find.byKey(const ValueKey<String>('scene-bar-zoom-in')),
+        );
+        await tester.pumpAndSettle();
+      }
+      final PageLayout page = chartPainter(tester).page;
+      expect(
+        page.zoom,
+        greaterThanOrEqualTo(requested - 1e-6),
+        reason: 'the view must have reached the zoom the loop asked for',
+      );
+      await drawStroke(
+        tester,
+        page,
+        pageStart: target,
+        pageEnd: target + const Offset(14, 5),
+        startMs: level * 1000,
+      );
+      final List<ResolvedInkStroke> strokes = inkPainter(tester).strokes;
+      expect(
+        strokes,
+        hasLength(level),
+        reason: 'a stroke must reach the document at zoom ${page.zoom}',
+      );
+      final ResolvedInkStroke drawn = strokes.last;
+      final InkStroke stroke = drawn.stroke;
+      final Offset stored = Offset(
+        stroke.points.first.x,
+        stroke.points.first.y,
+      );
+      final Offset surface = surfaceOf(tester, page, target);
+      final LayoutOffset pagePoint = page.pagePointOf(
+        LayoutOffset(surface.dx, surface.dy),
+      );
+      storedAtIdentity ??= stored;
+      expect(
+        stroke.anchor.sectionId,
+        bar.sectionId,
+        reason: 'the stroke must be anchored to the bar under the pen',
+      );
+      expect(stroke.anchor.bar, bar.barIndex);
+      expect(
+        stroke.anchor.beat,
+        cell.beat,
+        reason: 'the stroke began inside the cell, so it is anchored to it',
+      );
+      expect(stroke.points.first.x, closeTo(storedAtIdentity.dx, 1e-6));
+      expect(stroke.points.first.y, closeTo(storedAtIdentity.dy, 1e-6));
+      expect(
+        pagePoint.x - drawn.origin.x,
+        closeTo(stored.dx, 1e-6),
+        reason: 'the stored point is the page point relative to its anchor',
+      );
+      expect(pagePoint.y - drawn.origin.y, closeTo(stored.dy, 1e-6));
+      expect(stored.dx, closeTo(fromCorner.dx, 1e-6));
+      expect(stored.dy, closeTo(fromCorner.dy, 1e-6));
+      stdout.writeln(
+        'view.test.pen ${viewOf(page)} '
+        'aimed=${bar.sectionId}#${bar.barIndex} beat=${cell.beat} '
+        'anchor=${stroke.anchor} '
+        'surface=(${surface.dx.toStringAsFixed(2)},'
+        '${surface.dy.toStringAsFixed(2)}) '
+        'page_point=(${pagePoint.x.toStringAsFixed(2)},'
+        '${pagePoint.y.toStringAsFixed(2)}) '
+        'anchor_origin=(${drawn.origin.x.toStringAsFixed(2)},'
+        '${drawn.origin.y.toStringAsFixed(2)}) '
+        'stored=(${stored.dx.toStringAsFixed(6)},'
+        '${stored.dy.toStringAsFixed(6)}) points=${stroke.points.length}',
+      );
+    }
+  });
+
+  testWidgets('a chord tap names the same cell at every zoom', (
+    WidgetTester tester,
+  ) async {
+    await pumpViewer(tester, viewChart());
+    final PageLayout plain = chartPainter(tester).page;
+    final Offset target = pageCentreOf(plain);
+    final ChartHit aimed = hitTestPage(
+      plain,
+      LayoutOffset(target.dx, target.dy),
+    )!;
+    String? named;
+    for (final double requested in <double>[1, 2, 4]) {
+      while (chartPainter(tester).page.zoom < requested - 1e-6) {
+        await tester.tap(
+          find.byKey(const ValueKey<String>('scene-bar-zoom-in')),
+        );
+        await tester.pumpAndSettle();
+      }
+      final PageLayout page = chartPainter(tester).page;
+      await tester.tapAt(pagePointToGlobal(tester, page, target));
+      await tester.pumpAndSettle();
+      final ChartHit? hit = chartPainter(tester).selection;
+      expect(hit, isNotNull, reason: 'a tap on a cell must select');
+      expect(hit!.sectionId, aimed.bar.sectionId);
+      expect(hit.barIndex, aimed.bar.barIndex);
+      expect(hit.beat, aimed.beat);
+      named ??= '${hit.sectionId}#${hit.barIndex} beat=${hit.beat}';
+      expect(
+        '${hit.sectionId}#${hit.barIndex} beat=${hit.beat}',
+        named,
+        reason: 'the same surface aim must name the same cell at every zoom',
+      );
+      stdout.writeln(
+        'view.test.hit ${viewOf(page)} '
+        'aimed=${aimed.bar.sectionId}#${aimed.bar.barIndex} beat=${aimed.beat} '
+        'named=${hit.sectionId}#${hit.barIndex} beat=${hit.beat}',
+      );
+    }
+  });
+}

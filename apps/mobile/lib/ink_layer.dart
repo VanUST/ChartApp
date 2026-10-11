@@ -18,6 +18,13 @@
 //          `chart_core`'s `resolveInkAnchor` — and is not attached to the nearest CELL, because a
 //          cell is a column of time and a point outside the bar has none.
 //
+//          IT ALSO HOLDS THE ONE RULE THAT SAYS WHEN A CONTACT MUST NOT DRAW AT ALL, and that is the
+//          two-finger view gesture of owner decision D34: [setViewGestureActive] is set by the
+//          screen's recognizer, and while it is set nothing opens a stroke and any half-drawn one is
+//          abandoned. The rule lives here, beside the palm rule and in front of the one call that
+//          turns a contact into a stroke, so there is exactly one place where "may this contact
+//          write?" is answered.
+//
 //          WHY IT OWNS A REPAINT TICK, AND WHY THAT IS A PERFORMANCE DECISION RATHER THAN A
 //          RENDERING ONE. A pen delivers samples far faster than the screen draws, and the page is
 //          expensive to re-lay-out: on the owner's tablet, re-engraving during a stroke cost a
@@ -308,6 +315,58 @@ class InkCaptureLayer {
   /// Whether the most recent pointer-down was decided to lay ink.
   bool get lastPointWasInk => _lastPointWasInk;
 
+  /// Whether the screen's own two-finger view gesture currently owns the contacts.
+  ///
+  /// Owner decision D34 makes TWO FINGERS TOGETHER the pan, and a pinch the zoom. Two fingers cannot
+  /// write — the gesture does not exist in handwriting — so while they are down nothing may draw,
+  /// and the composer that routes a lift must not select either. This flag is how the screen tells
+  /// the layer that the gesture is live; the layer is where it matters, because the layer is the one
+  /// place a contact becomes a stroke, and a second copy of the rule in a widget is how the two come
+  /// to disagree about a contact that arrived mid-gesture.
+  ///
+  /// IT IS SET FROM THE GESTURE RECOGNIZER AND NOT FROM A CONTACT COUNT HERE. A recognizer knows
+  /// whether the screen has awarded it the gesture; counting pointers in this class would be a
+  /// second, weaker answer to the same question, and it could not defeat the page's own swipe.
+  bool get viewGestureActive => _viewGestureActive;
+
+  bool _viewGestureActive = false;
+
+  // PURPOSE: Tell the layer that the screen's two-finger view gesture started or ended, so no
+  //          contact draws while it is live and a contact that had already begun is abandoned.
+  // INPUTS: active — true when a two-finger gesture has been accepted, false when it ended.
+  // OUTPUTS: Nothing. Turning it ON abandons every open stroke and any armed erase, because those
+  //          contacts are the fingers now panning: committing a stroke whose hand has moved on to
+  //          panning would put a mark on the chart that the musician did not write, and an erase
+  //          armed by one of those fingers would delete a stroke he meant to keep. Turning it OFF
+  //          touches nothing: the contacts have already lifted.
+  // KEYWORDS: two-finger-pan, view-gesture, stroke-cancel, erase-disarm, no-write-while-panning,
+  //           d34
+  /// Declares whether the two-finger view gesture is in force.
+  void setViewGestureActive(bool active) {
+    if (_viewGestureActive == active) {
+      return;
+    }
+    _viewGestureActive = active;
+    if (!active) {
+      return;
+    }
+    final bool hadStrokes = _assemblers.isNotEmpty;
+    for (final InkStrokeAssembler assembler in _assemblers.values) {
+      assembler.cancel();
+    }
+    _assemblers.clear();
+    _live.clear();
+    final bool hadErase = _erasePointer != null;
+    _clearErase();
+    if (hadStrokes || hadErase) {
+      _liveRevision.value++;
+    }
+    debugPrint(
+      'ink.view.gesture active=$active cancelled_strokes=$hadStrokes '
+      'cancelled_erase=$hadErase strokes=${_session.document.strokes.length}',
+    );
+  }
+
   /// The pointer of the contact currently armed to erase, or null when none is.
   ///
   /// The eraser decides at the LIFT and not at the touch (see the file header), so the down has to
@@ -526,8 +585,10 @@ class InkCaptureLayer {
   // INPUTS: pointer — the engine's pointer id, which is the identity of this contact. page — the
   //         layout being drawn on. kind — the pointer kind. position — where the contact landed, in
   //         the widget's pixels. pressure and time — the first sample's values.
-  // OUTPUTS: True when a stroke was opened; false only when the page carries no bar to anchor to, in
-  //          which case the contact is tracked as refused and no stroke will be committed. A second
+  // OUTPUTS: True when a stroke was opened. False in one of two cases, and the log names which:
+  //          the page carries no bar to anchor to, in which case the contact is tracked as refused
+  //          and no stroke will be committed; or the two-finger view gesture owns the contacts, in
+  //          which case the contact is the pan and must not become ink (owner decision D34). A second
   //          contact with the same pointer id replaces the first, because one pointer id cannot be
   //          two contacts and the older one is a leaked stroke rather than a real second hand.
   //          The `ink.stroke.begin` line reports WHICH rule chose the anchor (`basis=`) and how far
@@ -546,6 +607,21 @@ class InkCaptureLayer {
   }) {
     final InkCaptureKind captureKind =
         InkInputMapper.kindOf(kind) ?? InkCaptureKind.unknown;
+    // TWO FINGERS CANNOT WRITE (owner decision D34). While the view gesture owns the contacts a
+    // contact must not open a stroke — including the FIRST of the two fingers, if the recognizer
+    // awarded itself the gesture before this event was routed. The refusal is logged with its own
+    // reason and is deliberately NOT counted in [_dropped]: that counter means "the page had no bar
+    // to anchor to", and folding a second meaning into it would make both unreadable. See
+    // [setViewGestureActive] for why a stroke already open is abandoned rather than completed.
+    if (_viewGestureActive) {
+      debugPrint(
+        'ink.stroke.refused pointer=$pointer kind=${captureKind.token} '
+        'reason=view-gesture-active '
+        'surface=(${position.x.toStringAsFixed(1)},'
+        '${position.y.toStringAsFixed(1)})',
+      );
+      return false;
+    }
     final InkStrokeAssembler assembler = InkStrokeAssembler(
       tool: StrokeTool.pen,
       color: _penColorFor(captureKind),
@@ -569,12 +645,22 @@ class InkCaptureLayer {
     _assemblers[pointer] = assembler;
     _lastPointWasInk = true;
     _refreshLive(page);
+    // THE PAGE POINT IS PRINTED BESIDE THE SURFACE POINT AND THE VIEW, because that pair is the
+    // whole of "the pen wrote where it was put": the surface coordinate is where the glass was
+    // touched, the page coordinate is what the anchor rule was given, and the view is what turned
+    // one into the other. Reading only the anchor cannot show that the transform was inverted
+    // rather than guessed, which is exactly the defect (A47) this evidence is here to rule out.
+    final LayoutOffset pagePoint = page.pagePointOf(position);
     debugPrint(
       'ink.stroke.begin pointer=$pointer kind=${captureKind.token} '
       'anchor=${assembler.anchor} basis=${assembler.anchorBasis?.token ?? 'none'} '
       'margin_px=${assembler.anchorDistancePx.toStringAsFixed(1)} '
       'surface=(${position.x.toStringAsFixed(1)},${position.y.toStringAsFixed(1)}) '
-      'scale=${page.scale} pressure=${pressure.toStringAsFixed(2)}',
+      'page_point=(${pagePoint.x.toStringAsFixed(1)},'
+      '${pagePoint.y.toStringAsFixed(1)}) '
+      'scale=${page.scale} zoom=${page.zoom.toStringAsFixed(3)} '
+      'pan=(${page.pan.x.toStringAsFixed(1)},${page.pan.y.toStringAsFixed(1)}) '
+      'pressure=${pressure.toStringAsFixed(2)}',
     );
     return true;
   }
@@ -674,6 +760,15 @@ class InkCaptureLayer {
   // KEYWORDS: erase-arm, tap-predicate, contact-tracking, selection-suppression
   /// Arms the eraser for the contact [pointer] that landed at [position].
   void beginErase({required int pointer, required LayoutOffset position}) {
+    // The same D34 gate the pen half carries: a contact that is part of a two-finger gesture is not
+    // aiming the eraser, so nothing is armed and the lift will not delete a stroke.
+    if (_viewGestureActive) {
+      debugPrint(
+        'ink.erase.refused pointer=$pointer reason=view-gesture-active '
+        'at=(${position.x.toStringAsFixed(1)},${position.y.toStringAsFixed(1)})',
+      );
+      return;
+    }
     _erasePointer = pointer;
     _eraseAim = position;
     _eraseMoved = false;

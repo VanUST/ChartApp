@@ -149,6 +149,7 @@ import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 // Flutter's own `Key` (widget identity) collides with the domain's musical Key, and this screen
 // names the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide Key;
 
 import 'chart_document.dart';
@@ -175,6 +176,7 @@ import 'sheet_surface.dart';
 import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
 import 'text_cue_sheet.dart';
+import 'two_finger_view_gesture.dart';
 
 /// Turns a reference into the library it holds.
 ///
@@ -401,6 +403,66 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// layout pass knows it: a guess here would report a fitted page's geometry for an ordinary one,
   /// and the two disagree about where every cell is.
   PageMode? _lastPageMode;
+
+  /// The musician's own magnification of the chart, at or above 1 and at most `PageLayout.maxZoom`.
+  ///
+  /// Owner decision D34 gives the view gesture to two fingers and a pinch; D33 also asks for a way
+  /// to zoom from the interface, so the scene bar carries three controls that write here. The zoom
+  /// is a VIEW and not an engraving: the page is laid out once for the pane and this is how it is
+  /// drawn, so the same value applies to whichever page of a paginated chart is on screen.
+  double _viewZoom = 1;
+
+  /// The musician's own pan of the chart, in chart-pane logical pixels.
+  ///
+  /// It is the same space a pointer event's `localPosition` arrives in, which is what makes the
+  /// pan gesture's arithmetic and `PageLayout.pagePointOf`'s inverse one pair rather than two. It
+  /// is CLAMPED by `PageLayout.withView` on every build, so the page can never be dragged off the
+  /// pane: the musician cannot lose the music.
+  LayoutOffset _viewPan = LayoutOffset.zero;
+
+  /// A sample of the two-finger gesture in progress, or null when none is.
+  ///
+  /// The start of a gesture is the reference the whole gesture is measured from: the zoom it began
+  /// at, the pan it began at, and the focal point the page must stay under. Keeping them in one
+  /// place means the update arithmetic is a function of the gesture and not of the frames in
+  /// between, which is what stops a slow drag accumulating a drift.
+  _ViewGestureAnchor? _viewGesture;
+
+  /// Whether the two-finger gesture is currently in force, as told to the ink layer.
+  ///
+  /// It is kept here as well as on the layer because '_onPageTapUp' has to know whether a contact
+  /// belongs to the gesture before it decides to select, and asking the layer for its own flag would
+  /// be the same fact read from two objects. The layer is told once per transition.
+  bool _viewGestureActive = false;
+
+  /// The engraving the last build produced, and the inputs it was produced from.
+  ///
+  /// WHY A CACHE IS NOW NEEDED, IN A30's OWN WORDS. A30 recorded the cost and predicted this: the
+  /// FIT search is up to 24 layout passes and nothing was cached because nothing rebuilt the page
+  /// per frame. A two-finger pan DOES rebuild per frame, and a rebuild that re-engraved would pay
+  /// the whole of that search for a move that changes only where the page is drawn. The key holds
+  /// every input the engraving depends on — the mode, the pane, the song and the cues — so a miss
+  /// is a real change and a hit is exactly the same page.
+  _EngravingKey? _engravedKey;
+
+  /// The pages the last engraving produced, shared by every frame of a pan.
+  _Engraving? _engraved;
+
+  /// The page the last frame actually drew, with the view applied.
+  ///
+  /// It is what the gesture arithmetic clamps against, because clamping needs the page's own size
+  /// and scale and those are properties of the engraving, not of the view. It is assigned during
+  /// build and read from a pointer handler, exactly as [_lastPageScale] and [_lastPageSurface] are
+  /// and for the same reason: the layout that produced it is out of scope by then.
+  PageLayout? _lastDrawnPage;
+
+  /// What the view belongs to: the song on screen and the page mode it is being read in.
+  ///
+  /// Read during build, and a change resets the zoom and the pan. Doing it here rather than at each
+  /// of the several places a song can change — the list, the drawer, the programme, an opened file —
+  /// is what keeps the two from drifting: the question "is this a different chart?" has one answer
+  /// and it is the identity of what is being drawn.
+  Object? _viewOwner;
 
   /// The last probe state published, so a rebuild that changes nothing writes nothing.
   String? _publishedInkState;
@@ -803,13 +865,23 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     if (pages.isEmpty) {
       return const <String, Object?>{};
     }
-    final PageLayout page = pages.first;
-    final double scale = page.scale;
+    final PageLayout page = pages.first.withView(
+      zoom: _viewZoom,
+      pan: _viewPan,
+    );
+    final double drawn = page.drawnScale;
     return <String, Object?>{
       'page': page.index,
       'mode': mode.name,
-      'scale': scale,
-      'surface': <double>[page.size.width * scale, page.size.height * scale],
+      // THE PAGE MODE'S SCALE AND THE MUSICIAN'S VIEW ARE REPORTED SEPARATELY, and the product is
+      // reported too, so a verification can tell "the chart was fitted" from "the musician zoomed"
+      // without re-deriving either. A surface position is `cell * drawn_scale + pan`, which is what
+      // the cell centres below are.
+      'scale': page.scale,
+      'zoom': page.zoom,
+      'pan': <double>[page.pan.x, page.pan.y],
+      'drawn_scale': drawn,
+      'surface': <double>[page.size.width * drawn, page.size.height * drawn],
       'cells': <Object?>[
         for (final PlacedBar bar in page.bars)
           for (final PlacedCell cell in bar.cells)
@@ -817,11 +889,244 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               'sec': bar.sectionId,
               'bar': bar.barIndex,
               'beat': cell.beat,
-              'x': (cell.bounds.left + cell.bounds.size.width / 2) * scale,
-              'y': (cell.bounds.top + cell.bounds.size.height / 2) * scale,
+              // WHERE THE CELL LANDED ON THE SURFACE, through the page's own forward transform —
+              // the same function [PageLayout.pagePointOf] inverts, so a driver that aims at these
+              // numbers is aiming through the pen's own arithmetic rather than through a second
+              // copy of it.
+              'x': page
+                  .surfacePointOf(
+                    LayoutOffset(
+                      cell.bounds.left + cell.bounds.size.width / 2,
+                      cell.bounds.top + cell.bounds.size.height / 2,
+                    ),
+                  )
+                  .x,
+              'y': page
+                  .surfacePointOf(
+                    LayoutOffset(
+                      cell.bounds.left + cell.bounds.size.width / 2,
+                      cell.bounds.top + cell.bounds.size.height / 2,
+                    ),
+                  )
+                  .y,
+              // The cell's rectangle in the page's engraved coordinates, so a driver can also ask
+              // what the hit test should answer for a point rather than only where to put a finger.
+              'page_rect': <double>[
+                cell.bounds.left,
+                cell.bounds.top,
+                cell.bounds.size.width,
+                cell.bounds.size.height,
+              ],
             },
       ],
     };
+  }
+
+  // PURPOSE: Put the musician's view on the page being drawn, so the whole screen — the chart, the
+  //          words, the ink and the two-finger gesture — agrees about one transform.
+  // INPUTS: raw — the page as the layout engine produced it, with an identity view.
+  // OUTPUTS: The same page with `_viewZoom` and `_viewPan` applied and both CLAMPED, so the drawn
+  //          page always covers the pane. The clamp is not repeated here: it is `PageLayout`'s, and
+  //          the gesture arithmetic reads its result back from [_lastDrawnPage].
+  // KEYWORDS: view-application, single-transform, clamps, d34
+  /// Returns [raw] with the current view applied.
+  PageLayout _viewed(PageLayout raw) {
+    final PageLayout viewed = raw.withView(zoom: _viewZoom, pan: _viewPan);
+    _lastDrawnPage = viewed;
+    return viewed;
+  }
+
+  // PURPOSE: Hold a requested magnification inside the range the view allows, so that arithmetic
+  //          which depends on the zoom agrees with the page that is finally stored.
+  // INPUTS: zoom — a requested magnification, possibly below 1, above the cap, or non-finite.
+  // OUTPUTS: A value in `[1, PageLayout.maxZoom]`. A non-finite request becomes the identity rather
+  //          than being propagated, because a page drawn at NaN is invisible rather than
+  //          wrong-looking.
+  //
+  //          WHY THIS EXISTS RATHER THAN LETTING `PageLayout.withView` CLAMP AT THE END. The zoom is
+  //          clamped there too, but a caller that had already computed a PAN from the unclamped
+  //          number would keep a pan belonging to a magnification the view never took, so the chart
+  //          jumps sideways on the step that crosses the cap. That was measured: a sequence of
+  //          zoom-in steps past four moved the page's centre from the middle of the pane to (74, 68)
+  //          of it, and the widget test in `view_transform_test.dart` now aims at the page's centre
+  //          precisely so that such a jump cannot hide.
+  // KEYWORDS: zoom-clamp, single-source, pan-depends-on-zoom, no-jump, d34
+  static double _clampZoom(double zoom) {
+    if (!zoom.isFinite || zoom <= 1) {
+      return 1;
+    }
+    return zoom > PageLayout.maxZoom ? PageLayout.maxZoom : zoom;
+  }
+
+  // PURPOSE: Move the view to a zoom and pan, keeping the pan legal, and rebuild.
+  // INPUTS: zoom — the requested magnification. pan — the requested offset in pane pixels.
+  // OUTPUTS: Nothing. Both are clamped through the page that is on screen, so the stored view is
+  //          the view that is DRAWN: a gesture that started from a stored-but-clamped value would
+  //          accumulate a difference between what the musician sees and what the next gesture
+  //          measures from. When no page has been drawn yet the values are stored unclamped and the
+  //          first build clamps them.
+  // KEYWORDS: view-state, zoom, pan, clamp-through-page, rebuild, d34
+  void _setView({required double zoom, required LayoutOffset pan}) {
+    final PageLayout? reference = _lastDrawnPage;
+    if (reference == null) {
+      setState(() {
+        _viewZoom = zoom;
+        _viewPan = pan;
+      });
+      return;
+    }
+    final PageLayout clamped = reference.withView(zoom: zoom, pan: pan);
+    setState(() {
+      _viewZoom = clamped.zoom;
+      _viewPan = clamped.pan;
+    });
+  }
+
+  // PURPOSE: Return the chart to the view its page mode gives it, which is how the musician gets
+  //          back to a known place after panning and zooming.
+  // INPUTS: None.
+  // OUTPUTS: Nothing. Zoom becomes 1 and the pan becomes zero, and the page is clamped by the next
+  //          build rather than here, because at zoom 1 the only legal pan is zero anyway.
+  //
+  //          WHY THIS IS THE "FIT" OF THE VIEW AND NOT A PAGE MODE. The page mode says how the
+  //          chart is ENGRAVED and the view says where the musician is looking at it; a reset that
+  //          changed the mode would answer a question the musician did not ask. At zoom 1 the drawn
+  //          page is exactly the pane again, which is the state the mode chose for it.
+  // KEYWORDS: view-reset, fit-the-view, known-view, get-back, d33, d34
+  void _resetView() {
+    if (_viewZoom == 1 && _viewPan == LayoutOffset.zero) {
+      // Said out loud rather than silently ignored: a press that does nothing must be
+      // distinguishable in the log from a press that was never delivered.
+      debugPrint('viewer.view.reset already_at_identity');
+      return;
+    }
+    debugPrint(
+      'viewer.view.reset from_zoom=${_viewZoom.toStringAsFixed(3)} '
+      'from_pan=(${_viewPan.x.toStringAsFixed(1)},${_viewPan.y.toStringAsFixed(1)})',
+    );
+    _setView(zoom: 1, pan: LayoutOffset.zero);
+  }
+
+  // PURPOSE: Step the magnification by one factor about the middle of what is on screen, or about a
+  //          named point, so the scene bar's two buttons are a usable interface path to the zoom
+  //          that D33 asks for beside the pinch.
+  // INPUTS: factor — the multiplier, above 1 to zoom in and below 1 to zoom out. about — the point
+  //         in pane pixels to keep still, or null for the pane's own centre.
+  // OUTPUTS: Nothing. A step that would leave the range is clamped rather than refused, so a button
+  //          held down stops at the end of the range instead of fighting the hand — and the CLAMP
+  //          HAPPENS BEFORE THE PAN IS COMPUTED FROM IT, so the step that reaches the cap keeps the
+  //          point it was zooming about exactly where it was.
+  // KEYWORDS: zoom-button, interface-path, zoom-about-point, clamped-step, d33
+  void _zoomBy(double factor, {Offset? about}) {
+    final Size pane = _lastPageSurface;
+    if (pane.isEmpty) {
+      return;
+    }
+    final Offset centre = about ?? Offset(pane.width / 2, pane.height / 2);
+    final double base = _lastPageScale <= 0 ? 1 : _lastPageScale;
+    final double fromDrawn = base * _viewZoom;
+    final double zoom = _clampZoom(_viewZoom * factor);
+    final double toDrawn = base * zoom;
+    // The page point under the button's target stays under it, so a zoom is a change of scale and
+    // not a jump to another part of the tune.
+    final LayoutOffset pageUnderPoint = LayoutOffset(
+      (centre.dx - _viewPan.x) / fromDrawn,
+      (centre.dy - _viewPan.y) / fromDrawn,
+    );
+    debugPrint(
+      'viewer.view.zoom from=${_viewZoom.toStringAsFixed(3)} '
+      'to=${zoom.toStringAsFixed(3)} about=(${centre.dx.toStringAsFixed(1)},'
+      '${centre.dy.toStringAsFixed(1)})',
+    );
+    _setView(
+      zoom: zoom,
+      pan: LayoutOffset(
+        centre.dx - pageUnderPoint.x * toDrawn,
+        centre.dy - pageUnderPoint.y * toDrawn,
+      ),
+    );
+  }
+
+  // PURPOSE: Begin the two-finger view gesture, recording the reference every later sample is
+  //          measured from.
+  // INPUTS: sample — the focal point and span of the two touches that started it.
+  // OUTPUTS: Nothing. The ink layer is told that the gesture owns the contacts, which is what stops
+  //          the first of the two fingers from becoming a stroke; the reference is kept so that an
+  //          update is a function of the gesture rather than of the frames in between.
+  // KEYWORDS: view-gesture-start, gesture-anchor, ink-suppression, d34
+  void _onViewGestureStart(TwoFingerViewSample sample) {
+    _viewGesture = _ViewGestureAnchor(
+      zoom: _viewZoom,
+      pan: _viewPan,
+      focal: sample.focal,
+      span: sample.span,
+      pageScale: _lastPageScale <= 0 ? 1 : _lastPageScale,
+    );
+    if (_viewGestureActive) {
+      return;
+    }
+    _viewGestureActive = true;
+    _activeInkLayer?.setViewGestureActive(true);
+    debugPrint(
+      'viewer.view.gesture start zoom=${_viewZoom.toStringAsFixed(3)} '
+      'span=${sample.span.toStringAsFixed(1)} '
+      'focal=(${sample.focal.dx.toStringAsFixed(1)},'
+      '${sample.focal.dy.toStringAsFixed(1)}) pointers=${sample.pointerCount}',
+    );
+  }
+
+  // PURPOSE: Apply one sample of the two-finger gesture: a translation of the focal point pans, a
+  //          change of span zooms, and the page point that was under the fingers at the start stays
+  //          under them throughout.
+  // INPUTS: sample — the current focal point and span.
+  // OUTPUTS: Nothing. A sample with fewer than two touches is ignored, because one finger is not
+  //          this gesture; a sample whose start span was degenerate (two touches exactly on top of
+  //          each other) pans without zooming rather than dividing by zero.
+  // KEYWORDS: pan-zoom-update, focal-hold, span-ratio, degenerate-span, d34
+  void _onViewGestureUpdate(TwoFingerViewSample sample) {
+    final _ViewGestureAnchor? anchor = _viewGesture;
+    if (anchor == null || sample.pointerCount < 2) {
+      return;
+    }
+    final double factor = anchor.span > 0 ? sample.span / anchor.span : 1;
+    // A degenerate span (two touches exactly on top of one another) or a non-finite ratio must not
+    // reach the page: a page drawn at NaN is invisible rather than wrong-looking, which is the
+    // failure hardest to attribute to a gesture. The CLAMP COMES BEFORE THE PAN IS DERIVED FROM THE
+    // ZOOM, so a pinch that runs past the cap does not carry a pan belonging to a scale the view
+    // never took — see [_clampZoom].
+    final double zoom = _clampZoom(anchor.zoom * factor);
+    final double fromDrawn = anchor.pageScale * anchor.zoom;
+    final LayoutOffset pageUnderFocal = LayoutOffset(
+      (anchor.focal.dx - anchor.pan.x) / fromDrawn,
+      (anchor.focal.dy - anchor.pan.y) / fromDrawn,
+    );
+    final double toDrawn = anchor.pageScale * zoom;
+    _setView(
+      zoom: zoom,
+      pan: LayoutOffset(
+        sample.focal.dx - pageUnderFocal.x * toDrawn,
+        sample.focal.dy - pageUnderFocal.y * toDrawn,
+      ),
+    );
+  }
+
+  // PURPOSE: End the two-finger view gesture and hand the contacts back to the tools.
+  // INPUTS: None.
+  // OUTPUTS: Nothing. The reference is dropped and the ink layer is told that a contact may draw
+  //          again, which happens on the lift of the last finger — not on the lift of the first,
+  //          because the remaining finger is still part of the gesture and must not begin a stroke.
+  // KEYWORDS: view-gesture-end, ink-handback, last-finger, d34
+  void _onViewGestureEnd() {
+    _viewGesture = null;
+    if (!_viewGestureActive) {
+      return;
+    }
+    _viewGestureActive = false;
+    _activeInkLayer?.setViewGestureActive(false);
+    debugPrint(
+      'viewer.view.gesture end zoom=${_viewZoom.toStringAsFixed(3)} '
+      'pan=(${_viewPan.x.toStringAsFixed(1)},${_viewPan.y.toStringAsFixed(1)})',
+    );
   }
 
   /// Whether the verification state was changed while the pen was down and is owed a publication.
@@ -2420,6 +2725,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               ),
               onPageModeChanged: (PageMode picked) =>
                   setState(() => _chosenPageMode = picked),
+              // THE VIEW THE MUSICIAN HAS ON THE CHART, shown and driven where he reads. D33 asks
+              // for a zoom reachable from the interface beside the touch gesture, and D34 gives the
+              // GESTURE to two fingers; these three controls are the interface half, and the middle
+              // one is how he gets back to a known view after a pan he cannot see the edges of.
+              zoom: _viewZoom,
+              onZoomIn: () => _zoomBy(1.25),
+              onZoomOut: () => _zoomBy(0.8),
+              onZoomReset: _resetView,
               // The tempo and the style are edited where they are shown. The sheet is one surface
               // for all four facts and opens with the tapped field focused, so the tempo a musician
               // pressed is the tempo the cursor is in.
@@ -2632,6 +2945,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           painter: TextCuePainter(
             cues: _resolveCues(page, textCues),
             pageScale: page.scale,
+            pageZoom: page.zoom,
+            pagePan: page.pan,
           ),
           child: const SizedBox.expand(),
         ),
@@ -2641,6 +2956,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             painter: InkPainter(
               strokes: _inkStrokes(page, layer),
               pageScale: page.scale,
+              pageZoom: page.zoom,
+              pagePan: page.pan,
             ),
             child: child,
           ),
@@ -2774,13 +3091,20 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          it. That is also the honest answer for a contact the palm rule REFUSED — the palm is
   //          neither allowed to erase nor invited to select, so it leaves the chart exactly as it
   //          found it. With the eraser off this branch is unchanged and everything selects as before.
+  //
+  //          AND A CONTACT THAT BELONGED TO THE TWO-FINGER VIEW GESTURE SELECTS NOTHING EITHER. A
+  //          pan is not a tap, but a two-finger touch that never moved can still reach a tap
+  //          recogniser — and the musician who put two fingers down to move the chart did not ask
+  //          for the bar under his hand to be selected. The layer's flag is read because it is the
+  //          one object that knows the gesture owned those contacts (owner decision D34).
   // INPUTS: page — the page the tap landed on. layer — the ink layer of the song on screen, whose
   //         mode is the only thing that can consume a tap without a stroke being drawn. details —
   //         the tap, whose local position is in the page's surface.
   // OUTPUTS: Nothing. It rebuilds when the contact was consumed, so a new stroke is painted, a
   //          deletion shows, and the undo control becomes live; it selects otherwise, and clears the
   //          selection on a miss.
-  // KEYWORDS: tap-up, commit-then-repaint, eraser-suppresses-selection, selection, fit-scale
+  // KEYWORDS: tap-up, commit-then-repaint, eraser-suppresses-selection, selection, fit-scale,
+  //           view-gesture-suppresses-selection, d34
   void _onPageTapUp(
     PageLayout page,
     InkCaptureLayer layer,
@@ -2788,7 +3112,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   ) {
     final bool drew = _tapWasInk;
     final bool erasing = layer.eraserMode;
+    final bool panning = layer.viewGestureActive;
     _tapWasInk = false;
+    if (panning) {
+      return;
+    }
     if (drew || erasing) {
       // The contact was the ink layer's: the document may have changed under this frame, so the page
       // and the app bar are both out of date. No selection is made — the bar under a stroke is not
@@ -3273,7 +3601,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   static const Color _fitFallbackTextColor = Color(0xFF5A4300);
 
   // PURPOSE: Lay the displayed song out at the size the window gives it and show it as one fitted
-  //          page or as a page at a time.
+  //          page or as a page at a time, under the musician's own zoom and pan.
   // INPUTS: entry — the selected song, for identity. displayed — the chart to draw, in its chosen
   //         key. mode — the mode the musician asked for: FIT or PAGES. layer — the ink layer of the
   //         song on screen, which decides what a contact on a page means. strokes — the committed
@@ -3288,8 +3616,22 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          screen rather than asking FIT again about a page that was never drawn. A song the
   //          layout engine produces no pages for says so instead of showing an empty page, because
   //          an empty song and a blank page must not look alike.
+  //
+  //          EVERY BRANCH IS WRAPPED IN THE TWO-FINGER GESTURE, and that is the one place in this
+  //          file where owner decision D34 is turned into a recogniser. It is wrapped here rather
+  //          than around the page because the gesture has to be an ANCESTOR of the pager: a
+  //          recogniser only competes for a pointer that hits it or a descendant, and the whole
+  //          reason `TwoFingerViewGestureRecognizer` accepts on the second touch is so that it wins
+  //          the arena before the pager's horizontal drag does.
+  //
+  //          THE ENGRAVING IS CACHED AND THE VIEW IS NOT. A pan rebuilds this subtree on every
+  //          frame, and re-engraving there would pay the FIT search — up to 24 layout passes — for a
+  //          move that only changes where the same page is drawn. [_engraveFor] holds the pages
+  //          against the inputs that determine them, so a frame during a gesture reuses them and
+  //          only wraps them in a new view.
   // KEYWORDS: pagination, fit, fit-fallback, page-scale, layout-call, page-view, empty-song,
-  //           legibility-message, fallback-notice, ink-layering, cue-layering, a50
+  //           legibility-message, fallback-notice, ink-layering, cue-layering, a50, two-finger,
+  //           view-zoom, view-pan, engraving-cache, d34
   Widget _buildPages(
     IRealSong entry,
     Song displayed,
@@ -3305,6 +3647,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         final double pageHeight = constraints.maxHeight;
         _lastPageSurface = Size(pageWidth, pageHeight);
         _lastPageMode = mode;
+        // The view belongs to the chart and the page mode it is being read in — not to the app. A
+        // fresh chart opens at the identity, and switching how the chart is engraved starts the
+        // view over, because every rectangle the old pan pointed at is a different one now.
+        final Object viewOwner = (entry.index, mode);
+        if (_viewOwner != viewOwner) {
+          _viewOwner = viewOwner;
+          _viewZoom = 1;
+          _viewPan = LayoutOffset.zero;
+          _lastDrawnPage = null;
+        }
         if (!pageWidth.isFinite ||
             !pageHeight.isFinite ||
             pageWidth <= 0 ||
@@ -3312,92 +3664,190 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             displayed.writtenBarCount == 0) {
           return Center(child: Text(l10n.noBars));
         }
-        if (mode == PageMode.fit) {
-          final FitOutcome outcome = _meteredLayout(
-            () => _engine.fitToPage(
+        final _Engraving engraving = _engraveFor(
+          entry,
+          displayed,
+          mode,
+          pageWidth,
+          pageHeight,
+          textCues,
+        );
+        final List<PageLayout> pages = engraving.pages;
+        if (pages.isEmpty) {
+          return Center(child: Text(l10n.noBars));
+        }
+        // The mode reported to `_pageGeometry` is the one DRAWN, so a driving tool re-engraves the
+        // paginated pages it is actually looking at instead of asking FIT again and getting an
+        // empty answer. The scale is the PAGE MODE's; the view is reported separately.
+        _lastPageMode = engraving.drawnMode;
+        _lastPageScale = pages.first.scale;
+        final Widget chart;
+        if (engraving.fit?.page != null) {
+          chart = _tappablePage(
+            _viewed(pages.first),
+            displayed,
+            layer,
+            textCues,
+          );
+        } else {
+          final Widget pager = PageView.builder(
+            key: ValueKey<int>(entry.index),
+            itemCount: pages.length,
+            itemBuilder: (BuildContext context, int index) => _tappablePage(
+              _viewed(pages[index]),
               displayed,
-              pageWidth: pageWidth,
-              pageHeight: pageHeight,
-              cues: textCues,
+              layer,
+              textCues,
             ),
           );
-          final PageLayout? page = outcome.page;
-          if (page != null) {
-            _lastPageScale = page.scale;
-            return _tappablePage(page, displayed, layer, textCues);
-          }
-          // --- THE FIT FALLBACK -----------------------------------------------------------------
-          // FIT could not put the song on one page above the legible floor, so the chart is shown
-          // PAGINATED rather than left blank. The decision and the reasons behind it are recorded
-          // beside [_fitFallbackNotice] and in `docs/sdd.md` A50; this is where it is carried out.
-          final List<PageLayout> fallback = _meteredLayout(
-            () => _engine.layout(
-              displayed,
-              pageWidth: pageWidth,
-              pageHeight: pageHeight,
-              cues: textCues,
-            ),
-          );
-          if (fallback.isEmpty) {
-            return Center(child: Text(l10n.noBars));
-          }
-          // The mode reported to `_pageGeometry` is the one DRAWN, so a driving tool re-engraves
-          // the paginated pages it is actually looking at instead of asking FIT again and getting
-          // an empty answer.
-          _lastPageMode = PageMode.pages;
-          _lastPageScale = fallback.first.scale;
+          final FitOutcome? outcome = engraving.fit;
+          chart = outcome == null
+              ? pager
+              : Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    pager,
+                    // IGNORED BY THE POINTER, so the band states the substitution WITHOUT taking a
+                    // contact away from the page under it. The page's own contract is that a touch
+                    // on its white space — exactly where a musician may miss a bar — is reported
+                    // and clears the selection; a band that swallowed the page's top strip would
+                    // break that contract in the one mode where the page already has the least room.
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(
+                        child: _fitFallbackNotice(context, outcome),
+                      ),
+                    ),
+                  ],
+                );
+        }
+        return _twoFingerView(chart);
+      },
+    );
+  }
+
+  // PURPOSE: Wrap the chart in the recogniser that owns the two-finger view gesture, so that a pan
+  //          or a pinch is never handed to the pager and a single finger is never taken from it.
+  // INPUTS: child — the chart, already carrying the current view.
+  // OUTPUTS: The chart with the gesture recogniser in front of it. The callbacks are re-bound on
+  //          every build, and the recogniser itself is REUSED by `RawGestureDetector` for as long
+  //          as the widget is in the same place, which is what lets a gesture survive the rebuild
+  //          its own first frame caused: a recogniser replaced mid-gesture would lose the touches
+  //          it is measuring and the gesture would end at the first frame it moved.
+  // KEYWORDS: gesture-detector, recogniser-factory, stable-across-rebuild, d34
+  Widget _twoFingerView(Widget child) => RawGestureDetector(
+    // OPAQUE, so a touch on the page's own white space still reaches the recogniser: that is where
+    // the musician's two fingers most often land, and a deferring detector would let exactly those
+    // touches fall through to nothing.
+    behavior: HitTestBehavior.opaque,
+    gestures: <Type, GestureRecognizerFactory<GestureRecognizer>>{
+      TwoFingerViewGestureRecognizer:
+          GestureRecognizerFactoryWithHandlers<TwoFingerViewGestureRecognizer>(
+            () => TwoFingerViewGestureRecognizer(),
+            (TwoFingerViewGestureRecognizer recognizer) {
+              recognizer.callbacks = TwoFingerViewCallbacks(
+                onStart: _onViewGestureStart,
+                onUpdate: _onViewGestureUpdate,
+                onEnd: _onViewGestureEnd,
+              );
+            },
+          ),
+    },
+    child: child,
+  );
+
+  // PURPOSE: Produce the pages of one chart for one pane, once, and hand back the same pages while
+  //          the inputs that determine them are unchanged.
+  // INPUTS: entry — the song, for the fallback log line and for identity in the key. displayed —
+  //         the chart to engrave. mode — the mode asked for. width and height — the pane. cues — the
+  //         document's remarks, whose reserved rows change where the bars sit.
+  // OUTPUTS: An [_Engraving] holding the pages, the mode they are really drawn in — FIT falls back
+  //          to PAGES below the legible floor, see A50 — and the FIT verdict when FIT was asked, so
+  //          the notice above the pages can still name the floor it refused to cross. A cache hit
+  //          returns the value the last identical input produced, without re-running the search.
+  // KEYWORDS: engraving-cache, cache-key, fit-fallback, layout-call, per-frame-cost, d34
+  _Engraving _engraveFor(
+    IRealSong entry,
+    Song displayed,
+    PageMode mode,
+    double width,
+    double height,
+    List<TextCue> cues,
+  ) {
+    final _EngravingKey key = _EngravingKey(
+      mode: mode,
+      width: width,
+      height: height,
+      song: displayed,
+      cues: cues,
+    );
+    final _Engraving? cached = _engraved;
+    if (cached != null && _engravedKey == key) {
+      return cached;
+    }
+    final _Engraving fresh;
+    if (mode == PageMode.fit) {
+      final FitOutcome outcome = _meteredLayout(
+        () => _engine.fitToPage(
+          displayed,
+          pageWidth: width,
+          pageHeight: height,
+          cues: cues,
+        ),
+      );
+      final PageLayout? page = outcome.page;
+      if (page != null) {
+        fresh = _Engraving(
+          pages: <PageLayout>[page],
+          drawnMode: PageMode.fit,
+          fit: outcome,
+        );
+      } else {
+        // --- THE FIT FALLBACK -------------------------------------------------------------
+        // FIT could not put the song on one page above the legible floor, so the chart is shown
+        // PAGINATED rather than left blank. The decision and the reasons behind it are recorded
+        // beside [_fitFallbackNotice] and in `docs/sdd.md` A50; this is where it is carried out.
+        final List<PageLayout> fallback = _meteredLayout(
+          () => _engine.layout(
+            displayed,
+            pageWidth: width,
+            pageHeight: height,
+            cues: cues,
+          ),
+        );
+        fresh = _Engraving(
+          pages: fallback,
+          drawnMode: PageMode.pages,
+          fit: outcome,
+        );
+        if (fallback.isNotEmpty) {
           debugPrint(
             'viewer.page.fit.fallback song="${_rawTitleFor(entry)}" '
-            'pane=${pageWidth.toStringAsFixed(0)}x${pageHeight.toStringAsFixed(0)} '
+            'pane=${width.toStringAsFixed(0)}x${height.toStringAsFixed(0)} '
             'floor=${outcome.scale} pages=${fallback.length} '
             'bar0=${fallback.first.bars.length} '
             'requested=${_chosenPageMode == PageMode.fit ? 'explicit' : 'default'}',
           );
-          return Stack(
-            fit: StackFit.expand,
-            children: <Widget>[
-              PageView.builder(
-                key: ValueKey<int>(entry.index),
-                itemCount: fallback.length,
-                itemBuilder: (BuildContext context, int index) =>
-                    _tappablePage(fallback[index], displayed, layer, textCues),
-              ),
-              // IGNORED BY THE POINTER, so the band states the substitution WITHOUT taking a contact
-              // away from the page under it. The page's own contract is that a touch on its white
-              // space — exactly where a musician may miss a bar — is reported and clears the
-              // selection; a band that swallowed the page's top strip would break that contract in
-              // the one mode where the page already has the least room.
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: IgnorePointer(
-                  child: _fitFallbackNotice(context, outcome),
-                ),
-              ),
-            ],
-          );
         }
-        final List<PageLayout> pages = _meteredLayout(
+      }
+    } else {
+      fresh = _Engraving(
+        pages: _meteredLayout(
           () => _engine.layout(
             displayed,
-            pageWidth: pageWidth,
-            pageHeight: pageHeight,
-            cues: textCues,
+            pageWidth: width,
+            pageHeight: height,
+            cues: cues,
           ),
-        );
-        if (pages.isEmpty) {
-          return Center(child: Text(l10n.noBars));
-        }
-        _lastPageScale = pages.first.scale;
-        return PageView.builder(
-          key: ValueKey<int>(entry.index),
-          itemCount: pages.length,
-          itemBuilder: (BuildContext context, int index) =>
-              _tappablePage(pages[index], displayed, layer, textCues),
-        );
-      },
-    );
+        ),
+        drawnMode: PageMode.pages,
+      );
+    }
+    _engravedKey = key;
+    _engraved = fresh;
+    return fresh;
   }
 
   // PURPOSE: Say WHY the chart is paginated when FIT was asked for and could not deliver, without
@@ -3616,4 +4066,109 @@ class _PenPathCost {
         'layout_per_sample_ms=${perSample.toStringAsFixed(2)} '
         'publish_ms=${(_publishMicros / 1000).toStringAsFixed(1)}';
   }
+}
+
+/// The reference a two-finger gesture is measured from, fixed at the moment it started.
+///
+/// WHY THE REFERENCE AND NOT THE PREVIOUS FRAME. A gesture that measured from the last update would
+/// integrate every rounding of every frame, and a slow drag would drift away from the fingers; and a
+/// zoom about the focal point has to keep the page point that was under the fingers AT THE START
+/// under them at the end, which is a statement about two moments and not about two frames.
+class _ViewGestureAnchor {
+  /// Creates the reference for a gesture that began at [focal] with [span].
+  const _ViewGestureAnchor({
+    required this.zoom,
+    required this.pan,
+    required this.focal,
+    required this.span,
+    required this.pageScale,
+  });
+
+  /// The magnification in force when the gesture began.
+  final double zoom;
+
+  /// The pan in force when the gesture began, in pane pixels.
+  final LayoutOffset pan;
+
+  /// Where the two fingers' middle was when the gesture began, in pane pixels.
+  final Offset focal;
+
+  /// How far apart the fingers were when the gesture began, as a mean radius in pixels.
+  final double span;
+
+  /// The page mode's own scale, so the arithmetic can work in surface pixels without consulting the
+  /// page on every frame — it cannot change while a gesture is in progress.
+  final double pageScale;
+}
+
+/// Every input an engraving depends on, so a cache hit is exactly the same page.
+///
+/// A value type rather than a string key on purpose: a string would have to render the song, which
+/// is the work the cache exists to avoid, and an equality over the values the engine actually reads
+/// cannot collide. `Song`, `TextCue` and `Section` all carry value equality, which is what makes
+/// this a comparison and not an identity test.
+class _EngravingKey {
+  /// Creates a key for [song] engraved at [mode] on a [width] x [height] pane with [cues].
+  const _EngravingKey({
+    required this.mode,
+    required this.width,
+    required this.height,
+    required this.song,
+    required this.cues,
+  });
+
+  /// The page mode the engraving was asked for.
+  final PageMode mode;
+
+  /// The pane width in logical pixels.
+  final double width;
+
+  /// The pane height in logical pixels.
+  final double height;
+
+  /// The chart that was engraved, in the key it is displayed in.
+  final Song song;
+
+  /// The document's text cues, whose reserved rows change where the bars sit.
+  final List<TextCue> cues;
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! _EngravingKey ||
+        other.mode != mode ||
+        other.width != width ||
+        other.height != height ||
+        other.song != song ||
+        other.cues.length != cues.length) {
+      return false;
+    }
+    for (int index = 0; index < cues.length; index++) {
+      if (other.cues[index] != cues[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(mode, width, height, song, Object.hashAll(cues));
+}
+
+/// What one engraving of a chart produced: the pages and the mode they were drawn in.
+///
+/// The mode travels with the pages because FIT can fall back to PAGES (A50), and a caller that
+/// re-derived the mode would report the mode it ASKED for rather than the one on screen.
+class _Engraving {
+  /// Creates an engraving of [pages] drawn in [drawnMode], with the FIT outcome when there was one.
+  const _Engraving({required this.pages, required this.drawnMode, this.fit});
+
+  /// The pages, in reading order.
+  final List<PageLayout> pages;
+
+  /// The mode the pages are actually drawn in.
+  final PageMode drawnMode;
+
+  /// The FIT verdict, or null when FIT was never asked.
+  final FitOutcome? fit;
 }

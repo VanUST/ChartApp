@@ -6,9 +6,10 @@
 //          the song-model address of what they cover, so it runs under `dart test` with no device
 //          and no Flutter.
 // INPUTS: A [PageLayout] and a point in THAT PAGE'S OWN coordinates — not a point on the glass.
-//         A fitted page is engraved at a larger virtual size and drawn smaller; the bridge from a
-//         surface point to a page point is [PageLayout.pagePointOf], and a caller that skips it is
-//         wrong only for fitted pages, which is the kind of wrongness that survives a casual look.
+//         A fitted page is engraved at a larger virtual size and drawn smaller, and a page can also
+//         carry the musician's own zoom and pan; the bridge from a surface point to a page point is
+//         [PageLayout.pagePointOf], which removes all three, and a caller that skips it is wrong
+//         only for a transformed page — which is the kind of wrongness that survives a casual look.
 // OUTPUTS: A [ChartHit] naming the bar and, when the point is over one, the cell; null when the
 //          point is over no bar at all. The three ways to get null or a half answer are decided
 //          and documented on [hitTestPage] rather than left to a caller to guess.

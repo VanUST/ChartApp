@@ -1,11 +1,16 @@
 // PURPOSE: Describe where everything landed, in a form that answers the two questions the rest of
 //          the system asks of a layout: where is this chord drawn, and which chord is under this
 //          touch. Every element carries both its identity in the song model and its rectangle on
-//          the page, so neither question requires re-running the engine.
-// INPUTS: Produced by the layout engine; not constructed by callers.
+//          the page, so neither question requires re-running the engine. The page also carries the
+//          whole bridge to the surface it is drawn on — the page mode's `scale` and the musician's
+//          `zoom`/`pan` — so both questions are answered in one coordinate system at any view.
+// INPUTS: Produced by the layout engine; not constructed by callers. The view fields default to the
+//         identity and are set through `withView` by whoever owns the screen's view state.
 // OUTPUTS: Immutable values with value equality, which is what makes a layout comparable — a
-//          cached layout can be recognised as unchanged without re-engraving it.
-// KEYWORDS: layout-result, placed-chord, hit-testing, value-equality, cache-key, anchor-address
+//          cached layout can be recognised as unchanged without re-engraving it. Equality includes
+//          the view, so a pan is a new page value and a painter that compares pages repaints.
+// KEYWORDS: layout-result, placed-chord, hit-testing, value-equality, cache-key, anchor-address,
+//           view-transform, zoom, pan, single-bridge
 import '../chord.dart';
 import 'geometry.dart';
 import 'melody_staff.dart';
@@ -433,13 +438,29 @@ class PlacedSystem {
 }
 
 /// One page of engraved music.
+///
+/// THE PAGE CARRIES BOTH HALVES OF THE ONE BRIDGE TO THE GLASS, AND THAT IS NOT AN ACCIDENT OF
+/// LAYERING. [scale] is the page mode's factor — FIT re-engraves the page larger and shrinks the
+/// result — and [zoom] and [pan] are the musician's own view on top of it, moved by a two-finger
+/// gesture or by the scene bar's zoom control (owner decision D34). All three live HERE rather than
+/// in a widget because [pagePointOf] has to be the only inverse of the drawing transform: this
+/// project has already paid once for a second rule for one relationship (a stroke anchored at
+/// `surface x scale²`, see A47), and a view transform held beside the page is exactly that second
+/// rule waiting for a call site to forget it. Putting the view in the page means the pen, the eraser
+/// and the chord hit test become zoom-aware by construction, because they already call
+/// [pagePointOf].
 class PageLayout {
   /// Creates a page with the given [index], page [size] and [systems].
+  ///
+  /// [zoom] and [pan] default to the identity view, which is what the layout engine produces and
+  /// what every caller that is not drawing on a surface gets.
   const PageLayout({
     required this.index,
     required this.size,
     required this.systems,
     this.scale = 1,
+    this.zoom = 1,
+    this.pan = LayoutOffset.zero,
   });
 
   /// Zero-based page number.
@@ -463,10 +484,50 @@ class PageLayout {
   /// each re-deriving the fit.
   final double scale;
 
+  /// The musician's own magnification, at or above 1, on top of [scale].
+  ///
+  /// It is never below 1 because at 1 the page ALREADY fills the surface exactly — that is what
+  /// both page modes produce — so a smaller value would only replace paper with empty desk. It is
+  /// capped at [maxZoom] for the reason given there. One is the identity and the ordinary page.
+  final double zoom;
+
+  /// The musician's own pan, in SURFACE logical pixels, applied after [scale] and [zoom].
+  ///
+  /// The drawn position of a point is therefore `pagePoint * drawnScale + pan`. It is never allowed
+  /// to take the page off the surface: [withView] clamps it, so the page always covers the surface
+  /// it is drawn on and the musician cannot lose the music by dragging it away. A pan of
+  /// [LayoutOffset.zero] is the identity.
+  final LayoutOffset pan;
+
+  /// The largest magnification the view may reach.
+  ///
+  /// A JUDGEMENT, STATED RATHER THAN TUNED. Four times a fitted page puts a single system of a long
+  /// tune across the tablet's chart pane, which is what "bring the bar I am playing closer" needs;
+  /// beyond that the reader sees a chord and its neighbours and has lost the bar line, and each
+  /// further step multiplies the drawn page rather than showing more music. It is NOT measured
+  /// against legibility the way the FIT floor (`LayoutEngine.minLegibleScale`) is, because zooming
+  /// IN cannot make a chart harder to read: the floor is a floor for shrinking and has no upper
+  /// sibling here.
+  static const double maxZoom = 4;
+
   /// Every bar on this page, in reading order.
   List<PlacedBar> get bars => <PlacedBar>[
     for (final PlacedSystem system in systems) ...system.bars,
   ];
+
+  /// The factor every engraved rectangle is multiplied by to reach the surface.
+  ///
+  /// The page mode's [scale] and the musician's [zoom] are one multiply for every consumer — the
+  /// painters, the eraser's band, a probe reporting where a bar landed — because two multiplies at
+  /// two call sites is how the two come to differ.
+  double get drawnScale => scale * zoom;
+
+  /// The extent this page covers on the surface at this view.
+  ///
+  /// At [zoom] 1 this is exactly the surface the page was laid out for, in both page modes, and
+  /// that identity is what makes the clamp in [withView] centre a page that exactly fits.
+  LayoutSize get drawnSize =>
+      LayoutSize(size.width * drawnScale, size.height * drawnScale);
 
   // PURPOSE: Turn a point on the surface the page is drawn on into the point in this page's own
   //          coordinates that lies under it. This is the inverse of the single transform the
@@ -477,17 +538,90 @@ class PageLayout {
   // INPUTS: surfacePoint — a position measured from the top-left of the rectangle the page is
   //         drawn into, in logical pixels. This is the coordinate a pointer event arrives in when
   //         the page fills its widget.
-  // OUTPUTS: The position in this page's engraved coordinates. Equal to [surfacePoint] when
-  //          [scale] is 1, so an ordinary page pays nothing; divided by [scale] otherwise. A
-  //          non-positive [scale] is not produced by the engine — [LayoutEngine] emits 1 or a
-  //          value at or above its legibility floor — so no clamp is applied here: a page a
-  //          caller built by hand with a meaningless scale yields a meaningless, visible result
-  //          rather than a plausible-looking wrong one.
-  // KEYWORDS: coordinate-transform, page-scale, fit, hit-testing, single-bridge, inverse
+  // OUTPUTS: The position in this page's engraved coordinates. Equal to [surfacePoint] when the
+  //          view is the identity, so an ordinary page pays nothing; otherwise the pan is removed
+  //          and the result divided by [drawnScale]. A non-positive [drawnScale] is not produced by
+  //          the engine — it emits 1 or a value at or above its legibility floor, and [zoom] is at
+  //          least 1 — so no clamp is applied here: a page a caller built by hand with a
+  //          meaningless scale yields a meaningless, visible result rather than a plausible-looking
+  //          wrong one.
+  // KEYWORDS: coordinate-transform, page-scale, view-zoom, view-pan, fit, hit-testing,
+  //           single-bridge, inverse, d34
   /// Returns the point of this page under [surfacePoint].
-  LayoutOffset pagePointOf(LayoutOffset surfacePoint) => scale == 1
-      ? surfacePoint
-      : LayoutOffset(surfacePoint.x / scale, surfacePoint.y / scale);
+  LayoutOffset pagePointOf(LayoutOffset surfacePoint) {
+    final double drawn = drawnScale;
+    if (drawn == 1 && pan == LayoutOffset.zero) {
+      return surfacePoint;
+    }
+    return LayoutOffset(
+      (surfacePoint.x - pan.x) / drawn,
+      (surfacePoint.y - pan.y) / drawn,
+    );
+  }
+
+  // PURPOSE: The forward half of [pagePointOf], which is what a report needs in order to say WHERE
+  //          a stored point is drawn: a probe prints the surface position of a stroke, and a
+  //          verification compares it against the point the pen touched.
+  // INPUTS: pagePoint — a position in this page's engraved coordinates.
+  // OUTPUTS: The surface position, `pagePoint * drawnScale + pan`. The exact inverse of
+  //          [pagePointOf], which is what makes "the mark was drawn where it was stored" a claim
+  //          that can be checked by composing the two.
+  // KEYWORDS: coordinate-transform, surface-point, report, forward, d34
+  /// Returns the surface position of [pagePoint] at this view.
+  LayoutOffset surfacePointOf(LayoutOffset pagePoint) => LayoutOffset(
+    pagePoint.x * drawnScale + pan.x,
+    pagePoint.y * drawnScale + pan.y,
+  );
+
+  // PURPOSE: Place the musician's view on this page and keep it on the surface, which is the ONE
+  //          place a zoom or a pan is turned into a page a painter or a hit test can use.
+  // INPUTS: zoom — the requested magnification, clamped into `[1, maxZoom]`. pan — the requested
+  //         offset in surface pixels, clamped so the drawn page always covers the surface.
+  // OUTPUTS: A page with the same engraving and the clamped view. The systems list is SHARED, not
+  //          copied: a view change re-describes where the page is drawn and does not re-engrave it,
+  //          which is what lets a two-finger gesture repaint without laying the chart out again.
+  //          WHY THE PAN IS CLAMPED AND NOT SIMPLY APPLIED. A pan the musician can drive past the
+  //          edge of the paper is a way to lose the chart and to be shown white space where the
+  //          music was; clamping means the four edges of the page are the four limits of the drag,
+  //          so the gesture always ends somewhere the music is. At [zoom] 1 the page is exactly the
+  //          surface, the only legal pan is zero, and the clamp therefore also makes a reset a
+  //          reset. A non-finite or non-positive zoom is treated as the identity rather than
+  //          propagated: the gesture arithmetic can produce one from a degenerate span and a page
+  //          drawn at NaN is invisible rather than wrong-looking.
+  // KEYWORDS: view-transform, zoom-clamp, pan-clamp, edges, no-lost-page, identity, d34
+  /// Returns this page with the view [zoom] and [pan], both clamped.
+  PageLayout withView({required double zoom, required LayoutOffset pan}) =>
+      _withView(
+        zoom: !zoom.isFinite || zoom <= 1
+            ? 1
+            : (zoom > maxZoom ? maxZoom : zoom),
+        pan: pan,
+      );
+
+  /// The unclamped-zoom half of [withView], so the clamp for the pan is written once.
+  PageLayout _withView({required double zoom, required LayoutOffset pan}) {
+    // The surface the page was engraved for: at zoom 1 the page covers it exactly, in both modes.
+    final double viewportX = size.width * scale;
+    final double viewportY = size.height * scale;
+    final double contentX = viewportX * zoom;
+    final double contentY = viewportY * zoom;
+    final LayoutOffset clamped = LayoutOffset(
+      contentX <= viewportX
+          ? (viewportX - contentX) / 2
+          : pan.x.clamp(viewportX - contentX, 0.0),
+      contentY <= viewportY
+          ? (viewportY - contentY) / 2
+          : pan.y.clamp(viewportY - contentY, 0.0),
+    );
+    return PageLayout(
+      index: index,
+      size: size,
+      systems: systems,
+      scale: scale,
+      zoom: zoom,
+      pan: clamped,
+    );
+  }
 
   @override
   bool operator ==(Object other) {
@@ -495,6 +629,8 @@ class PageLayout {
         other.index != index ||
         other.size != size ||
         other.scale != scale ||
+        other.zoom != zoom ||
+        other.pan != pan ||
         other.systems.length != systems.length) {
       return false;
     }
@@ -507,10 +643,13 @@ class PageLayout {
   }
 
   @override
-  int get hashCode => Object.hash(index, size, scale, Object.hashAll(systems));
+  int get hashCode =>
+      Object.hash(index, size, scale, zoom, pan, Object.hashAll(systems));
 
   @override
   String toString() =>
       'PageLayout($index, ${systems.length} system(s), ${bars.length} bar(s)'
-      '${scale == 1 ? '' : ', scale $scale'})';
+      '${scale == 1 ? '' : ', scale $scale'}'
+      '${zoom == 1 ? '' : ', zoom $zoom'}'
+      '${pan == LayoutOffset.zero ? '' : ', pan $pan'})';
 }

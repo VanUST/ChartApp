@@ -14,11 +14,15 @@
 //          musical position when the page is FITTED, when the key is transposed and after the file
 //          has been saved and read back.
 // INPUTS: A list of [ResolvedInkStroke], each already carrying the page position of its anchor; the
-//         page's scale; and the colours the two tools draw with.
+//         page's own scale; the musician's view (`pageZoom` and `pagePan`); and the colours the two
+//         tools draw with.
 // OUTPUTS: [paint] writes into the canvas and returns nothing. A stroke drawn beneath the page's
 //          clip is clipped away rather than bleeding into a neighbouring page of a `PageView`.
-// KEYWORDS: ink-renderer, custom-painter, anchor-local, page-scale, pressure, highlighter, pen,
-//           render-order
+//          The view is applied as ONE outer `translate` + `scale` before the page's own scale, so
+//          the ink and the music go through the same arithmetic and a zoomed page cannot slide the
+//          ink off the bar it was written on.
+// KEYWORDS: ink-renderer, custom-painter, anchor-local, page-scale, view-zoom, view-pan, pressure,
+//           highlighter, pen, render-order
 import 'package:chart_core/chart_core.dart';
 import 'package:flutter/rendering.dart';
 
@@ -51,13 +55,17 @@ class ResolvedInkStroke {
 class InkPainter extends CustomPainter {
   /// Creates a painter for the strokes that belong on one page.
   ///
-  /// [pageScale] must be the same `PageLayout.scale` the `ChartPainter` drawing this page was given,
-  /// because the two layers are positioned by the same transform and a mismatch would slide the ink
-  /// off the music by an amount proportional to the distance from the page's corner — the failure
-  /// that looks plausible in the middle of a page and obviously wrong at its edge.
+  /// [pageScale], [pageZoom] and [pagePan] must be the same three numbers the `ChartPainter`
+  /// drawing this page was given, because the two layers are positioned by the same transform and a
+  /// mismatch would slide the ink off the music by an amount proportional to the distance from the
+  /// page's corner — the failure that looks plausible in the middle of a page and obviously wrong at
+  /// its edge. They are passed separately rather than as a `PageLayout` because this painter needs
+  /// the transform and nothing else of the page.
   const InkPainter({
     required this.strokes,
     required this.pageScale,
+    this.pageZoom = 1,
+    this.pagePan = LayoutOffset.zero,
     this.penColor = const Color(0xFF102A43),
     this.highlighterColor = const Color(0x66FFC857),
   });
@@ -67,6 +75,12 @@ class InkPainter extends CustomPainter {
 
   /// The page's own scale, applied exactly as `ChartPainter` applies it.
   final double pageScale;
+
+  /// The musician's magnification, applied exactly as `ChartPainter` applies it.
+  final double pageZoom;
+
+  /// The musician's pan in surface logical pixels, applied exactly as `ChartPainter` applies it.
+  final LayoutOffset pagePan;
 
   /// The colour a pen stroke is drawn in when the stroke itself names none.
   final Color penColor;
@@ -98,8 +112,14 @@ class InkPainter extends CustomPainter {
     }
     canvas.save();
     canvas.clipRect(Offset.zero & size);
-    if (pageScale != 1) {
-      canvas.scale(pageScale, pageScale);
+    // THE VIEW GOES ON FIRST, so it composes with the page's own scale in the one order the inverse
+    // assumes: drawn = pagePoint * (pageScale * pageZoom) + pagePan. See `PageLayout.pagePointOf`.
+    if (pagePan != LayoutOffset.zero) {
+      canvas.translate(pagePan.x, pagePan.y);
+    }
+    final double drawn = pageScale * pageZoom;
+    if (drawn != 1) {
+      canvas.scale(drawn, drawn);
     }
     // The scratch paint is created once per frame and reused for every glyph, dot and segment. Its
     // colour, style and caps are set per STROKE and only its width per segment, so nothing a caller
@@ -197,14 +217,16 @@ class InkPainter extends CustomPainter {
   // PURPOSE: Report whether a new painter changes anything on screen, so a stroke committed to the
   //          document repaints the layer.
   // INPUTS: oldDelegate — the painter this one replaces.
-  // OUTPUTS: True when the stroke list, the page scale or either default colour differs. The list is
-  //          compared element by element because `List` has no value equality, and comparing
-  //          identity would miss a freshly built list holding the same strokes — which is the
-  //          ordinary case after a rebuild.
-  // KEYWORDS: should-repaint, element-comparison, rebuild, value-comparison
+  // OUTPUTS: True when the stroke list, the page scale, the view or either default colour differs.
+  //          The list is compared element by element because `List` has no value equality, and
+  //          comparing identity would miss a freshly built list holding the same strokes — which is
+  //          the ordinary case after a rebuild.
+  // KEYWORDS: should-repaint, element-comparison, rebuild, value-comparison, view-zoom, view-pan
   @override
   bool shouldRepaint(covariant InkPainter oldDelegate) =>
       oldDelegate.pageScale != pageScale ||
+      oldDelegate.pageZoom != pageZoom ||
+      oldDelegate.pagePan != pagePan ||
       oldDelegate.penColor != penColor ||
       oldDelegate.highlighterColor != highlighterColor ||
       !_sameStrokes(oldDelegate.strokes, strokes);

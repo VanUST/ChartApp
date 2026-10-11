@@ -397,9 +397,12 @@ LayoutOffset pagePointToAnchorLocal(
 // nib that drew it. A second transform for one relationship is the defect; a comment asserting the
 // two agree is what let it survive review.
 //
-// The transform exists in exactly one place: [PageLayout.pagePointOf], which divides. Capture (see
-// `InkStrokeAssembler`), the page hit test (`hitTestPage`) and the eraser (`hitTestInkErase`) all
-// call it, and the painter is its inverse through `canvas.scale(pageScale, pageScale)`. Do not add a
-// helper beside this one: route the caller to the layout instead. The one direction this file does
-// own is the translation between the page and the anchor's own corner, above and in
-// [inkPointToPage], because that is a subtraction and not a scale.
+// The transform exists in exactly one place: [PageLayout.pagePointOf], which removes the pan,
+// divides by the zoom and divides by the page scale — all three being the inverse of the one
+// transform the renderers apply (see `PageLayout` itself for why the musician's view lives on the
+// page rather than beside it). Capture (see `InkStrokeAssembler`), the page hit test
+// (`hitTestPage`) and the eraser (`hitTestInkErase`) all call it, and each painter is its inverse
+// through `canvas.translate(pan)` + `canvas.scale(drawnScale)`. Do not add a helper beside this
+// one: route the caller to the layout instead. The one direction this file does own is the
+// translation between the page and the anchor's own corner, above and in [inkPointToPage], because
+// that is a subtraction and not a scale.

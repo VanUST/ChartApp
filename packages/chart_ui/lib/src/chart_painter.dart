@@ -105,9 +105,10 @@ class ChartPainter extends CustomPainter {
   //         size when the viewer sizes the widget to the layout.
   // OUTPUTS: Nothing. Everything is drawn clipped to `size`, so a system the engine deliberately
   //          let overflow the page edge cannot bleed into the neighbouring page of a PageView. The
-  //          canvas is scaled by [PageLayout.scale] before the geometry is drawn, which is what
-  //          lets the same painter draw an ordinary page and a page the FIT mode shrank.
-  // KEYWORDS: paint, clipping, section-label, reading-order
+  //          canvas is scaled by [PageLayout.drawnScale] before the geometry is drawn and panned by
+  //          [PageLayout.pan], which is what lets the same painter draw an ordinary page, a page the
+  //          FIT mode shrank, and either of those under the musician's own zoom and pan.
+  // KEYWORDS: paint, clipping, section-label, reading-order, view-zoom, view-pan
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = backgroundColor);
@@ -116,7 +117,16 @@ class ChartPainter extends CustomPainter {
     // The page's geometry is in engraved coordinates. FIT produces a page engraved at a larger
     // virtual size and records the factor that brings it back onto this surface, so one scale here
     // keeps every rectangle, hit test and annotation anchor in a single coordinate system.
-    final double scale = page.scale;
+    //
+    // THE VIEW GOES ON FIRST, and it is the same transform `PageLayout.pagePointOf` inverts: the
+    // musician's pan is a translate, the musician's zoom multiplies the page's own scale, and the
+    // two together are `drawnScale`. It is applied HERE, in the chart painter, and not as a
+    // `Transform` widget around the stack, because the clip above must stay in surface coordinates
+    // — a zoomed page has to keep being clipped to the pane it is drawn in.
+    if (page.pan != LayoutOffset.zero) {
+      canvas.translate(page.pan.x, page.pan.y);
+    }
+    final double scale = page.drawnScale;
     if (scale != 1) {
       canvas.scale(scale, scale);
     }

@@ -26,7 +26,10 @@
 //          outcome the musician could not have predicted from the screen, and the failure this
 //          feature is most likely to have.
 // INPUTS: A [PageLayout], the document's strokes in render order, and a touch in SURFACE logical
-//         pixels — the space a pointer event arrives in, not the page's engraved coordinates.
+//         pixels — the space a pointer event arrives in, not the page's engraved coordinates. The
+//         page carries the whole bridge between the two, including the musician's own zoom and pan
+//         (see `PageLayout.pagePointOf`), so an eraser aimed at a zoomed page names the stroke it
+//         looks like it is aimed at.
 // OUTPUTS: An [InkEraseHit] naming the stroke, its position in the document list, the anchor origin
 //          it resolved to and the surface distance that decided it; null when no stroke is within
 //          the band. A stroke whose anchor does not resolve on this page is skipped rather than
@@ -195,7 +198,12 @@ InkEraseHit? hitTestInkErase({
   required LayoutOffset surfacePoint,
   double aimTolerance = InkEraseAim.tolerancePx,
 }) {
-  final double scale = page.scale;
+  // THE SCALE IS THE DRAWN ONE, NOT THE PAGE MODE'S. `drawnScale` is `page.scale * page.zoom`, so
+  // the band the eraser measures with is the band the renderer actually draws: the nib is stored in
+  // anchor-local pixels and the painter multiplies it by the same factor through `canvas.scale`.
+  // Using the page mode's scale alone would make a zoomed stroke harder to hit than it looks, which
+  // is the silent direction of failure this file's nib rule exists against.
+  final double scale = page.drawnScale;
   final LayoutOffset pagePoint = page.pagePointOf(surfacePoint);
   InkEraseHit? best;
   // The strict minimum is tracked separately from [best] so that the tie branch below can promote a

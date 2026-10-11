@@ -129,6 +129,14 @@
 
   "sceneModePages": "СТРАНИЦЫ",
 
+  "sceneCaptionZoom": "МАСШТАБ",
+
+  "zoomInTooltip": "Приблизить",
+
+  "zoomOutTooltip": "Отдалить",
+
+  "zoomResetTooltip": "Вернуться к целой странице",
+
   "sceneDeferredTooltip": "Стиль и повторы",
 
   "sceneDeferredStyleRow": "СТИЛЬ · {style}",

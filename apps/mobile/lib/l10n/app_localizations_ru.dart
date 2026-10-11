@@ -272,6 +272,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get sceneModePages => 'СТРАНИЦЫ';
 
   @override
+  String get sceneCaptionZoom => 'МАСШТАБ';
+
+  @override
+  String get zoomInTooltip => 'Приблизить';
+
+  @override
+  String get zoomOutTooltip => 'Отдалить';
+
+  @override
+  String get zoomResetTooltip => 'Вернуться к целой странице';
+
+  @override
   String get sceneDeferredTooltip => 'Стиль и повторы';
 
   @override

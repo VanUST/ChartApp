@@ -482,6 +482,30 @@ abstract class AppLocalizations {
   /// **'PAGES'**
   String get sceneModePages;
 
+  /// The scene bar's caption over the zoom control. The magnification itself is a multiplication sign and a number, which is notation and is not translated.
+  ///
+  /// In en, this message translates to:
+  /// **'ZOOM'**
+  String get sceneCaptionZoom;
+
+  /// The tooltip of the scene bar's button that magnifies the chart one step.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom in'**
+  String get zoomInTooltip;
+
+  /// The tooltip of the scene bar's button that shrinks the chart one step, without going below the page mode's own view.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom out'**
+  String get zoomOutTooltip;
+
+  /// The tooltip of the scene bar's middle zoom button, which returns the chart to the view its page mode gives it — the way back after a two-finger pan.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to the whole page'**
+  String get zoomResetTooltip;
+
   /// The tooltip of the narrow scene bar's control for the two deferred readings.
   ///
   /// In en, this message translates to:
