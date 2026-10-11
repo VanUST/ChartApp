@@ -104,13 +104,19 @@ abstract class AppLocalizations {
   /// **'ChartApp — iReal reader'**
   String get appTitle;
 
-  /// The button that opens the browser's file chooser for an iReal export.
+  /// The button and tooltip that opens the operating system's own file chooser, shown beside the path field on a desktop where a typed path is offered as well.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a file…'**
+  String get chooseFile;
+
+  /// The button that opens the platform's own file chooser for an iReal export, on a platform that offers no path field.
   ///
   /// In en, this message translates to:
   /// **'Open .html file'**
   String get openHtmlFile;
 
-  /// The label of the text field holding the path to an iReal export.
+  /// The label of the text field holding the path to an iReal export. Shown on a desktop only.
   ///
   /// In en, this message translates to:
   /// **'iReal .html file'**
@@ -122,11 +128,17 @@ abstract class AppLocalizations {
   /// **'Load'**
   String get load;
 
-  /// The empty state on a platform where a path names the file.
+  /// The empty state on a desktop, where the export can be named by a typed path or picked in the system chooser.
   ///
   /// In en, this message translates to:
-  /// **'Load an iReal .html file to see its songs.\nDefault: {path}'**
-  String promptFilePath(String path);
+  /// **'Open an iReal .html file exported from iReal Pro.\nType its path, or choose it with the button above.'**
+  String get promptNativePath;
+
+  /// The empty state on a hand-held, where the system's own file chooser is the only way to the export and no path can be typed.
+  ///
+  /// In en, this message translates to:
+  /// **'Open an iReal .html file exported from iReal Pro.\nThe file stays on this device.'**
+  String get promptNativeChooser;
 
   /// The empty state in a browser, where no path exists.
   ///
@@ -680,6 +692,12 @@ abstract class AppLocalizations {
   /// **'Opened \"{title}\" · {operations}.'**
   String chartFileOpened(String title, String operations);
 
+  /// The tail of a file dialog's success line where the platform's own save dialog chose the destination and will ask again next time.
+  ///
+  /// In en, this message translates to:
+  /// **'Each Save asks where to put the file.'**
+  String get saveModeChosenLocation;
+
   /// The tail of a file dialog's success line where the browser can overwrite the file it already has a handle on.
   ///
   /// In en, this message translates to:
@@ -691,6 +709,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This browser cannot update a file in place, so each Save downloads a NEW copy.'**
   String get saveModeDownload;
+
+  /// The `.chart` dialog's up-front promise on a hand-held, where a save must go through the operating system's save dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'This device has no file path you can type, so Save opens the system\'s own file chooser, where you pick the folder and the name.'**
+  String get chartFileSaveHintChosenLocation;
 
   /// The `.chart` dialog's up-front promise on a browser with the File System Access API.
   ///
@@ -761,6 +785,12 @@ abstract class AppLocalizations {
     String entries,
     String operations,
   );
+
+  /// The `.setlist` dialog's up-front promise on a hand-held, where a save must go through the operating system's save dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'This device has no file path you can type, so Save opens the system\'s own file chooser, where you pick the folder and the name.'**
+  String get setlistFileSaveHintChosenLocation;
 
   /// The `.setlist` dialog's up-front promise on a browser with the File System Access API.
   ///

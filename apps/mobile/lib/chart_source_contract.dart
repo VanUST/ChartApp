@@ -20,9 +20,19 @@
 enum ChartSaveMode {
   /// The reader names a file by a path and a save replaces that path's contents.
   ///
-  /// This is a platform with a filesystem: the desktop and mobile builds, through
-  /// `chart_source_io.dart`. Saving twice writes the same file twice.
+  /// This is a DESKTOP with a filesystem: the reader may type a path and the process may write it,
+  /// through `chart_source_io.dart`. Saving twice writes the same file twice.
   namedPath,
+
+  /// The platform's own save dialog chooses the destination, and the suggested name is all this
+  /// application can say about it beforehand.
+  ///
+  /// This is ANDROID and iOS, where a save cannot be a path: Android answers with a `content://`
+  /// URI that only the system's own document API may write, and a reader has no path to type. The
+  /// reader picks the folder and the name in the system dialogs, so a second save asks again rather
+  /// than updating the file the first one wrote — the honest promise, and a different one from
+  /// [namedPath].
+  chosenLocation,
 
   /// The browser can re-write a file the reader has already chosen, through the File System Access
   /// API, so a second save updates the same file in place.

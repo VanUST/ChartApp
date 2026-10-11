@@ -13,6 +13,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'ChartApp — iReal reader';
 
   @override
+  String get chooseFile => 'Choose a file…';
+
+  @override
   String get openHtmlFile => 'Open .html file';
 
   @override
@@ -22,9 +25,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get load => 'Load';
 
   @override
-  String promptFilePath(String path) {
-    return 'Load an iReal .html file to see its songs.\nDefault: $path';
-  }
+  String get promptNativePath =>
+      'Open an iReal .html file exported from iReal Pro.\nType its path, or choose it with the button above.';
+
+  @override
+  String get promptNativeChooser =>
+      'Open an iReal .html file exported from iReal Pro.\nThe file stays on this device.';
 
   @override
   String get promptWeb =>
@@ -432,12 +438,19 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get saveModeChosenLocation => 'Each Save asks where to put the file.';
+
+  @override
   String get saveModeRewriteInPlace =>
       'This browser re-writes that file in place, so the next Save updates it.';
 
   @override
   String get saveModeDownload =>
       'This browser cannot update a file in place, so each Save downloads a NEW copy.';
+
+  @override
+  String get chartFileSaveHintChosenLocation =>
+      'This device has no file path you can type, so Save opens the system\'s own file chooser, where you pick the folder and the name.';
 
   @override
   String get chartFileSaveHintRewriteInPlace =>
@@ -484,6 +497,10 @@ class AppLocalizationsEn extends AppLocalizations {
   ) {
     return 'Saved $bytes as $path · $entries · $operations.';
   }
+
+  @override
+  String get setlistFileSaveHintChosenLocation =>
+      'This device has no file path you can type, so Save opens the system\'s own file chooser, where you pick the folder and the name.';
 
   @override
   String get setlistFileSaveHintRewriteInPlace =>

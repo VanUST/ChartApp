@@ -1,27 +1,38 @@
-// PURPOSE: Name the things about saving and opening a container that differ between a browser and a
-//          platform with a filesystem — where the bytes come from and where they go, and what a save
-//          does to a file that already exists — and let the viewer stay unaware of it. This is the
-//          second half of the same composition point `ireal_source.dart` is: it supplies functions
-//          and answers about the platform, with the same names and a different implementation per
-//          platform.
+// PURPOSE: Name the things about saving and opening a container that differ between a browser, a
+//          desktop and a hand-held — where the bytes come from and where they go, what a save does
+//          to a file that already exists, and whether a reference is a path at all — and let the
+//          viewer stay unaware of it. This is the second half of the same composition point
+//          `ireal_source.dart` is: it supplies functions and answers about the platform, with the
+//          same names and a different implementation per platform.
 // INPUTS: None. The implementation is chosen at compile time by the conditional export below.
 // OUTPUTS: `chartSourceIsFilePath`, `chartSourceSaveMode`, and a save/open pair for each container
 //          — `saveChartFile`/`loadChartFile` for a chart and `saveSetlistFile`/`loadSetlistFile`
-//          for a programme — each with the same name and the same meaning on both platforms and a
-//          different answer on each:
+//          for a programme — each with the same name and the same meaning on every platform:
 //
-//            | Symbol                   | Desktop / mobile                 | Browser
-//            |--------------------------|----------------------------------|--------------------------------
-//            | `chartSourceIsFilePath`  | true                             | false
-//            | `chartSourceSaveMode()`  | namedPath                        | rewriteInPlace, else download
-//            | `save*File(name)`        | writes the file at that path     | re-writes the chosen file, else downloads
-//            | `load*File(path)`        | reads the file at that path      | opens the browser's chooser
+//            | Symbol                   | Desktop            | Android / iOS          | Browser
+//            |--------------------------|--------------------|------------------------|-------------------
+//            | `chartSourceIsFilePath`  | true               | false                  | false
+//            | `chartSourceSaveMode()`  | namedPath          | chosenLocation         | rewriteInPlace,
+//            |                          |                    |                        | else download
+//            | `save*File(ref)`         | writes the file at | asks the system's own  | re-writes the
+//            |                          | that path          | save dialog, names     | chosen file,
+//            |                          |                    | `ref` as the proposal  | else downloads
+//            | `load*File(ref)`         | reads the file at  | opens the system's     | opens the
+//            |                          | that path          | chooser; `ref` is a    | browser's chooser
+//            |                          |                    | shape it cannot use    |
+//
+//          THE THREE COLUMNS ARE NOT TWO WITH A SUBDIVISION. A hand-held is not a desktop with an
+//          inconvenient filesystem: the reference there is a proposed NAME, exactly as it is in a
+//          browser, and the destination is chosen in the system's dialog, which is neither the path
+//          a desktop replaces nor the browser's download. `chartSourceSaveMode` is the one place
+//          that difference is decided, and the dialog renders the answer instead of guessing it.
 //
 //          `ChartSaveMode` and `ChartFileCancelledException`, the vocabulary both implementations
 //          must agree on, are re-exported from `chart_source_contract.dart` so a caller imports the
 //          seam once.
 // KEYWORDS: chart-file, setlist-file, save, open, conditional-export, platform-seam,
-//           composition-root, web, io, file-system-access, download, d20
+//           composition-root, web, io, file-system-access, download, d20, file-picker, android,
+//           scoped-storage
 //
 // WHY THE TWO DOCUMENTS SHARE ONE SEAM AND DO NOT GET ONE EACH. A `.chart` file and a `.setlist`
 // file are moved by the same two mechanisms — the filesystem, or the browser's handle-or-download

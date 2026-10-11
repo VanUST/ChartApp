@@ -381,13 +381,17 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       suffix.isEmpty ? base : '$base $suffix';
 
   // PURPOSE: Say, in the status line, what this platform's save did to the file that was already
-  //          there — which is not the same answer on Chrome, on Safari and on a desktop.
+  //          there — which is not the same answer on Chrome, on Safari, on a hand-held and on a
+  //          desktop.
   // INPUTS: None; [_mode] and the catalogue.
   // OUTPUTS: One sentence, or the empty string where the platform replaces the named file and there
   //          is nothing surprising to say.
-  // KEYWORDS: save-mode, status-suffix, in-place, download, named-path, localized
+  // KEYWORDS: save-mode, status-suffix, in-place, download, chosen-location, named-path, localized
   String _saveModeSuffix() => switch (_mode) {
     ChartSaveMode.namedPath => '',
+    ChartSaveMode.chosenLocation => AppLocalizations.of(
+      context,
+    ).saveModeChosenLocation,
     ChartSaveMode.rewriteInPlace => AppLocalizations.of(
       context,
     ).saveModeRewriteInPlace,
@@ -395,13 +399,19 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
   };
 
   // PURPOSE: Tell the reader, before they press Save, what this platform will do to a file that
-  //          already exists — the difference between replacing their file and handing them another.
+  //          already exists — the difference between replacing their file and asking them afresh
+  //          where the next one goes.
   // INPUTS: None; [_mode] and the catalogue.
-  // OUTPUTS: One sentence in a browser, and the empty string where a path addresses the file
-  //          directly, because there the promise is already what the field and the button say.
-  // KEYWORDS: save-hint, file-system-access, download, up-front-disclosure, save-mode, localized
+  // OUTPUTS: One sentence where a save has to ask the platform something, and the empty string where
+  //          a path addresses the file directly, because there the promise is already what the field
+  //          and the button say.
+  // KEYWORDS: save-hint, file-system-access, download, chosen-location, up-front-disclosure,
+  //           save-mode, localized
   String _saveHint() => switch (_mode) {
     ChartSaveMode.namedPath => '',
+    ChartSaveMode.chosenLocation => AppLocalizations.of(
+      context,
+    ).chartFileSaveHintChosenLocation,
     ChartSaveMode.rewriteInPlace => AppLocalizations.of(
       context,
     ).chartFileSaveHintRewriteInPlace,

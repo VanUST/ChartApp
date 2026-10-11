@@ -1,14 +1,17 @@
-// PURPOSE: Give the browser the two things [ireal_source] promises — a loader and an answer to
-//          "is a reference a filesystem path?" — where no filesystem and no path exist. The reader
-//          picks a file through the browser's own chooser and the browser hands its text over; the
-//          viewer is fed through the same `IRealLibraryLoader` it already injects, so it does not
-//          know which implementation it got.
+// PURPOSE: Give the browser the things [ireal_source] promises — a loader, an answer to "is a
+//          reference a filesystem path?", and the reference-chooser a desktop uses — where no
+//          filesystem and no path exist. The reader picks a file through the browser's own chooser
+//          and the browser hands its text over; the viewer is fed through the same
+//          `IRealLibraryLoader` it already injects, so it does not know which implementation it got.
 // INPUTS: A reference string the loader ignores, plus the reader's choice in the browser's file
-//         chooser.
+//         chooser. [chooseIRealReference] takes nothing, because a page has nothing to offer it.
 // OUTPUTS: [iRealSourceIsFilePath] is false, [defaultIRealPath] is the empty string (there is no
 //          path to offer), and [loadIRealLibrary] answers with the library parsed from the chosen
-//          file. Throws a [FormatException] when the reader dismisses the chooser or the file
-//          holds no `irealb://` link, and whatever the DOM throws when the file cannot be read.
+//          file. [chooseIRealReference] always answers null: a page cannot hand a path back, and the
+//          viewer builds the control that calls it only where [iRealSourceIsFilePath] is true, so
+//          the browser never asks. Throws an [IRealFileCancelledException] when the reader dismisses
+//          the chooser, a [FormatException] when the chosen file holds no `irealb://` link, and
+//          whatever the DOM throws when the file cannot be read.
 // KEYWORDS: ireal, import, web, file-picker, js-interop, conditional-import, web-implementation
 //
 // WHY THE REFERENCE ARGUMENT IS IGNORED. The viewer's seam is `IRealLibraryLoader`,
@@ -31,6 +34,7 @@ import 'dart:async';
 import 'dart:js_interop';
 
 import 'ireal_library.dart';
+import 'ireal_source_contract.dart';
 
 /// No filesystem path to offer, because a browser has no path to give.
 ///
@@ -46,11 +50,32 @@ const String defaultIRealPath = '';
 /// browser.
 const bool iRealSourceIsFilePath = false;
 
+/// Whether this build runs as a page in a browser.
+///
+/// YES, HERE. It exists so the viewer can word the two sentences that are about where the
+/// application is running rather than about what it can do — the empty-state hint, whose browser
+/// wording is the only place a musician is told the file is never uploaded, and the settings sheet's
+/// note about where the language choice is kept — without inferring "a browser" from "no path",
+/// which stopped being the same thing when Android became a third platform with no path and no page.
+/// See the io half for the same constant.
+const bool iRealSourceIsBrowser = true;
+
+// PURPOSE: Answer the viewer's request for a reference the reader chose, which a browser cannot
+//          produce: a page is handed a file, never a path to one.
+// INPUTS: None.
+// OUTPUTS: Always null. It exists so that the one seam has the same shape on every platform, and it
+//          is never called on the web because the control that calls it is built only where
+//          [iRealSourceIsFilePath] is true — here, never.
+// KEYWORDS: reference-chooser, web, no-path, seam-shape
+/// Always null: a browser has no path it could hand back.
+Future<String?> chooseIRealReference() async => null;
+
 // PURPOSE: Read the export the reader picks in the browser's file chooser and hand back its songs,
 //          which is the only file access the viewer performs on this platform.
 // INPUTS: reference — ignored; see the library header for why the seam still takes it.
-// OUTPUTS: The parsed [IRealLibrary]. Throws a [FormatException] when the reader dismisses the
-//          chooser, when no file is present, or when the chosen file holds no `irealb://` link.
+// OUTPUTS: The parsed [IRealLibrary]. Throws an [IRealFileCancelledException] when the reader
+//          dismisses the chooser, when no file is present, or when the chosen file holds no
+//          `irealb://` link.
 // KEYWORDS: file-picker, click, user-gesture, js-interop, ireal-link, web-implementation
 /// Opens the browser's file chooser and loads the iReal library in the chosen file.
 Future<IRealLibrary> loadIRealLibrary(String reference) async {
@@ -84,15 +109,15 @@ Future<IRealLibrary> loadIRealLibrary(String reference) async {
     input.click();
     await settled.future;
     if (cancelled) {
-      throw const FormatException('No file was chosen.');
+      throw const IRealFileCancelledException('No file was chosen.');
     }
     final _FileList? files = input.files;
     if (files == null || files.length == 0) {
-      throw const FormatException('No file was chosen.');
+      throw const IRealFileCancelledException('No file was chosen.');
     }
     final _WebFile? file = files.item(0);
     if (file == null) {
-      throw const FormatException('No file was chosen.');
+      throw const IRealFileCancelledException('No file was chosen.');
     }
     final String contents = (await file.text().toDart).toDart;
     return parseIRealExport(contents, source: file.name);

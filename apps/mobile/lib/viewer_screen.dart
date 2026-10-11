@@ -7,9 +7,10 @@
 //          an ink mode turns on.
 // INPUTS: A reference the reader supplies, an [IRealLibraryLoader] that turns that reference into
 //         an [IRealLibrary], a starting reference, whether a reference is a filesystem path at all,
-//         and whether to load the starting reference on the first frame. The loader is injected so
-//         a widget test can pump this screen with a synthetic payload and never touch the
-//         filesystem, and so the web build can hand it a browser file chooser instead of a path.
+//         how the platform's own file chooser is asked for one, and whether to load the starting
+//         reference on the first frame. The loader is injected so a widget test can pump this screen
+//         with a synthetic payload and never touch the filesystem, and so the web build can hand it
+//         a browser file chooser instead of a path.
 // OUTPUTS: A screen with a source bar, a chart save/open bar, an ink switch, an eraser switch, undo
 //          and redo, a
 //          bars-and-sections switch, a song list, a scene bar and the selected song's page or pages,
@@ -55,11 +56,15 @@
 // `.chart` file seeds a session from the tail it carried. There is no path by which a chord reaches
 // the screen except through `EditSession`.
 //
-// WHAT CHANGES ON THE WEB, AND WHAT DOES NOT. Everything below the source bar is identical on
-// every platform, because nothing below it touches a file: the loader is the seam and it is the
-// same seam the widget tests use. Only the source bar differs — a path field where a path exists
-// and a file-picker button where the browser can only offer a choice — which is what
-// [sourceIsFilePath] selects. A screen that cannot name a file must not pretend to.
+// WHAT CHANGES PER PLATFORM, AND WHAT DOES NOT. Everything below the source bar is identical
+// everywhere, because nothing below it touches a file: the loader is the seam and it is the same seam
+// the widget tests use. Only the source bar differs, and it differs in one of two forms rather than
+// in one form per platform: a desktop gets the path field, the Load button and the chooser button,
+// and a hand-held and a browser each get the chooser alone, because a text field for a path that
+// addresses nothing would invite a musician to type their way to a file that cannot be reached. A
+// screen that cannot name a file must not pretend to. Which form a build gets is decided by
+// [IRealViewerScreen.sourceIsFilePath], and the wording of what the screen says — not just which
+// control it draws — follows the same fact.
 //
 // WHERE THE CHART FILE IS SAVED AND OPENED. [`ChartFileAction`] owns that, not this screen: it is
 // an app-bar action that opens a dialog holding the name field, the two buttons, a sentence saying
@@ -178,15 +183,15 @@ typedef IRealLibraryLoader = Future<IRealLibrary> Function(String reference);
 class IRealViewerScreen extends StatefulWidget {
   /// Creates the viewer.
   ///
-  /// [sourceIsFilePath] and the default of [autoLoad] both come from `ireal_source.dart`, so a
-  /// build on any target gets the affordance its platform can honour without the caller passing
-  /// anything.
+  /// [sourceIsFilePath] and [autoLoad] are left at their defaults on every target, so a build gets
+  /// the affordance its platform can honour without the caller passing anything.
   const IRealViewerScreen({
     super.key,
     this.loader = loadIRealLibrary,
     this.initialPath = defaultIRealPath,
-    this.autoLoad = iRealSourceIsFilePath,
-    this.sourceIsFilePath = iRealSourceIsFilePath,
+    this.autoLoad = true,
+    this.sourceIsFilePath,
+    this.chooseReference = chooseIRealReference,
     this.language = LanguageChoice.system,
     this.onLanguageChanged,
   });
@@ -196,23 +201,35 @@ class IRealViewerScreen extends StatefulWidget {
 
   /// The reference the source bar starts with.
   ///
-  /// A path where one exists, and the empty string in a browser, where there is no reference to
-  /// type and the bar shows no field to type it into.
+  /// A path where one exists, and the empty string everywhere else, where there is no reference to
+  /// type and the bar shows the platform's chooser instead.
   final String initialPath;
 
   /// Whether to load [initialPath] once, after the first frame.
   ///
-  /// True where [initialPath] is a path, so a launch shows a chart without a click. False in a
-  /// browser: the source is a file chooser, and a browser refuses to open one outside a user
-  /// gesture, so a load on the first frame would be refused rather than deferred. A test that
+  /// True by default, and it does nothing unless a caller supplied a reference: the reference a
+  /// platform has to be handed is one only a test or a desktop session can supply, and loading an
+  /// empty one used to raise a `FileSystemException` naming `path = ""` — the red banner an empty
+  /// default produced on a tablet. False in a browser and on a hand-held, where the source is a file
+  /// chooser and a browser additionally refuses to open one outside a user gesture; a test that
   /// wants to decide exactly when the loader runs passes false and presses the button itself.
   final bool autoLoad;
 
   /// Whether [initialPath] is a filesystem path the reader may type.
   ///
-  /// True selects the path field and the Load button; false selects a button that opens the
-  /// platform's own file chooser and tells the reader the file is read where it already is.
-  final bool sourceIsFilePath;
+  /// NULL MEANS "ASK THE PLATFORM", which is what every production build does; the field exists so
+  /// that a test can force either form of the bar. Read through [_IRealViewerScreenState.sourceIsFilePath],
+  /// never directly, because the two controls below have to agree about it.
+  final bool? sourceIsFilePath;
+
+  /// How a reference is obtained from the platform's own file chooser, where that is a useful
+  /// thing to offer.
+  ///
+  /// Defaults to the platform's implementation. It answers with the path the reader chose, or null
+  /// when they dismissed the dialog or when the platform has no path to hand back — on a hand-held
+  /// the chooser is reached through [loader] instead, because the chosen file cannot leave it as a
+  /// reference. See `chooseIRealReference`.
+  final Future<String?> Function() chooseReference;
 
   /// The language choice in force, so the settings sheet can show which row is ticked.
   ///
@@ -268,6 +285,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   static const double _songRailWidth = 260;
 
   late final TextEditingController _pathController;
+
+  /// Whether this platform offers a path field, read once so the bar's two controls cannot disagree.
+  ///
+  /// The injected [IRealViewerScreen.sourceIsFilePath] wins when a caller supplied one, which is what
+  /// lets a test force either form of the bar; every production build passes nothing and gets the
+  /// platform's own answer from `ireal_source.dart`, which is the answer to "may the reader type a
+  /// path and have it work?" — true on a desktop, false on Android, iOS and the web.
+  bool get sourceIsFilePath => widget.sourceIsFilePath ?? iRealSourceIsFilePath;
 
   /// The scroll position of the song list, kept across the drawer being closed and reopened.
   ///
@@ -802,13 +827,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     publishInkProbeState(line);
   }
 
-  // PURPOSE: Replace the shown library with the one the current path holds, or record why it could
-  //          not be read.
-  // INPUTS: None; the path comes from [_pathController].
+  // PURPOSE: Replace the shown library with the one the current reference holds, or record why it
+  //          could not be read.
+  // INPUTS: None; the reference comes from [_pathController], and is empty on every platform that
+  //         reaches its file through the chooser rather than through a typed path.
   // OUTPUTS: Nothing. Sets [_loading] around the read and either [_library] or [_error] afterwards.
   //          A result that arrives after the screen is gone is dropped rather than calling setState
-  //          on an unmounted state. A successful load clears every remembered transposition.
-  // KEYWORDS: load, error-handling, unmounted-guard, structured-log
+  //          on an unmounted state. A successful load clears every remembered transposition. A
+  //          chooser the reader dismissed is NOT an error and leaves the screen as it was: the
+  //          banner is for a failure, and changing one's mind is not one.
+  // KEYWORDS: load, error-handling, cancellation, unmounted-guard, structured-log
   Future<void> _load() async {
     final String path = _pathController.text.trim();
     setState(() {
@@ -848,6 +876,17 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         'playlist_chars=${library.playlistName.length} '
         'setlist_entries=${_setlist?.items.length ?? 0}',
       );
+    } on IRealFileCancelledException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      // A dismissed chooser is the reader's own action, so the screen returns to exactly what it was
+      // showing and no banner appears. The exception's message is the platform's description of what
+      // it saw and goes to the log; the interface words its own outcomes from the catalogue.
+      setState(() {
+        _loading = false;
+      });
+      debugPrint('viewer.load.cancelled reason="${error.message}"');
     } catch (error) {
       if (!mounted) {
         return;
@@ -1610,7 +1649,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // "there is no owner" from "the owner did nothing" without a second flag.
     onChanged: (LanguageChoice choice) =>
         widget.onLanguageChanged?.call(choice),
-    browserStorage: !widget.sourceIsFilePath,
+    // A preference that lives in the page is a fact about where this build RUNS, not about whether
+    // it offers a path field. Deriving it from the field put a tablet's language choice in the same
+    // sentence as Safari's seven-day storage policy, which is a claim about a browser the tablet is
+    // not. See `iRealSourceIsBrowser`.
+    browserStorage: iRealSourceIsBrowser,
   );
 
   // PURPOSE: Put the tools under the thumb on a phone, which is D11's own landing for a phone.
@@ -1863,20 +1906,24 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
 
   // PURPOSE: Give the reader the control that starts a load, in the form the platform can honour.
   // INPUTS: context — the build context.
-  // OUTPUTS: The bar widget. Where a path exists this is the path field and the Load button; in a
-  //          browser it is a single button that opens the file chooser, because a text field for a
-  //          path no browser can resolve would invite the reader to type something meaningless. The
-  //          button is disabled while a load is running, so two reads cannot race for the same
-  //          state.
-  // KEYWORDS: source-bar, path-field, load-button, file-picker, busy-guard, platform-affordance
+  // OUTPUTS: The bar widget. Where a typed path addresses the file — a desktop — the path field and
+  //          the Load button are shown, together with a chooser button that fills the field in for
+  //          the reader, because both ways in genuinely work there. Everywhere else the bar is a
+  //          single button that opens the platform's own file chooser: a text field for a path that
+  //          addresses nothing, which is the case on Android, on iOS and in a browser, would invite
+  //          the reader to type something meaningless. Every button is disabled while a load is
+  //          running, so two reads cannot race for the same state.
+  // KEYWORDS: source-bar, path-field, load-button, file-picker, busy-guard, platform-affordance,
+  //           chooser-button
   Widget _buildPathBar(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
-    if (!widget.sourceIsFilePath) {
+    if (!sourceIsFilePath) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
         child: Align(
           alignment: Alignment.centerLeft,
           child: FilledButton.icon(
+            key: const ValueKey<String>('viewer-open-file'),
             onPressed: _loading ? null : () => unawaited(_load()),
             icon: const Icon(Icons.folder_open),
             label: Text(l10n.openHtmlFile),
@@ -1890,6 +1937,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         children: <Widget>[
           Expanded(
             child: TextField(
+              key: const ValueKey<String>('viewer-path-field'),
               controller: _pathController,
               decoration: InputDecoration(
                 labelText: l10n.iRealHtmlFileLabel,
@@ -1900,14 +1948,46 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: _loading ? null : () => unawaited(_load()),
+          // A chooser beside the field rather than instead of it, and only here: a desktop is the
+          // one platform where typing a path is a real way to name a file, so offering the dialog as
+          // well costs nothing and saves the reader who does not want to type. It is not shown where
+          // the field is not, because there the single button above IS the chooser.
+          OutlinedButton.icon(
+            key: const ValueKey<String>('viewer-choose-file'),
+            onPressed: _loading ? null : () => unawaited(_chooseAndLoad()),
             icon: const Icon(Icons.folder_open),
+            label: Text(l10n.chooseFile),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            key: const ValueKey<String>('viewer-load-file'),
+            onPressed: _loading ? null : () => unawaited(_load()),
+            icon: const Icon(Icons.download),
             label: Text(l10n.load),
           ),
         ],
       ),
     );
+  }
+
+  // PURPOSE: Let a desktop reach a file through the platform's own chooser instead of making the
+  //          reader type its path, which is the second way in that only a desktop has.
+  // INPUTS: None; the reader's choice in the platform's own dialog.
+  // OUTPUTS: Nothing. Writes the chosen path into the field — so the reader can see which file is
+  //          loaded and can edit or re-use it — and then loads it through the ONE loading path,
+  //          [_load]. A null answer means the reader dismissed the dialog, on a platform that has no
+  //          path to hand back, or both: nothing is loaded and nothing is reported, because a
+  //          cancellation is not a fault.
+  // KEYWORDS: chooser, reference, desktop-only, cancellation, one-loading-path
+  Future<void> _chooseAndLoad() async {
+    final String? reference = await widget.chooseReference();
+    if (!mounted || reference == null) {
+      debugPrint('viewer.choose.cancelled');
+      return;
+    }
+    _pathController.text = reference;
+    debugPrint('viewer.choose.ok path_chars=${reference.length}');
+    await _load();
   }
 
   // PURPOSE: Show why a load failed, in the same window rather than only on a console the reader
@@ -1943,11 +2023,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final IRealLibrary? library = _library;
     if (library == null) {
-      // The prompt names the platform's own way in, because the alternative — telling a browser
-      // reader to type a Windows path — is the one instruction they cannot follow.
-      final String prompt = widget.sourceIsFilePath
-          ? l10n.promptFilePath(defaultIRealPath)
-          : l10n.promptWeb;
+      // THREE PLATFORMS, THREE SENTENCES, and none of them instructs a reader to do something their
+      // platform cannot. A desktop may type a path OR choose one; a hand-held can only choose; a
+      // browser can only choose and is the one place a musician is told the file is never uploaded.
+      // The browser wording is selected by WHAT THIS BUILD IS and not by "there is no path field",
+      // because Android has no path field either and is not a page — the coupling that made the
+      // tablet's empty state talk about a browser.
+      final String prompt = sourceIsFilePath
+          ? l10n.promptNativePath
+          : (iRealSourceIsBrowser ? l10n.promptWeb : l10n.promptNativeChooser);
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

@@ -13,6 +13,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get appTitle => 'ChartApp — читалка iReal';
 
   @override
+  String get chooseFile => 'Выбрать файл…';
+
+  @override
   String get openHtmlFile => 'Открыть файл .html';
 
   @override
@@ -22,9 +25,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get load => 'Загрузить';
 
   @override
-  String promptFilePath(String path) {
-    return 'Загрузите файл iReal .html, чтобы увидеть его песни.\nПо умолчанию: $path';
-  }
+  String get promptNativePath =>
+      'Откройте файл .html, экспортированный из iReal Pro.\nВведите путь или выберите файл кнопкой выше.';
+
+  @override
+  String get promptNativeChooser =>
+      'Откройте файл .html, экспортированный из iReal Pro.\nФайл остаётся на этом устройстве.';
 
   @override
   String get promptWeb =>
@@ -454,12 +460,20 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get saveModeChosenLocation =>
+      'Каждое сохранение спрашивает, куда положить файл.';
+
+  @override
   String get saveModeRewriteInPlace =>
       'Этот браузер перезаписывает тот файл на месте, поэтому следующее «Сохранить» обновит его.';
 
   @override
   String get saveModeDownload =>
       'Этот браузер не может обновить файл на месте, поэтому каждое «Сохранить» скачивает НОВУЮ копию.';
+
+  @override
+  String get chartFileSaveHintChosenLocation =>
+      'На этом устройстве нельзя ввести путь к файлу, поэтому «Сохранить» открывает системный выбор файла: папку и имя вы выбираете там.';
 
   @override
   String get chartFileSaveHintRewriteInPlace =>
@@ -507,6 +521,10 @@ class AppLocalizationsRu extends AppLocalizations {
   ) {
     return 'Сохранено $bytes как $path · $entries · $operations.';
   }
+
+  @override
+  String get setlistFileSaveHintChosenLocation =>
+      'На этом устройстве нельзя ввести путь к файлу, поэтому «Сохранить» открывает системный выбор файла: папку и имя вы выбираете там.';
 
   @override
   String get setlistFileSaveHintRewriteInPlace =>

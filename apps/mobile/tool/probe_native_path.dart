@@ -1,8 +1,9 @@
 // PURPOSE: Produce the strings a musician READS on the native code path, on stdout, so "the native
 //          half has never been looked at" becomes a printed list instead of a claim. It renders the
 //          real dialogs the viewer opens — the `.chart` plate, the `.setlist` plate and the
-//          programme sheet — under the io implementation of the conditional import, and prints the
-//          field label, the buttons and every status sentence in Russian and in English.
+//          programme sheet — AND the viewer's own source bar with its empty state, under the io
+//          implementation of the conditional import, and prints the field label, the buttons and
+//          every status sentence in Russian and in English.
 //
 //          WHY IT HAS TO BE A FLUTTER PROBE AND NOT A `dart run` ONE. The `tool/probe_*_seam.dart`
 //          probes exercise the io FUNCTIONS without Flutter, which is what they are for; the strings
@@ -23,8 +24,11 @@
 // INPUTS: None. Every song is synthetic, so nothing is read from the owner's machine.
 // OUTPUTS: `probe.*` lines on stdout: the platform constants, and, per locale, every string each
 //          dialog shows and every status sentence it reaches — including the save status, the
-//          empty-path refusal and the opened-document status. The temporary files are removed
-//          before the probe returns.
+//          empty-path refusal and the opened-document status — plus the viewer's source bar and empty
+//          state with which of its three controls are present. The temporary files are removed
+//          before the probe returns. The probe runs on the VM, so the form it prints is the DESKTOP
+//          one (`iRealSourceIsFilePath == true`); the hand-held form is the same widgets with the
+//          chooser alone, and is observed on the device rather than here.
 // KEYWORDS: probe, native-path, io-implementation, chart-file, setlist-file, localization,
 //           russian, english, status-line, evidence
 import 'dart:io';
@@ -37,6 +41,7 @@ import 'package:chartapp/ireal_source.dart';
 import 'package:chartapp/l10n/app_localizations.dart';
 import 'package:chartapp/setlist_file_bar.dart';
 import 'package:chartapp/setlist_sheet.dart';
+import 'package:chartapp/viewer_screen.dart';
 // Flutter's widget-identity `Key` would collide with the musical Key this file names.
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
@@ -149,6 +154,9 @@ void main() {
       'probe.constants iRealSourceIsFilePath=$iRealSourceIsFilePath',
     );
     stdout.writeln(
+      'probe.constants iRealSourceIsBrowser=$iRealSourceIsBrowser',
+    );
+    stdout.writeln(
       'probe.constants defaultIRealPath_exists='
       '${File(defaultIRealPath).existsSync()}',
     );
@@ -176,10 +184,51 @@ void main() {
       await _setlistDialog(tester, locale, setlistPath);
       await _untitledFileName(tester, locale);
       await _programmeSheet(tester, locale);
+      await _viewerSourceBar(tester, locale);
     }
 
     stdout.writeln('probe.done');
   });
+}
+
+/// Renders the viewer's OWN source bar and empty state, which is the screen the tablet defect was
+/// about: it is where a musician decides how to reach their file, and where the two forms of the bar
+/// are chosen. Nothing is loaded and `autoLoad` is false, so the loader below is never called and
+/// the empty state is exactly what a first launch shows.
+Future<void> _viewerSourceBar(WidgetTester tester, Locale locale) async {
+  // Torn down first for the same reason `_pumpApp` does it: the dialogs the previous sections left
+  // open would otherwise survive the re-pump and their modal barriers would swallow every tap.
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pumpAndSettle();
+  await tester.pumpWidget(
+    MaterialApp(
+      locale: locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: IRealViewerScreen(
+        loader: (String reference) async =>
+            const IRealLibrary(playlistName: '', songs: <IRealSong>[]),
+        initialPath: '',
+        autoLoad: false,
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+
+  stdout.writeln('probe.viewer.locale=${locale.languageCode}');
+  stdout.writeln(
+    'probe.viewer.path_field='
+    '${find.byKey(const ValueKey<String>('viewer-path-field')).evaluate().isNotEmpty}',
+  );
+  stdout.writeln(
+    'probe.viewer.choose_button='
+    '${find.byKey(const ValueKey<String>('viewer-choose-file')).evaluate().isNotEmpty}',
+  );
+  stdout.writeln(
+    'probe.viewer.open_button='
+    '${find.byKey(const ValueKey<String>('viewer-open-file')).evaluate().isNotEmpty}',
+  );
+  _printTexts('viewer.${locale.languageCode}', _texts(tester));
 }
 
 /// Renders the `.chart` dialog and drives Save, an empty-path Open and a real-file Open.

@@ -50,8 +50,10 @@ class ChartApp extends StatefulWidget {
   /// Creates the application root.
   ///
   /// [loader] and [initialPath] are injected so a widget test can boot the real shell against a
-  /// synthetic library; the defaults are the reader's own file on a platform with a filesystem and
-  /// the browser's file chooser in a browser. [settings] is injected so a test never reads or
+  /// synthetic library; the defaults read whichever file the reader names — through a typed path
+  /// where that addresses one, and through the platform's own chooser everywhere else, because
+  /// `ireal_source.dart` supplies the implementation and `defaultIRealPath` is empty so that the
+  /// application asks instead of guessing. [settings] is injected so a test never reads or
   /// writes the machine's real preference file; the default keeps nothing past the process.
   const ChartApp({
     super.key,

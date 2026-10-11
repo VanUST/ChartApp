@@ -26,6 +26,28 @@ dependencies:
   chart_core: any
   chart_ui: any
   cupertino_icons: ^1.0.8
+  # WHY THIS ONE, AND WHAT IT COSTS. The application cannot perform its primary function on the
+  # owner's tablet without a native file chooser: Android scoped storage makes another app's
+  # `Documents`/`Downloads` unreadable, the manifest declares no storage permission, and the
+  # absolute path of one's own document is not something a musician knows. `file_selector` is the
+  # Flutter team's own federated plugin, in the same `flutter/packages` repository as
+  # `flutter_localizations`, and it is the canonical route to each platform's own file dialog:
+  # `ACTION_OPEN_DOCUMENT` on Android, `IFileDialog` on Windows, the portal/GTK dialog on Linux,
+  # from one Dart API. Reimplementing that per platform would be a hand-written channel repeated
+  # three times and maintained here for ever.
+  #
+  # The cost, named rather than implied: the umbrella depends on one endorsed implementation per
+  # platform, so the WEB bundle gains `file_selector_web` in its generated plugin registrant even
+  # though no web code path calls it, and the APK gains the plugin's Kotlin and its registrant
+  # entry. Both numbers are measured and recorded in `docs/sdd.md` A55.
+  #
+  # WHAT IT DELIBERATELY DOES NOT DO. `getSaveLocation` is documented unsupported on Android and
+  # iOS (its README's feature table; flutter/flutter#168318, where a maintainer confirms the Android
+  # answer is a `content://` URI that `dart:io` cannot write). Saving a `.chart` or a `.setlist` on
+  # Android therefore goes through this application's own `ACTION_CREATE_DOCUMENT` channel — see
+  # `android/app/src/main/kotlin/com/chartapp/chartapp/MainActivity.kt` — instead of a second
+  # dependency.
+  file_selector: ^1.0.3
   flutter:
     sdk: flutter
   # WHY THESE TWO, AND WHAT THEY COST. The interface is switchable between English and Russian at

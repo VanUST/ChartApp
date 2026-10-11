@@ -7,20 +7,23 @@
     "placeholders": {}
   },
 
+  "chooseFile": "Choose a file…",
+  "@chooseFile": { "description": "The button and tooltip that opens the operating system's own file chooser, shown beside the path field on a desktop where a typed path is offered as well." },
+
   "openHtmlFile": "Open .html file",
-  "@openHtmlFile": { "description": "The button that opens the browser's file chooser for an iReal export." },
+  "@openHtmlFile": { "description": "The button that opens the platform's own file chooser for an iReal export, on a platform that offers no path field." },
 
   "iRealHtmlFileLabel": "iReal .html file",
-  "@iRealHtmlFileLabel": { "description": "The label of the text field holding the path to an iReal export." },
+  "@iRealHtmlFileLabel": { "description": "The label of the text field holding the path to an iReal export. Shown on a desktop only." },
 
   "load": "Load",
   "@load": { "description": "The button that loads the file named in the path field." },
 
-  "promptFilePath": "Load an iReal .html file to see its songs.\nDefault: {path}",
-  "@promptFilePath": {
-    "description": "The empty state on a platform where a path names the file.",
-    "placeholders": { "path": { "type": "String" } }
-  },
+  "promptNativePath": "Open an iReal .html file exported from iReal Pro.\nType its path, or choose it with the button above.",
+  "@promptNativePath": { "description": "The empty state on a desktop, where the export can be named by a typed path or picked in the system chooser." },
+
+  "promptNativeChooser": "Open an iReal .html file exported from iReal Pro.\nThe file stays on this device.",
+  "@promptNativeChooser": { "description": "The empty state on a hand-held, where the system's own file chooser is the only way to the export and no path can be typed." },
 
   "promptWeb": "Open an iReal .html file exported from iReal Pro.\nIt is read in the browser and is not uploaded.",
   "@promptWeb": { "description": "The empty state in a browser, where no path exists." },
@@ -394,11 +397,17 @@
     "placeholders": { "title": { "type": "String" }, "operations": { "type": "String" } }
   },
 
+  "saveModeChosenLocation": "Each Save asks where to put the file.",
+  "@saveModeChosenLocation": { "description": "The tail of a file dialog's success line where the platform's own save dialog chose the destination and will ask again next time." },
+
   "saveModeRewriteInPlace": "This browser re-writes that file in place, so the next Save updates it.",
   "@saveModeRewriteInPlace": { "description": "The tail of a file dialog's success line where the browser can overwrite the file it already has a handle on." },
 
   "saveModeDownload": "This browser cannot update a file in place, so each Save downloads a NEW copy.",
   "@saveModeDownload": { "description": "The tail of a file dialog's success line where every save produces a fresh download." },
+
+  "chartFileSaveHintChosenLocation": "This device has no file path you can type, so Save opens the system's own file chooser, where you pick the folder and the name.",
+  "@chartFileSaveHintChosenLocation": { "description": "The `.chart` dialog's up-front promise on a hand-held, where a save must go through the operating system's save dialog." },
 
   "chartFileSaveHintRewriteInPlace": "This browser can re-write a chart file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.",
   "@chartFileSaveHintRewriteInPlace": { "description": "The `.chart` dialog's up-front promise on a browser with the File System Access API." },
@@ -435,6 +444,9 @@
     "description": "The `.setlist` dialog's success line in a browser.",
     "placeholders": { "bytes": { "type": "String" }, "path": { "type": "String" }, "entries": { "type": "String" }, "operations": { "type": "String" } }
   },
+
+  "setlistFileSaveHintChosenLocation": "This device has no file path you can type, so Save opens the system's own file chooser, where you pick the folder and the name.",
+  "@setlistFileSaveHintChosenLocation": { "description": "The `.setlist` dialog's up-front promise on a hand-held, where a save must go through the operating system's save dialog." },
 
   "setlistFileSaveHintRewriteInPlace": "This browser can re-write a setlist file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.",
   "@setlistFileSaveHintRewriteInPlace": { "description": "The `.setlist` dialog's up-front promise on a browser with the File System Access API." },
