@@ -484,7 +484,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     inkInputCountersReader = () =>
         _activeInkLayer?.inputReport ?? const <String, Object?>{};
     pageGeometryReader = _pageGeometry;
-    if (widget.autoLoad) {
+    // ONLY WHEN THERE IS A PATH TO LOAD. `autoLoad` says this platform opens a file by path, which is
+    // true on Android and false in a browser; it does NOT say that a path was supplied. Loading an
+    // empty one raises a FileSystemException naming `path = ""`, so the application could open on a red
+    // error banner about a file nobody named — which is exactly what an empty default produced on a
+    // tablet. The default is empty now, and this is the other half of that fix: a platform that loads
+    // by path still has to be HANDED one.
+    if (widget.autoLoad && widget.initialPath.isNotEmpty) {
       // Deferred to after the first frame so the window paints before a file read is started.
       WidgetsBinding.instance.addPostFrameCallback((Duration _) {
         if (mounted) {

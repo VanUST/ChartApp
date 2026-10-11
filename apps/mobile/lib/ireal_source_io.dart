@@ -16,11 +16,14 @@ import 'ireal_library.dart';
 
 /// The path the viewer opens when the reader gives it nothing else.
 ///
-/// It is an absolute path on the owner's machine rather than a package asset because the file is
-/// outside this repository: the export belongs to the person reading it, not to the source tree.
-/// The browser build has no such path and exports the empty string from
-/// `ireal_source_web.dart` instead.
-const String defaultIRealPath = r'C:\Users\1\Downloads\Ракета Русское.html';
+/// **EMPTY, AND IT MUST STAY EMPTY.** This used to be an absolute path pointing into one developer's
+/// home directory, on the reasoning that the export belongs to the person reading it. That reasoning
+/// was right about the file and wrong about the machine: the path was compiled into the Android build
+/// and does not exist on a tablet, so the application opened on a red `FileSystemException` naming a
+/// directory that was never there — the first thing a musician would see. A default that names a file
+/// can only be correct on the machine it was written on. An empty default means the viewer asks
+/// instead of guessing. See `iRealSourceIsFilePath` for how the reader then names it.
+const String defaultIRealPath = '';
 
 /// Whether a reader can name an iReal export by a filesystem path on this platform.
 ///
