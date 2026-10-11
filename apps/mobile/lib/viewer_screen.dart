@@ -824,6 +824,42 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     };
   }
 
+  /// Whether the verification state was changed while the pen was down and is owed a publication.
+  ///
+  /// A flag rather than a direct write, because the write is the thing this class stopped doing on
+  /// the pen path: the state is published by the next frame that is built with no contact drawing,
+  /// and this is what tells that frame the work is there to do.
+  bool _inkPublishOwed = false;
+
+  // PURPOSE: Publish the verification state, but only from a frame in which no contact is drawing,
+  //          so that a cost proportional to the ink on the page is never paid on the thread that
+  //          reads the pen.
+  //
+  //          THE WORK IS MOVED AND NOT DROPPED, AND THIS METHOD IS THE WHOLE OF THAT CLAIM. The
+  //          publication is a one-way convenience for a tool inspecting the page; nothing in the
+  //          application reads it back, so no behaviour depends on when it happens — but a tool that
+  //          reads it after a stroke must still see the committed stroke, and it does: the lift
+  //          resumes the build that carries it, and the build calls this. What was removed from the
+  //          pen path is only the O(ink) serialisation that used to run inside a stroke, and the
+  //          interval that bounded it is gone with it.
+  // INPUTS: None. The owed flag is set by [_onPagePointerMove] while a contact is drawing, and the
+  //         ink layer is asked whether a contact still is.
+  // OUTPUTS: Nothing. Returns without publishing when no change is owed or a contact is still down,
+  //          which is what makes the call safe from every frame; otherwise publishes through
+  //          [_publishInkState] and charges the time to [_PenPathCost]. Note that the charge lands on
+  //          whichever stroke's report is open when the publication finally runs, so `publish_ms`
+  //          reads zero throughout a stroke by construction.
+  // KEYWORDS: verification-handoff, publish-when-idle, pen-starvation, latency, deferred-work
+  void publishInkStateWhenIdle() {
+    if (!_inkPublishOwed || (_activeInkLayer?.isDrawingInk ?? false)) {
+      return;
+    }
+    _inkPublishOwed = false;
+    final Stopwatch publishing = Stopwatch()..start();
+    _publishInkState();
+    _penCost.notePublish(publishing.elapsedMicroseconds);
+  }
+
   // PURPOSE: Publish the state, so a browser-driving tool that cannot call into Dart still has a
   //          copy of it, and so a log line records the moment it changed.
   // INPUTS: None.
@@ -1378,9 +1414,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final Widget screen = _buildScreen(context);
     // AFTER the tree is described, not before: the ink layer is created on the way down, by the pane
     // that needs it, so a publish that ran first would always read a layer that does not exist yet.
-    // The call is a no-op on every target without a browser, and a no-op here when the line matches
-    // the last one published.
-    _publishInkState();
+    // The call is a no-op on every target without a browser, a no-op here when no change is owed, and
+    // — since the pen path no longer publishes — a no-op while a contact is still drawing, which is
+    // what keeps an O(ink) serialisation off the thread that reads the pen.
+    publishInkStateWhenIdle();
     return screen;
   }
 
@@ -2459,9 +2496,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     page: page,
     child: Listener(
       // This listener does NOT repaint. The ink layer repaints itself through its own tick, and the
-      // only jobs left here are the throttled publication of the verification state and the pen
-      // path's cost accounting — see [_onPagePointerMove]. A move the layer did not take — a finger,
-      // or a pen with the mode off — therefore costs one comparison and nothing else.
+      // only jobs left here are the pen path's cost accounting and marking the verification state as
+      // owed — see [_onPagePointerMove]. A move the layer did not take — a finger, or a pen with the
+      // mode off — therefore costs one comparison and nothing else.
       onPointerMove: (PointerMoveEvent event) => _onPagePointerMove(),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -2473,8 +2510,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     ),
   );
 
-  // PURPOSE: Publish the verification state while a stroke is being drawn, throttled, and account
-  //          for what the pen path costs.
+  // PURPOSE: Account for what the pen path costs, and mark the verification state as owed, so that
+  //          the change is published by an idle frame instead of by the pen's own thread.
   //
   //          IT NO LONGER REBUILDS ANYTHING, AND THAT IS THE WHOLE OF THE LATENCY FIX. The live line
   //          is repainted by the ink layer's own tick (see [_layeredPage]); this listener is left
@@ -2485,19 +2522,35 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          each time — and the rebuild that carried it re-engraved the chart on 105 of the stroke's
   //          246 samples.
   //
-  //          WHY THE PUBLICATION IS THROTTLED RATHER THAN DROPPED. It is a one-way convenience for a
-  //          tool inspecting the page, and the state itself says so: `_inkProbeState` is built on
-  //          demand and `inkInputReport` is the live reader a verification should call. Four updates
-  //          a second keeps a browser-driven check useful at a fraction of the cost of one per
-  //          sample, which at the sample rate a working pen delivers was a hundred serialisations of
-  //          the whole document per second.
+  //          WHY THE PUBLICATION LEFT THIS METHOD ALTOGETHER RATHER THAN BEING MADE RARER. Throttling
+  //          it to four a second was this project's previous answer, and it was not enough: the cost
+  //          of one publication is proportional to the ink already on the page, so a rarer O(ink) job
+  //          is still an O(ink) job, and by the eighteenth stroke of a four-second-per-stroke run it
+  //          was 7 783 ms — 45 % of the run — spent inside a diagnostic on the thread that reads the
+  //          pen. A rate cannot bound a cost that grows with the document; only taking the work off
+  //          the path can.
   // INPUTS: None; the ink layer is asked whether a contact is drawing.
   // OUTPUTS: Nothing that a frame depends on. The cost counters are reset at the first sample of a
-  //          stroke and reported, throttled, for as long as it lasts; the verification state is
-  //          published at most once per [_inkPublishIntervalMs], and immediately when the number of
-  //          committed strokes changed — so a tool that reads the state after a stroke sees the
-  //          stroke even if the throttle would otherwise have skipped it.
-  // KEYWORDS: verification-handoff, throttled-publish, cost-measurement, no-rebuild, latency
+  //          stroke and reported, throttled, for as long as it lasts.
+  //
+  //          THE VERIFICATION STATE IS NOT PUBLISHED FROM HERE, AND THAT IS THE FIX FOR THE DEFECT
+  //          THIS METHOD USED TO CAUSE. Every publication serialises every stroke the document holds
+  //          in its canonical form and then parses that line back to validate it, so its cost is
+  //          proportional to the ink ALREADY ON THE PAGE — measured on the owner's tablet as 0.7 ms
+  //          for the first stroke of a session rising to 7 783 ms of `publish_ms` by the eighteenth,
+  //          which is 45 % of a 17 s run spent inside a diagnostic. It ran on the thread that reads
+  //          the pen, the platform's input pipeline backed up behind it, and the same fixed 0.4 s
+  //          gesture that carried 532 samples on a fresh page carried 4 by the time the page was
+  //          full. The instrument is `viewer.pen.cost` before and after, and the sample count in
+  //          `ink.stroke.commit`.
+  //
+  //          WHAT REPLACED IT. While a contact is drawing, this method only marks the publication as
+  //          owed and returns; the frame that follows the lift publishes it, because the lift
+  //          resumes the build that carries the committed stroke. A tool that reads the state after
+  //          a stroke therefore still sees the stroke, and it no longer reads it at the pen's
+  //          expense. See [publishInkStateWhenIdle] for why the work is moved and not dropped.
+  // KEYWORDS: verification-handoff, publish-when-idle, cost-measurement, no-rebuild, latency,
+  //           pen-starvation
   void _onPagePointerMove() {
     final InkCaptureLayer? layer = _activeInkLayer;
     if (!(layer?.isDrawingInk ?? false)) {
@@ -2509,38 +2562,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       _penCost.beginStroke();
     }
     _penCost.noteSample();
-    final int strokes = layer!.strokeCount;
-    final bool documentChanged = strokes != _publishedStrokeCount;
-    final DateTime now = DateTime.now();
-    if (documentChanged ||
-        now.difference(_lastInkPublish).inMilliseconds >=
-            _inkPublishIntervalMs) {
-      _lastInkPublish = now;
-      _publishedStrokeCount = strokes;
-      final Stopwatch publishing = Stopwatch()..start();
-      _publishInkState();
-      _penCost.notePublish(publishing.elapsedMicroseconds);
-    }
+    _inkPublishOwed = true;
     final String? report = _penCost.reportIfDue();
     if (report != null) {
       debugPrint(report);
     }
   }
-
-  /// How often the verification state may be re-published while the pen is down.
-  ///
-  /// MEASURED, NOT CHOSEN. One publication per pointer sample cost 7.06 ms of the UI thread on
-  /// average over one 246-sample stroke — 1 738 ms of a 2 882 ms stroke — because
-  /// `publishInkProbeState` validates what it was just told by parsing it back, so the whole
-  /// document is serialised twice per sample. Four publications a second is a fortieth of that and
-  /// still finer than any browser-driving check reads it.
-  static const int _inkPublishIntervalMs = 250;
-
-  /// When the verification state was last published, so the throttle has a base to measure from.
-  DateTime _lastInkPublish = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// How many strokes the document held when the verification state was last published.
-  int _publishedStrokeCount = 0;
 
   // PURPOSE: Run one chart engraving and record what it cost, so that "the page was re-laid-out on
   //          every pen sample" is a number in the log rather than an inference from the code.
@@ -2767,7 +2794,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       // and the app bar are both out of date. No selection is made — the bar under a stroke is not
       // what the musician asked for, and under the eraser not even a miss is a selection.
       setState(() {});
-      _publishInkState();
+      // The state changed under this contact, and the contact has now lifted, so this is the first
+      // moment at which publishing it cannot starve the pen. See [_onPagePointerMove].
+      publishInkStateWhenIdle();
       return;
     }
     _select(page, details.localPosition);
@@ -3514,7 +3543,17 @@ class _SelectionAction extends StatelessWidget {
 //          accumulated millisecond totals. A stroke that ends contributes no final line, so the
 //          last report of a stroke is partial: the sample count at its end is in the stroke's own
 //          `ink.stroke.commit` line, which is the number to compare across builds.
-// KEYWORDS: pen-latency, cost-measurement, layout-passes, structured-log, no-flood, ldd
+//
+//          WHAT `publish_ms` MEANS NOW, AND WHY A READER MUST NOT MISREAD IT AS A REGRESSION. It
+//          accumulates the cost of publications that a stroke OWED, and those publications now run
+//          after the pen has left the glass, so this number is zero for as long as the contact
+//          lasts and the publication is charged to the report of whichever stroke is open when it
+//          finally runs. Zero here therefore means "nothing on the pen path serialised anything",
+//          which is the property the number was introduced to establish; the total is still worth
+//          reading, because a total that grows with the document is still an O(ink) job, and the
+//          question of whether it can be made cheaper is left open rather than hidden.
+// KEYWORDS: pen-latency, cost-measurement, layout-passes, structured-log, no-flood, ldd,
+//           publish-when-idle
 class _PenPathCost {
   int _samples = 0;
   int _layoutPasses = 0;
