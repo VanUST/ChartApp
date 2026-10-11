@@ -79,7 +79,7 @@
     {
       "id": "generated-code-current",
       "command": "dart run melos run generate && git diff --exit-code",
-      "purpose": "CI's staleness check for the committed drift accessors: regenerate, then fail if the working tree changed. The `git diff --exit-code` half requires a git checkout and is run by the verify job of .github/workflows/ci.yml, not by a local audit.",
+      "purpose": "CI's staleness check for committed generated code: regenerate, then fail if the working tree changed. The `git diff --exit-code` half is run by the verify job of .github/workflows/ci.yml and NOT by a local audit, and the consequence is stronger than that sentence looks: **A LOCALLY GREEN `melos run verify` IS NOT EVIDENCE THAT CI WILL PASS.** This rule caught a real failure — adding `flutter_localizations` and `intl` to apps/mobile/pubspec.yaml updated the tracked WORKSPACE lock at the repository root, and leaving it uncommitted made CI regenerate it and see a difference, while every local gate was green. When a manifest changes, check `git status` for a lock file the change forgot, not just the package that changed.",
       "path": ".github/workflows/ci.yml"
     },
     {
