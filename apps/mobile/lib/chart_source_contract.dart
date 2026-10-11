@@ -45,13 +45,18 @@ enum ChartSaveMode {
 /// words on screen: a cancellation is the reader's own action and reporting it as an error would be
 /// telling them off for it. The io implementation never throws this — it takes a path and has no
 /// chooser to dismiss — so catching it is how a caller stays correct on both platforms.
+///
+/// WHAT [message] IS FOR, AND WHAT IT IS NOT. It is the implementing side's own description of what
+/// it saw, written for the log and for whoever is reading the seam; it is NOT the sentence the
+/// reader is shown. A file dialog words the outcome from its message catalogue, because the
+/// catalogue lives on the interface side of this boundary — this file is compiled into a runner
+/// that has no `BuildContext` and no `AppLocalizations` — and because the same dismissal has to be
+/// worded in whichever language the reader chose.
 class ChartFileCancelledException implements Exception {
-  /// Creates a cancellation carrying the sentence to show the reader.
-  ///
-  /// [message] is written as a complete sentence because it is displayed verbatim.
+  /// Creates a cancellation carrying a developer-facing description of what was dismissed.
   const ChartFileCancelledException(this.message);
 
-  /// What to tell the reader, phrased as an outcome rather than a fault.
+  /// What the platform saw, for the log. Never shown to the reader: the dialog words the outcome.
   final String message;
 
   @override

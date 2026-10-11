@@ -40,6 +40,11 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 
+import 'l10n/app_localizations.dart';
+// `localizedKeyName` is imported rather than re-derived here: the key badge, the song list, the
+// twelve-key grid and this sheet all have to name the same key with the same words, exactly as
+// `repeatSummary` is the one place the repeat summary is worded.
+import 'scene_bar.dart';
 import 'sheet_surface.dart';
 
 // PURPOSE: Open the chord palette for one cell and resolve when the musician is finished. The sheet
@@ -235,11 +240,12 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
 
   // PURPOSE: Describe the edited position the way the musician counts it, so the sheet says which
   //          cell is about to change and not only which chord.
-  // INPUTS: None.
+  // INPUTS: l10n — the message catalogue, which supplies the words `Bar` and `cell`. It is passed in
+  //         rather than read from a context because this is a getter and not a builder.
   // OUTPUTS: A one-line label such as `Bar 12 · cell 2`, numbered from one across the whole written
   //          chart, which is the same counting the viewer's selection line uses.
-  // KEYWORDS: label, one-based, bar-ordinal, musician-numbering
-  String get _positionLabel {
+  // KEYWORDS: label, one-based, bar-ordinal, musician-numbering, localized
+  String _positionLabel(AppLocalizations l10n) {
     int ordinal = 0;
     for (final Section section in widget.session.song.sections) {
       if (section.id == widget.sectionId) {
@@ -248,7 +254,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
       }
       ordinal += section.bars.length;
     }
-    return 'Bar $ordinal · cell ${widget.beat + 1}';
+    return l10n.palettePosition(ordinal, widget.beat + 1);
   }
 
   // PURPOSE: Render the chord a tap would write, in the key the chart is SHOWN in, using the same
@@ -294,38 +300,48 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
 
   // PURPOSE: Draw the sheet's header: the position being edited, the key the roots are spelled in,
   //          and the control that closes the sheet.
-  // INPUTS: None; the position and the key are the widget's own fields.
+  // INPUTS: None; the position and the key are the widget's own fields, and the words come from the
+  //         catalogue in the context this builder was given.
   // OUTPUTS: The header row.
-  // KEYWORDS: header, position-label, shown-key, done
-  Widget _buildHeader() => Row(
-    children: <Widget>[
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              _positionLabel,
-              key: const ValueKey<String>('chord-palette-position'),
-              style: const TextStyle(
-                color: sheetOnPanelColor,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
+  // KEYWORDS: header, position-label, shown-key, done, localized
+  Widget _buildHeader() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                _positionLabel(l10n),
+                key: const ValueKey<String>('chord-palette-position'),
+                style: const TextStyle(
+                  color: sheetOnPanelColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            Text(
-              'Chords in ${widget.shownKey}',
-              style: const TextStyle(color: sheetMutedColor, fontSize: 12),
-            ),
-          ],
+              Text(
+                // The key is named through the catalogue and not by `Key.toString()`, which is a
+                // diagnostic: a musician reading Russian needs the mode word in Russian, while the
+                // tonic letter stays the chart's own notation.
+                l10n.paletteChordsIn(localizedKeyName(l10n, widget.shownKey)),
+                style: const TextStyle(color: sheetMutedColor, fontSize: 12),
+              ),
+            ],
+          ),
         ),
-      ),
-      TextButton(
-        key: const ValueKey<String>('chord-palette-done'),
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Done', style: TextStyle(color: sheetAccentColor)),
-      ),
-    ],
-  );
+        TextButton(
+          key: const ValueKey<String>('chord-palette-done'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            l10n.done,
+            style: const TextStyle(color: sheetAccentColor),
+          ),
+        ),
+      ],
+    );
+  }
 
   // PURPOSE: Show the chord the next tap writes, large enough to read at arm's length, so the
   //          musician confirms a symbol rather than trusting that the buttons mean what they say.
@@ -333,34 +349,37 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   //         chosen. current — the chord in the cell, shown as a secondary line when one is there.
   // OUTPUTS: A two-line card: the preview, or a prompt to pick a root; beneath it, the chord the
   //          cell holds now, which is what makes the change legible before it is made.
-  // KEYWORDS: preview-card, current-chord, prompt, falsifiable-feedback
-  Widget _buildPreview(Chord? preview, BeatChord? current) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(
-      color: sheetCellColor,
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          preview == null ? 'Pick a root' : _render(preview),
-          key: const ValueKey<String>('chord-palette-preview'),
-          style: TextStyle(
-            color: preview == null ? sheetMutedColor : sheetAccentColor,
-            fontSize: 26,
-            fontWeight: FontWeight.w700,
+  // KEYWORDS: preview-card, current-chord, prompt, falsifiable-feedback, localized
+  Widget _buildPreview(Chord? preview, BeatChord? current) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: sheetCellColor,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            preview == null ? l10n.palettePickRoot : _render(preview),
+            key: const ValueKey<String>('chord-palette-preview'),
+            style: TextStyle(
+              color: preview == null ? sheetMutedColor : sheetAccentColor,
+              fontSize: 26,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        Text(
-          current == null
-              ? 'This cell is empty.'
-              : 'Now: ${_render(current.chord)}',
-          style: const TextStyle(color: sheetMutedColor, fontSize: 12),
-        ),
-      ],
-    ),
-  );
+          Text(
+            current == null
+                ? l10n.paletteCellEmpty
+                : l10n.paletteNow(_render(current.chord)),
+            style: const TextStyle(color: sheetMutedColor, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
 
   // PURPOSE: Draw the sticky quality row, one chip per quality the palette offers.
   // INPUTS: None.
@@ -412,7 +431,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   // PURPOSE: Offer the removal of the chord, in the same sheet rather than behind a second mode.
   // INPUTS: current — the cell's chord; the action is disabled when there is none.
   // OUTPUTS: A row holding one destructive-styled button.
-  // KEYWORDS: remove, destructive, disabled-when-empty, same-sheet
+  // KEYWORDS: remove, destructive, disabled-when-empty, same-sheet, localized
   Widget _buildRemoveRow(BeatChord? current) => Row(
     mainAxisAlignment: MainAxisAlignment.end,
     children: <Widget>[
@@ -420,7 +439,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
         key: const ValueKey<String>('chord-palette-remove'),
         onPressed: current == null ? null : _remove,
         icon: const Icon(Icons.backspace_outlined, size: 18),
-        label: const Text('Remove chord'),
+        label: Text(AppLocalizations.of(context).paletteRemoveChord),
         style: TextButton.styleFrom(
           foregroundColor: const Color(0xFFFF8A80),
           disabledForegroundColor: sheetMutedColor,

@@ -860,10 +860,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // OUTPUTS: A future that completes when the dialog is dismissed.
   // KEYWORDS: issues, transposition, dialog, diagnostics
   Future<void> _showIssues(BuildContext context, IRealSong entry) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     await showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text('Import issues — ${entry.title}'),
+        // The catalogue was carrying `issuesTitle` and `issueLine` and this dialog printed the words
+        // itself in English, so a Russian reader opening the issue list read English above a Russian
+        // shell. The title goes through `_titleFor` for the same reason every other name does: an
+        // empty title is the interface's `Без названия` and not the payload's blank.
+        title: Text(l10n.issuesTitle(_titleFor(entry, l10n))),
         content: SizedBox(
           width: 560,
           child: ListView(
@@ -872,7 +877,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               for (final IRealParseIssue issue in entry.issues)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Text('@${issue.offset}: ${issue.message}'),
+                  child: Text(l10n.issueLine(issue.offset, issue.message)),
                 ),
             ],
           ),
@@ -880,7 +885,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+            child: Text(l10n.close),
           ),
         ],
       ),

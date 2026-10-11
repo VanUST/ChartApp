@@ -31,6 +31,7 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 
+import 'l10n/app_localizations.dart';
 import 'sheet_surface.dart';
 
 /// The colour of a destructive action's label, matching the form sheet.
@@ -169,11 +170,10 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
   //          are equal and offering an undo for an edit nobody made.
   // KEYWORDS: apply, single-event, validation, nothing-changed, close-on-success
   void _save() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final int? tempo = int.tryParse(_tempoText.text.trim());
     if (tempo == null) {
-      setState(
-        () => _outcome = 'A tempo is a whole number of beats per minute.',
-      );
+      setState(() => _outcome = l10n.metadataTempoRefused);
       debugPrint(
         'viewer.song.info.refused tempo_text="${_tempoText.text}" '
         'reason=not-a-number',
@@ -193,9 +193,7 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
       'undo_depth=${widget.session.undoDepth}',
     );
     if (!applied) {
-      setState(
-        () => _outcome = 'Nothing changed, so nothing was written to the log.',
-      );
+      setState(() => _outcome = l10n.metadataNothingChanged);
       return;
     }
     widget.onChanged?.call();
@@ -204,6 +202,7 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Song song = widget.session.song;
     return SafeArea(
       child: SingleChildScrollView(
@@ -218,20 +217,20 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
               _field(
                 field: SongMetadataField.title,
                 controller: _title,
-                label: 'Title',
-                hint: 'The name a musician reads at the top of the chart.',
+                label: l10n.metadataTitle,
+                hint: l10n.metadataTitleHint,
               ),
               _field(
                 field: SongMetadataField.composer,
                 controller: _composer,
-                label: 'Composer',
-                hint: 'As written; the order is whatever the format stores.',
+                label: l10n.metadataComposer,
+                hint: l10n.metadataComposerHint,
               ),
               _field(
                 field: SongMetadataField.style,
                 controller: _style,
-                label: 'Style',
-                hint: 'Free text, such as Medium Swing or Ballad.',
+                label: l10n.metadataStyle,
+                hint: l10n.metadataStyleHint,
               ),
               _buildTempoField(),
               const SizedBox(height: 4),
@@ -246,36 +245,42 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
   // PURPOSE: Say whose facts these are, so the sheet cannot be mistaken for a page setting.
   // INPUTS: song — the song as it stands.
   // OUTPUTS: The header row with the tune's current name and the control that closes the sheet.
-  // KEYWORDS: header, identity, done
-  Widget _buildHeader(Song song) => Row(
-    children: <Widget>[
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text(
-              'Song info',
-              key: ValueKey<String>('song-info-heading'),
-              style: TextStyle(
-                color: sheetOnPanelColor,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
+  // KEYWORDS: header, identity, done, localized
+  Widget _buildHeader(Song song) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                l10n.songInfoSheetTitle,
+                key: const ValueKey<String>('song-info-heading'),
+                style: const TextStyle(
+                  color: sheetOnPanelColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            Text(
-              song.title.isEmpty ? 'Untitled' : song.title,
-              style: const TextStyle(color: sheetMutedColor, fontSize: 12),
-            ),
-          ],
+              Text(
+                song.title.isEmpty ? l10n.untitled : song.title,
+                style: const TextStyle(color: sheetMutedColor, fontSize: 12),
+              ),
+            ],
+          ),
         ),
-      ),
-      TextButton(
-        key: const ValueKey<String>('song-info-done'),
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Done', style: TextStyle(color: sheetAccentColor)),
-      ),
-    ],
-  );
+        TextButton(
+          key: const ValueKey<String>('song-info-done'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            l10n.done,
+            style: const TextStyle(color: sheetAccentColor),
+          ),
+        ),
+      ],
+    );
+  }
 
   // PURPOSE: One labelled text field of the metadata.
   // INPUTS: field — which of the four this is, used for the key and for the focus. controller —
@@ -319,8 +324,9 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
   // OUTPUTS: The field with its four buttons, an error line when the text is not a number, and a
   //          line saying what zero means, because "no tempo" is not an obvious value for an empty
   //          speed.
-  // KEYWORDS: tempo-field, stepper, validation, zero-means-unset
+  // KEYWORDS: tempo-field, stepper, validation, zero-means-unset, localized
   Widget _buildTempoField() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final bool readable = _tempoReadable;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -335,11 +341,11 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
             onChanged: (String _) => setState(() => _outcome = null),
             style: const TextStyle(color: sheetOnPanelColor, fontSize: 16),
             decoration: InputDecoration(
-              labelText: 'Tempo (BPM)',
+              labelText: l10n.metadataTempo,
               helperText: readable
-                  ? '0 means this chart sets no tempo.'
-                  : 'Whole beats per minute, or 0 for none.',
-              errorText: readable ? null : 'A tempo is a whole number.',
+                  ? l10n.metadataTempoHelperZero
+                  : l10n.metadataTempoHelperHint,
+              errorText: readable ? null : l10n.metadataTempoError,
               labelStyle: const TextStyle(color: sheetMutedColor),
               helperStyle: const TextStyle(
                 color: sheetMutedColor,
@@ -393,32 +399,35 @@ class _SongInfoSheetState extends State<SongInfoSheet> {
   //          that the four facts are one edit, or — when the tempo cannot be read — the reason, in
   //          the removal colour, because that line is a refusal. The button is disabled in exactly
   //          that last case.
-  // KEYWORDS: footer, save, disabled, status, outcome, honest-refusal
-  Widget _buildFooter() => Row(
-    children: <Widget>[
-      Expanded(
-        child: Text(
-          _outcome ??
-              (_tempoReadable
-                  ? 'One edit: the four facts above are written together.'
-                  : 'Fix the tempo before saving.'),
-          key: const ValueKey<String>('song-info-status'),
-          style: TextStyle(
-            color: _outcome != null
-                ? sheetAccentColor
-                : (_tempoReadable ? sheetMutedColor : _dangerColor),
-            fontSize: 12,
+  // KEYWORDS: footer, save, disabled, status, outcome, honest-refusal, localized
+  Widget _buildFooter() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            _outcome ??
+                (_tempoReadable
+                    ? l10n.metadataFooterHint
+                    : l10n.metadataFooterFixTempo),
+            key: const ValueKey<String>('song-info-status'),
+            style: TextStyle(
+              color: _outcome != null
+                  ? sheetAccentColor
+                  : (_tempoReadable ? sheetMutedColor : _dangerColor),
+              fontSize: 12,
+            ),
           ),
         ),
-      ),
-      FilledButton.icon(
-        key: const ValueKey<String>('song-info-save'),
-        onPressed: _tempoReadable ? _save : null,
-        icon: const Icon(Icons.check, size: 18),
-        label: const Text('Save'),
-      ),
-    ],
-  );
+        FilledButton.icon(
+          key: const ValueKey<String>('song-info-save'),
+          onPressed: _tempoReadable ? _save : null,
+          icon: const Icon(Icons.check, size: 18),
+          label: Text(l10n.save),
+        ),
+      ],
+    );
+  }
 }
 
 /// One button of the tempo stepper.

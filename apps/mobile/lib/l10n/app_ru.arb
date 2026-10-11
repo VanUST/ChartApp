@@ -152,5 +152,375 @@
 
   "settingsStorageNoteWeb": "Выбор запоминается в хранилище этого браузера. Safari очищает такое хранилище после семи дней без использования, и тогда язык снова берётся с устройства. Ваши чарты — это файлы, их это не касается.",
 
-  "languageChanged": "Язык: {language}"
+  "languageChanged": "Язык: {language}",
+
+  "save": "Сохранить",
+
+  "ok": "ОК",
+
+  "fileNameLabel": "Имя файла",
+
+  "fileSaveFailed": "Не удалось сохранить: {error}",
+
+  "fileOpenFailed": "Не удалось открыть: {error}",
+
+  "fileChooserCancelled": "Файл не выбран.",
+
+  "fileWarningSuffix": " {warnings}: {message}",
+
+  "byteCount": "{count, plural, one{{count} байт} few{{count} байта} many{{count} байт} other{{count} байта}}",
+
+  "operationCount": "{count, plural, one{{count} операция} few{{count} операции} many{{count} операций} other{{count} операции}}",
+
+  "warningCount": "{count, plural, one{{count} предупреждение} few{{count} предупреждения} many{{count} предупреждений} other{{count} предупреждения}}",
+
+  "entryCount": "{count, plural, one{{count} запись} few{{count} записи} many{{count} записей} other{{count} записи}}",
+
+  "chartFileDialogTitle": "Файл чарта",
+
+  "chartFileLabelPath": "Файл .chart",
+
+  "chartFileOpenButton": "Открыть .chart",
+
+  "chartFileNoDocument": "Загрузите или импортируйте песню, прежде чем сохранять её.",
+
+  "chartFileNameToSave": "Укажите файл .chart, в который сохранять.",
+
+  "chartFileNameToOpen": "Укажите файл .chart, который открыть.",
+
+  "chartFileSavedTo": "Сохранено {bytes} в {path} · {operations}.",
+
+  "chartFileSavedAs": "Сохранено {bytes} как {path} · {operations}.",
+
+  "chartFileOpened": "Открыт «{title}» · {operations}.",
+
+  "saveModeRewriteInPlace": "Этот браузер перезаписывает тот файл на месте, поэтому следующее «Сохранить» обновит его.",
+
+  "saveModeDownload": "Этот браузер не может обновить файл на месте, поэтому каждое «Сохранить» скачивает НОВУЮ копию.",
+
+  "chartFileSaveHintRewriteInPlace": "Этот браузер может перезаписать файл чарта, который ему уже давали. Первое «Сохранить» спросит, куда положить файл; каждое следующее обновляет тот же файл.",
+
+  "chartFileSaveHintDownload": "Этот браузер не может перезаписать файл на месте, поэтому каждое «Сохранить» скачивает НОВУЮ копию. Куда её положить, выбирает браузер, и он может переименовать её, если файл с таким именем уже есть.",
+
+  "setlistFileTooltip": "Сохранить или открыть файл .setlist",
+
+  "setlistFileDialogTitle": "Файл программы",
+
+  "setlistFileLabelPath": "Файл .setlist",
+
+  "setlistFileOpenButton": "Открыть .setlist",
+
+  "setlistFileNameToSave": "Укажите файл .setlist, в который сохранять.",
+
+  "setlistFileNameToOpen": "Укажите файл .setlist, который открыть.",
+
+  "setlistFileSavedTo": "Сохранено {bytes} в {path} · {entries} · {operations}.",
+
+  "setlistFileSavedAs": "Сохранено {bytes} как {path} · {entries} · {operations}.",
+
+  "setlistFileSaveHintRewriteInPlace": "Этот браузер может перезаписать файл программы, который ему уже давали. Первое «Сохранить» спросит, куда положить файл; каждое следующее обновляет тот же файл.",
+
+  "setlistFileSaveHintDownload": "Этот браузер не может перезаписать файл на месте, поэтому каждое «Сохранить» скачивает НОВУЮ копию. Куда её положить, выбирает браузер, и он может переименовать её, если файл с таким именем уже есть.",
+
+  "setlistOpened": "Открыта «{name}» · {entries}.",
+
+  "missingEntryCount": "{count, plural, one{{count} не найдена в библиотеке.} few{{count} не найдены в библиотеке.} many{{count} не найдены в библиотеке.} other{{count} не найдены в библиотеке.}}",
+
+  "metadataTitle": "Название",
+
+  "metadataTitleHint": "Имя, которое музыкант читает над чартом.",
+
+  "metadataComposer": "Автор",
+
+  "metadataComposerHint": "Как записано; порядок — тот, что хранит формат.",
+
+  "metadataStyle": "Стиль",
+
+  "metadataStyleHint": "Свободный текст, например Medium Swing или Ballad.",
+
+  "metadataTempo": "Темп (BPM)",
+
+  "metadataTempoHelperZero": "0 означает, что чарт не задаёт темп.",
+
+  "metadataTempoHelperHint": "Целые удары в минуту или 0, если темпа нет.",
+
+  "metadataTempoError": "Темп — целое число.",
+
+  "metadataTempoRefused": "Темп — целое число ударов в минуту.",
+
+  "metadataNothingChanged": "Ничего не изменилось, поэтому в журнал ничего не записано.",
+
+  "metadataFooterHint": "Одна правка: четыре факта выше записываются вместе.",
+
+  "metadataFooterFixTempo": "Исправьте темп перед сохранением.",
+
+  "palettePosition": "Такт {bar} · доля {cell}",
+
+  "paletteChordsIn": "Аккорды в {key}",
+
+  "palettePickRoot": "Выберите основной тон",
+
+  "paletteCellEmpty": "Эта доля пуста.",
+
+  "paletteNow": "Сейчас: {chord}",
+
+  "paletteRemoveChord": "Удалить аккорд",
+
+  "formGroupBar": "ТАКТЫ",
+
+  "formGroupRepeat": "ПОВТОРЫ",
+
+  "formGroupMarks": "ЗНАКИ",
+
+  "formGroupSection": "РАЗДЕЛЫ",
+
+  "formBarBefore": "Такт до",
+
+  "formBarAfter": "Такт после",
+
+  "formDuplicateBar": "Дублировать такт",
+
+  "formDeleteBar": "Удалить такт",
+
+  "formRepeatStart": "Начало повтора",
+
+  "formRepeatEnd": "Конец повтора",
+
+  "formPreviousLabel": "Предыдущий: {state}",
+
+  "formEndingLabel": "Вольта: {state}",
+
+  "formSectionBefore": "Раздел до",
+
+  "formSectionAfter": "Раздел после",
+
+  "formDuplicateSection": "Дублировать раздел",
+
+  "formRenameSection": "Переименовать раздел",
+
+  "moveEarlier": "Раньше",
+
+  "moveLater": "Позже",
+
+  "formDeleteSection": "Удалить раздел",
+
+  "formNoBarSelected": "Такт не выбран",
+
+  "formPosition": "Такт {bar} · раздел {section}",
+
+  "formBarGone": "Выбранного такта больше нет в песне.",
+
+  "formDetail": "такт {bar} из {bars} в этом разделе · раздел {section} из {sections}",
+
+  "formRefusedDefault": "Ничего не изменилось: эта операция здесь невозможна.",
+
+  "formBarInsertedBefore": "Такт вставлен до.",
+
+  "formBarInsertedAfter": "Такт вставлен после.",
+
+  "formNoSuchBarInsert": "Ничего не вставлено: в песне нет такого такта.",
+
+  "formBarDuplicated": "Такт продублирован.",
+
+  "formNoSuchBarCopy": "Ничего не скопировано: в песне нет такого такта.",
+
+  "formBarDeleted": "Такт удалён.",
+
+  "formLastBarRefused": "Ничего не удалено: в разделе остаётся хотя бы один такт, иначе его нельзя было бы показать или выбрать.",
+
+  "formRepeatStartSet": "Начало повтора поставлено.",
+
+  "formRepeatStartCleared": "Начало повтора снято.",
+
+  "formBarlineSame": "Ничего не изменилось: такт уже несёт эту тактовую черту.",
+
+  "formRepeatEndSet": "Конец повтора поставлен.",
+
+  "formRepeatEndCleared": "Конец повтора снят.",
+
+  "formRepeatPreviousStatus": "Повтор предыдущего: {state}.",
+
+  "formSymbolSame": "Ничего не изменилось: такт уже несёт этот знак.",
+
+  "formEndingRemoved": "Вольта убрана.",
+
+  "formEndingSetTo": "Вольта: {volta}",
+
+  "formBracketSame": "Ничего не изменилось: такт уже несёт эту вольту.",
+
+  "formMarkSet": "{mark} поставлен.",
+
+  "formMarkCleared": "{mark} снят.",
+
+  "formSignPresent": "Ничего не изменилось: такт уже несёт этот знак.",
+
+  "formSignAbsent": "Ничего не изменилось: такт не несёт этого знака.",
+
+  "formSectionInsertedBefore": "Новый раздел вставлен до.",
+
+  "formSectionInsertedAfter": "Новый раздел вставлен после.",
+
+  "formNoSuchSectionInsert": "Ничего не вставлено: в песне нет такого раздела.",
+
+  "formSectionDuplicated": "Раздел продублирован.",
+
+  "formNoSuchSectionCopy": "Ничего не скопировано: в песне нет такого раздела.",
+
+  "formSectionMovedEarlier": "Раздел перемещён раньше.",
+
+  "formSectionMovedLater": "Раздел перемещён позже.",
+
+  "formSectionAtEnd": "Ничего не перемещено: раздел уже стоит с этого края формы.",
+
+  "formSectionDeleted": "Раздел удалён.",
+
+  "formLastSectionRefused": "Ничего не удалено: в песне остаётся хотя бы один раздел, иначе показывать было бы нечего.",
+
+  "formSectionRenamed": "Раздел переименован в «{name}».",
+
+  "formNameSame": "Ничего не переименовано: он уже так называется.",
+
+  "formVoltaNone": "нет",
+
+  "formVoltaUnnumbered": "без номера",
+
+  "formRepeatPreviousOff": "выкл.",
+
+  "formRepeatPreviousOneBar": "1 такт",
+
+  "formRepeatPreviousTwoBars": "2 такта",
+
+  "formRenameLabel": "Репетиционная буква или название",
+
+  "formRenameHelper": "Одна буква становится репетиционной буквой.",
+
+  "formRenameButton": "Переименовать",
+
+  "formEndingTitle": "Альтернативная концовка",
+
+  "formNoBracket": "Без вольты",
+
+  "formUnnumberedBracket": "Без номера [",
+
+  "markSegno": "Сегно",
+
+  "markCoda": "Кода",
+
+  "markFermata": "Фермата",
+
+  "markPlayerEnding": "Стоп игрока",
+
+  "cueGroupThisBar": "ЭТОТ ТАКТ",
+
+  "cueGroupTheCue": "ЗАМЕТКА",
+
+  "cueWriteWords": "Написать слова здесь",
+
+  "cuePreviousBar": "Предыдущий такт",
+
+  "cueNextBar": "Следующий такт",
+
+  "cueSaveWords": "Сохранить слова",
+
+  "cueBarEarlier": "На такт раньше",
+
+  "cueBarLater": "На такт позже",
+
+  "cueUpLine": "Выше на строку",
+
+  "cueDownLine": "Ниже на строку",
+
+  "cueRemove": "Удалить заметку",
+
+  "cuePosition": "Слова · такт {bar}",
+
+  "cueDetail": "такт {bar} из {bars} в этом разделе · {place} · {cues}",
+
+  "cueCount": "{count, plural, one{{count} заметка} few{{count} заметки} many{{count} заметок} other{{count} заметки}}",
+
+  "cueWholeBar": "весь такт",
+
+  "cueCell": "доля {cell}",
+
+  "cueRefusedDefault": "Ничего не изменилось: здесь это невозможно.",
+
+  "cueAdded": "Заметка добавлена.",
+
+  "cueNoSuchBarAdd": "Ничего не добавлено: в песне нет такого такта.",
+
+  "cueAddedTypeWords": "Заметка добавлена — наберите слова.",
+
+  "cueNothingHappened": "Ничего не произошло.",
+
+  "cueNoSelectionSave": "Ничего не сохранено: заметка не выбрана.",
+
+  "cueWordsSaved": "Слова сохранены.",
+
+  "cueSameWords": "Ничего не изменилось: заметка уже это говорит.",
+
+  "cueNoSelectionRemove": "Ничего не удалено: заметка не выбрана.",
+
+  "cueRemoved": "Заметка удалена.",
+
+  "cueAlreadyGone": "Ничего не удалено: заметки уже нет.",
+
+  "cueNoSelectionMove": "Ничего не перемещено: заметка не выбрана.",
+
+  "cueEndOfSong": "Ничего не перемещено: это край песни.",
+
+  "cueMovedEarlier": "Заметка перемещена на такт раньше.",
+
+  "cueMovedLater": "Заметка перемещена на такт позже.",
+
+  "cueAlreadyThere": "Ничего не перемещено: заметка уже там.",
+
+  "cueNudgedUp": "Заметка сдвинута вверх.",
+
+  "cueNudgedDown": "Заметка сдвинута вниз.",
+
+  "cueNothingMoved": "Ничего не перемещено.",
+
+  "cueNowOnBar": "Теперь такт {bar}.",
+
+  "cueNoneHere": "На этом такте слов пока нет.",
+
+  "cueNoWordsYet": "(слов пока нет)",
+
+  "cueWordsLabel": "Слова",
+
+  "cueWordsHelper": "Например: To Coda · D.C. al Fine · Solo · Vamp · 4×",
+
+  "setlistSheetTitle": "Программа",
+
+  "undo": "Отменить",
+
+  "redo": "Вернуть",
+
+  "setlistNameLabel": "Название программы",
+
+  "setlistMissingCharts": "{count, plural, one{{count} запись называет чарт, которого нет в этой библиотеке. Программа её сохраняет; играть этот чарт нечем.} few{{count} записи называют чарты, которых нет в этой библиотеке. Программа их сохраняет; играть эти чарты нечем.} many{{count} записей называют чарты, которых нет в этой библиотеке. Программа их сохраняет; играть эти чарты нечем.} other{{count} записи называют чарты, которых нет в этой библиотеке. Программа их сохраняет; играть эти чарты нечем.}}",
+
+  "setlistEmpty": "Программа пуста.\nДобавьте чарт из библиотеки.",
+
+  "setlistAddChart": "Добавить чарт в программу",
+
+  "setlistAddChartTitle": "Добавить чарт",
+
+  "setlistPlayTooltip": "Играть этот чарт из программы",
+
+  "setlistEntryTooltip": "Как играется эта запись",
+
+  "setlistRemoveTooltip": "Убрать из программы",
+
+  "setlistTranspositionHint": "Транспонирование для этой записи (чарт сохраняет записанную тональность)",
+
+  "setlistNotesLabel": "Заметка для исполнителя",
+
+  "setlistEntrySubtitle": "{interval} · {notes}",
+
+  "setlistSongSubtitle": "{key} · {bars}",
+
+  "untitledProgramme": "Программа без названия",
+
+  "setlistMissingChart": "(чарт не найден)"
 }

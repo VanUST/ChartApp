@@ -339,4 +339,726 @@ class AppLocalizationsRu extends AppLocalizations {
   String languageChanged(String language) {
     return 'Язык: $language';
   }
+
+  @override
+  String get save => 'Сохранить';
+
+  @override
+  String get ok => 'ОК';
+
+  @override
+  String get fileNameLabel => 'Имя файла';
+
+  @override
+  String fileSaveFailed(String error) {
+    return 'Не удалось сохранить: $error';
+  }
+
+  @override
+  String fileOpenFailed(String error) {
+    return 'Не удалось открыть: $error';
+  }
+
+  @override
+  String get fileChooserCancelled => 'Файл не выбран.';
+
+  @override
+  String fileWarningSuffix(String warnings, String message) {
+    return ' $warnings: $message';
+  }
+
+  @override
+  String byteCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count байта',
+      many: '$count байт',
+      few: '$count байта',
+      one: '$count байт',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String operationCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count операции',
+      many: '$count операций',
+      few: '$count операции',
+      one: '$count операция',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String warningCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count предупреждения',
+      many: '$count предупреждений',
+      few: '$count предупреждения',
+      one: '$count предупреждение',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String entryCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count записи',
+      many: '$count записей',
+      few: '$count записи',
+      one: '$count запись',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get chartFileDialogTitle => 'Файл чарта';
+
+  @override
+  String get chartFileLabelPath => 'Файл .chart';
+
+  @override
+  String get chartFileOpenButton => 'Открыть .chart';
+
+  @override
+  String get chartFileNoDocument =>
+      'Загрузите или импортируйте песню, прежде чем сохранять её.';
+
+  @override
+  String get chartFileNameToSave => 'Укажите файл .chart, в который сохранять.';
+
+  @override
+  String get chartFileNameToOpen => 'Укажите файл .chart, который открыть.';
+
+  @override
+  String chartFileSavedTo(String bytes, String path, String operations) {
+    return 'Сохранено $bytes в $path · $operations.';
+  }
+
+  @override
+  String chartFileSavedAs(String bytes, String path, String operations) {
+    return 'Сохранено $bytes как $path · $operations.';
+  }
+
+  @override
+  String chartFileOpened(String title, String operations) {
+    return 'Открыт «$title» · $operations.';
+  }
+
+  @override
+  String get saveModeRewriteInPlace =>
+      'Этот браузер перезаписывает тот файл на месте, поэтому следующее «Сохранить» обновит его.';
+
+  @override
+  String get saveModeDownload =>
+      'Этот браузер не может обновить файл на месте, поэтому каждое «Сохранить» скачивает НОВУЮ копию.';
+
+  @override
+  String get chartFileSaveHintRewriteInPlace =>
+      'Этот браузер может перезаписать файл чарта, который ему уже давали. Первое «Сохранить» спросит, куда положить файл; каждое следующее обновляет тот же файл.';
+
+  @override
+  String get chartFileSaveHintDownload =>
+      'Этот браузер не может перезаписать файл на месте, поэтому каждое «Сохранить» скачивает НОВУЮ копию. Куда её положить, выбирает браузер, и он может переименовать её, если файл с таким именем уже есть.';
+
+  @override
+  String get setlistFileTooltip => 'Сохранить или открыть файл .setlist';
+
+  @override
+  String get setlistFileDialogTitle => 'Файл программы';
+
+  @override
+  String get setlistFileLabelPath => 'Файл .setlist';
+
+  @override
+  String get setlistFileOpenButton => 'Открыть .setlist';
+
+  @override
+  String get setlistFileNameToSave =>
+      'Укажите файл .setlist, в который сохранять.';
+
+  @override
+  String get setlistFileNameToOpen => 'Укажите файл .setlist, который открыть.';
+
+  @override
+  String setlistFileSavedTo(
+    String bytes,
+    String path,
+    String entries,
+    String operations,
+  ) {
+    return 'Сохранено $bytes в $path · $entries · $operations.';
+  }
+
+  @override
+  String setlistFileSavedAs(
+    String bytes,
+    String path,
+    String entries,
+    String operations,
+  ) {
+    return 'Сохранено $bytes как $path · $entries · $operations.';
+  }
+
+  @override
+  String get setlistFileSaveHintRewriteInPlace =>
+      'Этот браузер может перезаписать файл программы, который ему уже давали. Первое «Сохранить» спросит, куда положить файл; каждое следующее обновляет тот же файл.';
+
+  @override
+  String get setlistFileSaveHintDownload =>
+      'Этот браузер не может перезаписать файл на месте, поэтому каждое «Сохранить» скачивает НОВУЮ копию. Куда её положить, выбирает браузер, и он может переименовать её, если файл с таким именем уже есть.';
+
+  @override
+  String setlistOpened(String name, String entries) {
+    return 'Открыта «$name» · $entries.';
+  }
+
+  @override
+  String missingEntryCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count не найдены в библиотеке.',
+      many: '$count не найдены в библиотеке.',
+      few: '$count не найдены в библиотеке.',
+      one: '$count не найдена в библиотеке.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get metadataTitle => 'Название';
+
+  @override
+  String get metadataTitleHint => 'Имя, которое музыкант читает над чартом.';
+
+  @override
+  String get metadataComposer => 'Автор';
+
+  @override
+  String get metadataComposerHint =>
+      'Как записано; порядок — тот, что хранит формат.';
+
+  @override
+  String get metadataStyle => 'Стиль';
+
+  @override
+  String get metadataStyleHint =>
+      'Свободный текст, например Medium Swing или Ballad.';
+
+  @override
+  String get metadataTempo => 'Темп (BPM)';
+
+  @override
+  String get metadataTempoHelperZero => '0 означает, что чарт не задаёт темп.';
+
+  @override
+  String get metadataTempoHelperHint =>
+      'Целые удары в минуту или 0, если темпа нет.';
+
+  @override
+  String get metadataTempoError => 'Темп — целое число.';
+
+  @override
+  String get metadataTempoRefused => 'Темп — целое число ударов в минуту.';
+
+  @override
+  String get metadataNothingChanged =>
+      'Ничего не изменилось, поэтому в журнал ничего не записано.';
+
+  @override
+  String get metadataFooterHint =>
+      'Одна правка: четыре факта выше записываются вместе.';
+
+  @override
+  String get metadataFooterFixTempo => 'Исправьте темп перед сохранением.';
+
+  @override
+  String palettePosition(int bar, int cell) {
+    return 'Такт $bar · доля $cell';
+  }
+
+  @override
+  String paletteChordsIn(String key) {
+    return 'Аккорды в $key';
+  }
+
+  @override
+  String get palettePickRoot => 'Выберите основной тон';
+
+  @override
+  String get paletteCellEmpty => 'Эта доля пуста.';
+
+  @override
+  String paletteNow(String chord) {
+    return 'Сейчас: $chord';
+  }
+
+  @override
+  String get paletteRemoveChord => 'Удалить аккорд';
+
+  @override
+  String get formGroupBar => 'ТАКТЫ';
+
+  @override
+  String get formGroupRepeat => 'ПОВТОРЫ';
+
+  @override
+  String get formGroupMarks => 'ЗНАКИ';
+
+  @override
+  String get formGroupSection => 'РАЗДЕЛЫ';
+
+  @override
+  String get formBarBefore => 'Такт до';
+
+  @override
+  String get formBarAfter => 'Такт после';
+
+  @override
+  String get formDuplicateBar => 'Дублировать такт';
+
+  @override
+  String get formDeleteBar => 'Удалить такт';
+
+  @override
+  String get formRepeatStart => 'Начало повтора';
+
+  @override
+  String get formRepeatEnd => 'Конец повтора';
+
+  @override
+  String formPreviousLabel(String state) {
+    return 'Предыдущий: $state';
+  }
+
+  @override
+  String formEndingLabel(String state) {
+    return 'Вольта: $state';
+  }
+
+  @override
+  String get formSectionBefore => 'Раздел до';
+
+  @override
+  String get formSectionAfter => 'Раздел после';
+
+  @override
+  String get formDuplicateSection => 'Дублировать раздел';
+
+  @override
+  String get formRenameSection => 'Переименовать раздел';
+
+  @override
+  String get moveEarlier => 'Раньше';
+
+  @override
+  String get moveLater => 'Позже';
+
+  @override
+  String get formDeleteSection => 'Удалить раздел';
+
+  @override
+  String get formNoBarSelected => 'Такт не выбран';
+
+  @override
+  String formPosition(int bar, String section) {
+    return 'Такт $bar · раздел $section';
+  }
+
+  @override
+  String get formBarGone => 'Выбранного такта больше нет в песне.';
+
+  @override
+  String formDetail(int bar, int bars, int section, int sections) {
+    return 'такт $bar из $bars в этом разделе · раздел $section из $sections';
+  }
+
+  @override
+  String get formRefusedDefault =>
+      'Ничего не изменилось: эта операция здесь невозможна.';
+
+  @override
+  String get formBarInsertedBefore => 'Такт вставлен до.';
+
+  @override
+  String get formBarInsertedAfter => 'Такт вставлен после.';
+
+  @override
+  String get formNoSuchBarInsert =>
+      'Ничего не вставлено: в песне нет такого такта.';
+
+  @override
+  String get formBarDuplicated => 'Такт продублирован.';
+
+  @override
+  String get formNoSuchBarCopy =>
+      'Ничего не скопировано: в песне нет такого такта.';
+
+  @override
+  String get formBarDeleted => 'Такт удалён.';
+
+  @override
+  String get formLastBarRefused =>
+      'Ничего не удалено: в разделе остаётся хотя бы один такт, иначе его нельзя было бы показать или выбрать.';
+
+  @override
+  String get formRepeatStartSet => 'Начало повтора поставлено.';
+
+  @override
+  String get formRepeatStartCleared => 'Начало повтора снято.';
+
+  @override
+  String get formBarlineSame =>
+      'Ничего не изменилось: такт уже несёт эту тактовую черту.';
+
+  @override
+  String get formRepeatEndSet => 'Конец повтора поставлен.';
+
+  @override
+  String get formRepeatEndCleared => 'Конец повтора снят.';
+
+  @override
+  String formRepeatPreviousStatus(String state) {
+    return 'Повтор предыдущего: $state.';
+  }
+
+  @override
+  String get formSymbolSame =>
+      'Ничего не изменилось: такт уже несёт этот знак.';
+
+  @override
+  String get formEndingRemoved => 'Вольта убрана.';
+
+  @override
+  String formEndingSetTo(String volta) {
+    return 'Вольта: $volta';
+  }
+
+  @override
+  String get formBracketSame =>
+      'Ничего не изменилось: такт уже несёт эту вольту.';
+
+  @override
+  String formMarkSet(String mark) {
+    return '$mark поставлен.';
+  }
+
+  @override
+  String formMarkCleared(String mark) {
+    return '$mark снят.';
+  }
+
+  @override
+  String get formSignPresent =>
+      'Ничего не изменилось: такт уже несёт этот знак.';
+
+  @override
+  String get formSignAbsent =>
+      'Ничего не изменилось: такт не несёт этого знака.';
+
+  @override
+  String get formSectionInsertedBefore => 'Новый раздел вставлен до.';
+
+  @override
+  String get formSectionInsertedAfter => 'Новый раздел вставлен после.';
+
+  @override
+  String get formNoSuchSectionInsert =>
+      'Ничего не вставлено: в песне нет такого раздела.';
+
+  @override
+  String get formSectionDuplicated => 'Раздел продублирован.';
+
+  @override
+  String get formNoSuchSectionCopy =>
+      'Ничего не скопировано: в песне нет такого раздела.';
+
+  @override
+  String get formSectionMovedEarlier => 'Раздел перемещён раньше.';
+
+  @override
+  String get formSectionMovedLater => 'Раздел перемещён позже.';
+
+  @override
+  String get formSectionAtEnd =>
+      'Ничего не перемещено: раздел уже стоит с этого края формы.';
+
+  @override
+  String get formSectionDeleted => 'Раздел удалён.';
+
+  @override
+  String get formLastSectionRefused =>
+      'Ничего не удалено: в песне остаётся хотя бы один раздел, иначе показывать было бы нечего.';
+
+  @override
+  String formSectionRenamed(String name) {
+    return 'Раздел переименован в «$name».';
+  }
+
+  @override
+  String get formNameSame => 'Ничего не переименовано: он уже так называется.';
+
+  @override
+  String get formVoltaNone => 'нет';
+
+  @override
+  String get formVoltaUnnumbered => 'без номера';
+
+  @override
+  String get formRepeatPreviousOff => 'выкл.';
+
+  @override
+  String get formRepeatPreviousOneBar => '1 такт';
+
+  @override
+  String get formRepeatPreviousTwoBars => '2 такта';
+
+  @override
+  String get formRenameLabel => 'Репетиционная буква или название';
+
+  @override
+  String get formRenameHelper => 'Одна буква становится репетиционной буквой.';
+
+  @override
+  String get formRenameButton => 'Переименовать';
+
+  @override
+  String get formEndingTitle => 'Альтернативная концовка';
+
+  @override
+  String get formNoBracket => 'Без вольты';
+
+  @override
+  String get formUnnumberedBracket => 'Без номера [';
+
+  @override
+  String get markSegno => 'Сегно';
+
+  @override
+  String get markCoda => 'Кода';
+
+  @override
+  String get markFermata => 'Фермата';
+
+  @override
+  String get markPlayerEnding => 'Стоп игрока';
+
+  @override
+  String get cueGroupThisBar => 'ЭТОТ ТАКТ';
+
+  @override
+  String get cueGroupTheCue => 'ЗАМЕТКА';
+
+  @override
+  String get cueWriteWords => 'Написать слова здесь';
+
+  @override
+  String get cuePreviousBar => 'Предыдущий такт';
+
+  @override
+  String get cueNextBar => 'Следующий такт';
+
+  @override
+  String get cueSaveWords => 'Сохранить слова';
+
+  @override
+  String get cueBarEarlier => 'На такт раньше';
+
+  @override
+  String get cueBarLater => 'На такт позже';
+
+  @override
+  String get cueUpLine => 'Выше на строку';
+
+  @override
+  String get cueDownLine => 'Ниже на строку';
+
+  @override
+  String get cueRemove => 'Удалить заметку';
+
+  @override
+  String cuePosition(int bar) {
+    return 'Слова · такт $bar';
+  }
+
+  @override
+  String cueDetail(int bar, int bars, String place, String cues) {
+    return 'такт $bar из $bars в этом разделе · $place · $cues';
+  }
+
+  @override
+  String cueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count заметки',
+      many: '$count заметок',
+      few: '$count заметки',
+      one: '$count заметка',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get cueWholeBar => 'весь такт';
+
+  @override
+  String cueCell(int cell) {
+    return 'доля $cell';
+  }
+
+  @override
+  String get cueRefusedDefault => 'Ничего не изменилось: здесь это невозможно.';
+
+  @override
+  String get cueAdded => 'Заметка добавлена.';
+
+  @override
+  String get cueNoSuchBarAdd =>
+      'Ничего не добавлено: в песне нет такого такта.';
+
+  @override
+  String get cueAddedTypeWords => 'Заметка добавлена — наберите слова.';
+
+  @override
+  String get cueNothingHappened => 'Ничего не произошло.';
+
+  @override
+  String get cueNoSelectionSave => 'Ничего не сохранено: заметка не выбрана.';
+
+  @override
+  String get cueWordsSaved => 'Слова сохранены.';
+
+  @override
+  String get cueSameWords => 'Ничего не изменилось: заметка уже это говорит.';
+
+  @override
+  String get cueNoSelectionRemove => 'Ничего не удалено: заметка не выбрана.';
+
+  @override
+  String get cueRemoved => 'Заметка удалена.';
+
+  @override
+  String get cueAlreadyGone => 'Ничего не удалено: заметки уже нет.';
+
+  @override
+  String get cueNoSelectionMove => 'Ничего не перемещено: заметка не выбрана.';
+
+  @override
+  String get cueEndOfSong => 'Ничего не перемещено: это край песни.';
+
+  @override
+  String get cueMovedEarlier => 'Заметка перемещена на такт раньше.';
+
+  @override
+  String get cueMovedLater => 'Заметка перемещена на такт позже.';
+
+  @override
+  String get cueAlreadyThere => 'Ничего не перемещено: заметка уже там.';
+
+  @override
+  String get cueNudgedUp => 'Заметка сдвинута вверх.';
+
+  @override
+  String get cueNudgedDown => 'Заметка сдвинута вниз.';
+
+  @override
+  String get cueNothingMoved => 'Ничего не перемещено.';
+
+  @override
+  String cueNowOnBar(int bar) {
+    return 'Теперь такт $bar.';
+  }
+
+  @override
+  String get cueNoneHere => 'На этом такте слов пока нет.';
+
+  @override
+  String get cueNoWordsYet => '(слов пока нет)';
+
+  @override
+  String get cueWordsLabel => 'Слова';
+
+  @override
+  String get cueWordsHelper =>
+      'Например: To Coda · D.C. al Fine · Solo · Vamp · 4×';
+
+  @override
+  String get setlistSheetTitle => 'Программа';
+
+  @override
+  String get undo => 'Отменить';
+
+  @override
+  String get redo => 'Вернуть';
+
+  @override
+  String get setlistNameLabel => 'Название программы';
+
+  @override
+  String setlistMissingCharts(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count записи называют чарты, которых нет в этой библиотеке. Программа их сохраняет; играть эти чарты нечем.',
+      many:
+          '$count записей называют чарты, которых нет в этой библиотеке. Программа их сохраняет; играть эти чарты нечем.',
+      few:
+          '$count записи называют чарты, которых нет в этой библиотеке. Программа их сохраняет; играть эти чарты нечем.',
+      one:
+          '$count запись называет чарт, которого нет в этой библиотеке. Программа её сохраняет; играть этот чарт нечем.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get setlistEmpty => 'Программа пуста.\nДобавьте чарт из библиотеки.';
+
+  @override
+  String get setlistAddChart => 'Добавить чарт в программу';
+
+  @override
+  String get setlistAddChartTitle => 'Добавить чарт';
+
+  @override
+  String get setlistPlayTooltip => 'Играть этот чарт из программы';
+
+  @override
+  String get setlistEntryTooltip => 'Как играется эта запись';
+
+  @override
+  String get setlistRemoveTooltip => 'Убрать из программы';
+
+  @override
+  String get setlistTranspositionHint =>
+      'Транспонирование для этой записи (чарт сохраняет записанную тональность)';
+
+  @override
+  String get setlistNotesLabel => 'Заметка для исполнителя';
+
+  @override
+  String setlistEntrySubtitle(String interval, String notes) {
+    return '$interval · $notes';
+  }
+
+  @override
+  String setlistSongSubtitle(String key, String bars) {
+    return '$key · $bars';
+  }
+
+  @override
+  String get untitledProgramme => 'Программа без названия';
+
+  @override
+  String get setlistMissingChart => '(чарт не найден)';
 }

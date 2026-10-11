@@ -326,4 +326,710 @@ class AppLocalizationsEn extends AppLocalizations {
   String languageChanged(String language) {
     return 'Language: $language';
   }
+
+  @override
+  String get save => 'Save';
+
+  @override
+  String get ok => 'OK';
+
+  @override
+  String get fileNameLabel => 'File name';
+
+  @override
+  String fileSaveFailed(String error) {
+    return 'Could not save: $error';
+  }
+
+  @override
+  String fileOpenFailed(String error) {
+    return 'Could not open: $error';
+  }
+
+  @override
+  String get fileChooserCancelled => 'No file was chosen.';
+
+  @override
+  String fileWarningSuffix(String warnings, String message) {
+    return ' $warnings: $message';
+  }
+
+  @override
+  String byteCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bytes',
+      one: '$count byte',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String operationCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count operations',
+      one: '$count operation',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String warningCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count warnings',
+      one: '$count warning',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String entryCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count entries',
+      one: '$count entry',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get chartFileDialogTitle => 'Chart file';
+
+  @override
+  String get chartFileLabelPath => '.chart file';
+
+  @override
+  String get chartFileOpenButton => 'Open .chart';
+
+  @override
+  String get chartFileNoDocument => 'Load or import a song before saving it.';
+
+  @override
+  String get chartFileNameToSave => 'Name a .chart file to save to.';
+
+  @override
+  String get chartFileNameToOpen => 'Name a .chart file to open.';
+
+  @override
+  String chartFileSavedTo(String bytes, String path, String operations) {
+    return 'Saved $bytes to $path · $operations.';
+  }
+
+  @override
+  String chartFileSavedAs(String bytes, String path, String operations) {
+    return 'Saved $bytes as $path · $operations.';
+  }
+
+  @override
+  String chartFileOpened(String title, String operations) {
+    return 'Opened \"$title\" · $operations.';
+  }
+
+  @override
+  String get saveModeRewriteInPlace =>
+      'This browser re-writes that file in place, so the next Save updates it.';
+
+  @override
+  String get saveModeDownload =>
+      'This browser cannot update a file in place, so each Save downloads a NEW copy.';
+
+  @override
+  String get chartFileSaveHintRewriteInPlace =>
+      'This browser can re-write a chart file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.';
+
+  @override
+  String get chartFileSaveHintDownload =>
+      'This browser cannot re-write a file in place, so every Save downloads a NEW copy. The browser chooses where it lands, and may rename it when a file of that name is already there.';
+
+  @override
+  String get setlistFileTooltip => 'Save or open a .setlist file';
+
+  @override
+  String get setlistFileDialogTitle => 'Programme file';
+
+  @override
+  String get setlistFileLabelPath => '.setlist file';
+
+  @override
+  String get setlistFileOpenButton => 'Open .setlist';
+
+  @override
+  String get setlistFileNameToSave => 'Name a .setlist file to save to.';
+
+  @override
+  String get setlistFileNameToOpen => 'Name a .setlist file to open.';
+
+  @override
+  String setlistFileSavedTo(
+    String bytes,
+    String path,
+    String entries,
+    String operations,
+  ) {
+    return 'Saved $bytes to $path · $entries · $operations.';
+  }
+
+  @override
+  String setlistFileSavedAs(
+    String bytes,
+    String path,
+    String entries,
+    String operations,
+  ) {
+    return 'Saved $bytes as $path · $entries · $operations.';
+  }
+
+  @override
+  String get setlistFileSaveHintRewriteInPlace =>
+      'This browser can re-write a setlist file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.';
+
+  @override
+  String get setlistFileSaveHintDownload =>
+      'This browser cannot re-write a file in place, so every Save downloads a NEW copy. The browser chooses where it lands, and may rename it when a file of that name is already there.';
+
+  @override
+  String setlistOpened(String name, String entries) {
+    return 'Opened \"$name\" · $entries.';
+  }
+
+  @override
+  String missingEntryCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count not found in this library.',
+      one: '$count not found in this library.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get metadataTitle => 'Title';
+
+  @override
+  String get metadataTitleHint =>
+      'The name a musician reads at the top of the chart.';
+
+  @override
+  String get metadataComposer => 'Composer';
+
+  @override
+  String get metadataComposerHint =>
+      'As written; the order is whatever the format stores.';
+
+  @override
+  String get metadataStyle => 'Style';
+
+  @override
+  String get metadataStyleHint => 'Free text, such as Medium Swing or Ballad.';
+
+  @override
+  String get metadataTempo => 'Tempo (BPM)';
+
+  @override
+  String get metadataTempoHelperZero => '0 means this chart sets no tempo.';
+
+  @override
+  String get metadataTempoHelperHint =>
+      'Whole beats per minute, or 0 for none.';
+
+  @override
+  String get metadataTempoError => 'A tempo is a whole number.';
+
+  @override
+  String get metadataTempoRefused =>
+      'A tempo is a whole number of beats per minute.';
+
+  @override
+  String get metadataNothingChanged =>
+      'Nothing changed, so nothing was written to the log.';
+
+  @override
+  String get metadataFooterHint =>
+      'One edit: the four facts above are written together.';
+
+  @override
+  String get metadataFooterFixTempo => 'Fix the tempo before saving.';
+
+  @override
+  String palettePosition(int bar, int cell) {
+    return 'Bar $bar · cell $cell';
+  }
+
+  @override
+  String paletteChordsIn(String key) {
+    return 'Chords in $key';
+  }
+
+  @override
+  String get palettePickRoot => 'Pick a root';
+
+  @override
+  String get paletteCellEmpty => 'This cell is empty.';
+
+  @override
+  String paletteNow(String chord) {
+    return 'Now: $chord';
+  }
+
+  @override
+  String get paletteRemoveChord => 'Remove chord';
+
+  @override
+  String get formGroupBar => 'BAR';
+
+  @override
+  String get formGroupRepeat => 'REPEAT';
+
+  @override
+  String get formGroupMarks => 'MARKS';
+
+  @override
+  String get formGroupSection => 'SECTION';
+
+  @override
+  String get formBarBefore => 'Bar before';
+
+  @override
+  String get formBarAfter => 'Bar after';
+
+  @override
+  String get formDuplicateBar => 'Duplicate bar';
+
+  @override
+  String get formDeleteBar => 'Delete bar';
+
+  @override
+  String get formRepeatStart => 'Repeat start';
+
+  @override
+  String get formRepeatEnd => 'Repeat end';
+
+  @override
+  String formPreviousLabel(String state) {
+    return 'Previous: $state';
+  }
+
+  @override
+  String formEndingLabel(String state) {
+    return 'Ending: $state';
+  }
+
+  @override
+  String get formSectionBefore => 'Section before';
+
+  @override
+  String get formSectionAfter => 'Section after';
+
+  @override
+  String get formDuplicateSection => 'Duplicate section';
+
+  @override
+  String get formRenameSection => 'Rename section';
+
+  @override
+  String get moveEarlier => 'Move earlier';
+
+  @override
+  String get moveLater => 'Move later';
+
+  @override
+  String get formDeleteSection => 'Delete section';
+
+  @override
+  String get formNoBarSelected => 'No bar selected';
+
+  @override
+  String formPosition(int bar, String section) {
+    return 'Bar $bar · section $section';
+  }
+
+  @override
+  String get formBarGone => 'The selected bar is no longer in the song.';
+
+  @override
+  String formDetail(int bar, int bars, int section, int sections) {
+    return 'bar $bar of $bars in this section · section $section of $sections';
+  }
+
+  @override
+  String get formRefusedDefault =>
+      'Nothing changed: that operation is not possible here.';
+
+  @override
+  String get formBarInsertedBefore => 'Inserted a bar before.';
+
+  @override
+  String get formBarInsertedAfter => 'Inserted a bar after.';
+
+  @override
+  String get formNoSuchBarInsert =>
+      'Nothing was inserted: the song has no such bar.';
+
+  @override
+  String get formBarDuplicated => 'Duplicated this bar.';
+
+  @override
+  String get formNoSuchBarCopy =>
+      'Nothing was copied: the song has no such bar.';
+
+  @override
+  String get formBarDeleted => 'Deleted this bar.';
+
+  @override
+  String get formLastBarRefused =>
+      'Nothing was deleted: a section keeps at least one bar, or it could not be shown or selected.';
+
+  @override
+  String get formRepeatStartSet => 'Repeat start set.';
+
+  @override
+  String get formRepeatStartCleared => 'Repeat start cleared.';
+
+  @override
+  String get formBarlineSame =>
+      'Nothing changed: the bar already carries that barline.';
+
+  @override
+  String get formRepeatEndSet => 'Repeat end set.';
+
+  @override
+  String get formRepeatEndCleared => 'Repeat end cleared.';
+
+  @override
+  String formRepeatPreviousStatus(String state) {
+    return 'Repeat previous: $state.';
+  }
+
+  @override
+  String get formSymbolSame =>
+      'Nothing changed: the bar already carries that symbol.';
+
+  @override
+  String get formEndingRemoved => 'Ending bracket removed.';
+
+  @override
+  String formEndingSetTo(String volta) {
+    return 'Ending bracket set to $volta';
+  }
+
+  @override
+  String get formBracketSame =>
+      'Nothing changed: the bar already carries that bracket.';
+
+  @override
+  String formMarkSet(String mark) {
+    return '$mark set.';
+  }
+
+  @override
+  String formMarkCleared(String mark) {
+    return '$mark cleared.';
+  }
+
+  @override
+  String get formSignPresent =>
+      'Nothing changed: the bar already carries that sign.';
+
+  @override
+  String get formSignAbsent =>
+      'Nothing changed: the bar does not carry that sign.';
+
+  @override
+  String get formSectionInsertedBefore => 'Inserted a new section before.';
+
+  @override
+  String get formSectionInsertedAfter => 'Inserted a new section after.';
+
+  @override
+  String get formNoSuchSectionInsert =>
+      'Nothing was inserted: the song has no such section.';
+
+  @override
+  String get formSectionDuplicated => 'Duplicated this section.';
+
+  @override
+  String get formNoSuchSectionCopy =>
+      'Nothing was copied: the song has no such section.';
+
+  @override
+  String get formSectionMovedEarlier => 'Moved this section earlier.';
+
+  @override
+  String get formSectionMovedLater => 'Moved this section later.';
+
+  @override
+  String get formSectionAtEnd =>
+      'Nothing moved: the section is already at that end of the form.';
+
+  @override
+  String get formSectionDeleted => 'Deleted this section.';
+
+  @override
+  String get formLastSectionRefused =>
+      'Nothing was deleted: a song keeps at least one section, or there would be nothing left to show.';
+
+  @override
+  String formSectionRenamed(String name) {
+    return 'Renamed this section to \"$name\".';
+  }
+
+  @override
+  String get formNameSame =>
+      'Nothing was renamed: it already carries that name.';
+
+  @override
+  String get formVoltaNone => 'none';
+
+  @override
+  String get formVoltaUnnumbered => 'unnumbered';
+
+  @override
+  String get formRepeatPreviousOff => 'off';
+
+  @override
+  String get formRepeatPreviousOneBar => '1 bar';
+
+  @override
+  String get formRepeatPreviousTwoBars => '2 bars';
+
+  @override
+  String get formRenameLabel => 'Rehearsal letter or name';
+
+  @override
+  String get formRenameHelper => 'A single letter becomes a rehearsal letter.';
+
+  @override
+  String get formRenameButton => 'Rename';
+
+  @override
+  String get formEndingTitle => 'Alternative ending';
+
+  @override
+  String get formNoBracket => 'No bracket';
+
+  @override
+  String get formUnnumberedBracket => 'Unnumbered [';
+
+  @override
+  String get markSegno => 'Segno';
+
+  @override
+  String get markCoda => 'Coda';
+
+  @override
+  String get markFermata => 'Fermata';
+
+  @override
+  String get markPlayerEnding => 'Player end';
+
+  @override
+  String get cueGroupThisBar => 'THIS BAR';
+
+  @override
+  String get cueGroupTheCue => 'THE CUE';
+
+  @override
+  String get cueWriteWords => 'Write words here';
+
+  @override
+  String get cuePreviousBar => 'Previous bar';
+
+  @override
+  String get cueNextBar => 'Next bar';
+
+  @override
+  String get cueSaveWords => 'Save words';
+
+  @override
+  String get cueBarEarlier => 'A bar earlier';
+
+  @override
+  String get cueBarLater => 'A bar later';
+
+  @override
+  String get cueUpLine => 'Up a line';
+
+  @override
+  String get cueDownLine => 'Down a line';
+
+  @override
+  String get cueRemove => 'Remove the cue';
+
+  @override
+  String cuePosition(int bar) {
+    return 'Words · bar $bar';
+  }
+
+  @override
+  String cueDetail(int bar, int bars, String place, String cues) {
+    return 'bar $bar of $bars in this section · $place · $cues here';
+  }
+
+  @override
+  String cueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count cues',
+      one: '$count cue',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get cueWholeBar => 'whole bar';
+
+  @override
+  String cueCell(int cell) {
+    return 'cell $cell';
+  }
+
+  @override
+  String get cueRefusedDefault => 'Nothing changed: that is not possible here.';
+
+  @override
+  String get cueAdded => 'Added a cue.';
+
+  @override
+  String get cueNoSuchBarAdd => 'Nothing was added: the song has no such bar.';
+
+  @override
+  String get cueAddedTypeWords => 'Added a cue — type the words.';
+
+  @override
+  String get cueNothingHappened => 'Nothing happened.';
+
+  @override
+  String get cueNoSelectionSave => 'Nothing was saved: no cue is selected.';
+
+  @override
+  String get cueWordsSaved => 'Saved the words.';
+
+  @override
+  String get cueSameWords => 'Nothing changed: the cue already says that.';
+
+  @override
+  String get cueNoSelectionRemove => 'Nothing was removed: no cue is selected.';
+
+  @override
+  String get cueRemoved => 'Removed the cue.';
+
+  @override
+  String get cueAlreadyGone => 'Nothing was removed: the cue is already gone.';
+
+  @override
+  String get cueNoSelectionMove => 'Nothing moved: no cue is selected.';
+
+  @override
+  String get cueEndOfSong => 'Nothing moved: that is the end of the song.';
+
+  @override
+  String get cueMovedEarlier => 'Moved the cue a bar earlier.';
+
+  @override
+  String get cueMovedLater => 'Moved the cue a bar later.';
+
+  @override
+  String get cueAlreadyThere => 'Nothing moved: the cue is already there.';
+
+  @override
+  String get cueNudgedUp => 'Nudged the cue up.';
+
+  @override
+  String get cueNudgedDown => 'Nudged the cue down.';
+
+  @override
+  String get cueNothingMoved => 'Nothing moved.';
+
+  @override
+  String cueNowOnBar(int bar) {
+    return 'Now on bar $bar.';
+  }
+
+  @override
+  String get cueNoneHere => 'No words on this bar yet.';
+
+  @override
+  String get cueNoWordsYet => '(no words yet)';
+
+  @override
+  String get cueWordsLabel => 'The words';
+
+  @override
+  String get cueWordsHelper =>
+      'For example: To Coda · D.C. al Fine · Solo · Vamp · 4×';
+
+  @override
+  String get setlistSheetTitle => 'Programme';
+
+  @override
+  String get undo => 'Undo';
+
+  @override
+  String get redo => 'Redo';
+
+  @override
+  String get setlistNameLabel => 'Programme name';
+
+  @override
+  String setlistMissingCharts(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count entries name a chart this library does not hold. The programme keeps them; the chart is not here to play.',
+      one:
+          '$count entry names a chart this library does not hold. The programme keeps it; the chart is not here to play.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get setlistEmpty =>
+      'The programme is empty.\nAdd a chart from the library.';
+
+  @override
+  String get setlistAddChart => 'Add a chart to the programme';
+
+  @override
+  String get setlistAddChartTitle => 'Add a chart';
+
+  @override
+  String get setlistPlayTooltip => 'Play this chart from the programme';
+
+  @override
+  String get setlistEntryTooltip => 'How this entry is played';
+
+  @override
+  String get setlistRemoveTooltip => 'Remove from the programme';
+
+  @override
+  String get setlistTranspositionHint =>
+      'Transposition for this entry (the chart keeps its written key)';
+
+  @override
+  String get setlistNotesLabel => 'Note for the performer';
+
+  @override
+  String setlistEntrySubtitle(String interval, String notes) {
+    return '$interval · $notes';
+  }
+
+  @override
+  String setlistSongSubtitle(String key, String bars) {
+    return '$key · $bars';
+  }
+
+  @override
+  String get untitledProgramme => 'Untitled programme';
+
+  @override
+  String get setlistMissingChart => '(missing chart)';
 }

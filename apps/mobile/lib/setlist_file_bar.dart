@@ -29,6 +29,7 @@ import 'package:flutter/material.dart';
 
 import 'chart_source.dart';
 import 'document_file_name.dart';
+import 'l10n/app_localizations.dart';
 import 'setlist_document.dart';
 
 /// Moves a `.setlist` container's bytes to the place the reader named.
@@ -117,7 +118,7 @@ class SetlistFileAction extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
     key: const ValueKey<String>('setlist-file'),
     icon: const Icon(Icons.save_alt),
-    tooltip: 'Save or open a .setlist file',
+    tooltip: AppLocalizations.of(context).setlistFileTooltip,
     onPressed: () => unawaited(
       showSetlistFileDialog(
         context,
@@ -201,9 +202,10 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
   //          silently doing nothing.
   // KEYWORDS: save, encode, setlist-file, operation-tail, save-mode, status, error-reporting
   Future<void> _save() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String path = _controller.text.trim();
     if (path.isEmpty) {
-      setState(() => _status = 'Name a .setlist file to save to.');
+      setState(() => _status = l10n.setlistFileNameToSave);
       return;
     }
     setState(() {
@@ -225,12 +227,7 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status =
-            'Saved ${encoded.bytes.length} bytes ${_destinationWord()} $path'
-            ' · ${widget.session.items.length} entr'
-            '${widget.session.items.length == 1 ? 'y' : 'ies'}'
-            ' · ${widget.session.log.length} operation(s).'
-            '${_saveModeSuffix()}';
+        _status = _savedStatus(encoded, path);
       });
       debugPrint(
         'viewer.setlist.save.ok mode=${_mode.name} bytes=${encoded.bytes.length} '
@@ -243,52 +240,84 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status = error.message;
+        // The outcome is worded by the catalogue rather than by the exception: the exception
+        // carries the platform's own description of what happened, while "you changed your mind"
+        // is interface text, and a dialog is the only side that can reach a message catalogue.
+        _status = l10n.fileChooserCancelled;
       });
-      debugPrint('viewer.setlist.save.cancelled mode=${_mode.name}');
+      debugPrint(
+        'viewer.setlist.save.cancelled mode=${_mode.name} '
+        'reason="${error.message}"',
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _busy = false;
-        _status = 'Could not save: $error';
+        _status = l10n.fileSaveFailed('$error');
       });
       debugPrint('viewer.setlist.save.error error=$error');
     }
   }
 
-  /// Whether the destination is a path to write to or a name to offer, which is the one word in the
-  /// status line that differs by platform.
-  String _destinationWord() => _mode == ChartSaveMode.namedPath ? 'to' : 'as';
+  // PURPOSE: Word the successful save so that re-writing a file and downloading a new one cannot be
+  //          mistaken for each other, and so that every count is written in the reader's language.
+  // INPUTS: encoded — what the codec produced, for the byte count and the D19 warnings. path — the
+  //         path or file name the reader supplied. The catalogue comes from the context.
+  // OUTPUTS: The status sentence: the byte count, the entry count, the operation count, any warning,
+  //          and the platform's own promise about what a second save will do.
+  // KEYWORDS: status, save-mode, in-place, download, honest-reporting, localized
+  String _savedStatus(SetlistFileEncodeResult encoded, String path) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String bytes = l10n.byteCount(encoded.bytes.length);
+    final String entries = l10n.entryCount(widget.session.items.length);
+    final String operations = l10n.operationCount(widget.session.log.length);
+    final String base = _mode == ChartSaveMode.namedPath
+        ? l10n.setlistFileSavedTo(bytes, path, entries, operations)
+        : l10n.setlistFileSavedAs(bytes, path, entries, operations);
+    return _withSuffix(
+      _withSuffix(base, _warningSuffix(encoded.warnings)),
+      _saveModeSuffix(),
+    );
+  }
+
+  // PURPOSE: Join a status sentence with a trailing clause that may be absent, so a sentence and a
+  //          clause that is sometimes empty cannot run together with no space or keep a leading one.
+  // INPUTS: base — the sentence. suffix — the clause, or the empty string when there is none.
+  // OUTPUTS: The sentence alone, or the two joined by one space. Both empty inputs give the empty
+  //          string.
+  // KEYWORDS: text-join, optional-clause, spacing, empty-safe
+  String _withSuffix(String base, String suffix) =>
+      suffix.isEmpty ? base : '$base $suffix';
 
   // PURPOSE: Say, in the status line, what this platform's save did to the file that was already
   //          there — which is not the same answer on Chrome, on Safari and on a desktop.
-  // INPUTS: None; [_mode].
+  // INPUTS: None; [_mode] and the catalogue.
   // OUTPUTS: One sentence, or the empty string where the platform replaces the named file.
-  // KEYWORDS: save-mode, status-suffix, in-place, download, named-path
+  // KEYWORDS: save-mode, status-suffix, in-place, download, named-path, localized
   String _saveModeSuffix() => switch (_mode) {
     ChartSaveMode.namedPath => '',
-    ChartSaveMode.rewriteInPlace => ' This browser re-writes that file in place, so the next Save updates it.',
-    ChartSaveMode.download => ' This browser cannot update a file in place, so each Save downloads a NEW copy.',
+    ChartSaveMode.rewriteInPlace => AppLocalizations.of(
+      context,
+    ).saveModeRewriteInPlace,
+    ChartSaveMode.download => AppLocalizations.of(context).saveModeDownload,
   };
 
   // PURPOSE: Tell the reader, before they press Save, what this platform will do to a file that
   //          already exists — the difference between replacing their file and handing them another.
-  // INPUTS: None; [_mode].
+  // INPUTS: None; [_mode] and the catalogue.
   // OUTPUTS: One sentence in a browser, and the empty string where a path addresses the file
   //          directly.
-  // KEYWORDS: save-hint, file-system-access, download, up-front-disclosure, save-mode
+  // KEYWORDS: save-hint, file-system-access, download, up-front-disclosure, save-mode, localized
   String _saveHint() => switch (_mode) {
     ChartSaveMode.namedPath => '',
-    ChartSaveMode.rewriteInPlace =>
-      'This browser can re-write a setlist file it has already been given. The '
-          'first Save asks where to put the file; every Save after that updates '
-          'that same file.',
-    ChartSaveMode.download =>
-      'This browser cannot re-write a file in place, so every Save downloads a '
-          'NEW copy. The browser chooses where it lands, and may rename it when a '
-          'file of that name is already there.',
+    ChartSaveMode.rewriteInPlace => AppLocalizations.of(
+      context,
+    ).setlistFileSaveHintRewriteInPlace,
+    ChartSaveMode.download => AppLocalizations.of(
+      context,
+    ).setlistFileSaveHintDownload,
   };
 
   // PURPOSE: Read the `.setlist` file the reader named and hand its programme and operation tail to
@@ -304,9 +333,10 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
   //          operation twice.
   // KEYWORDS: open, read, decode, snapshot, operation-tail, typed-failure, cancellation, status
   Future<void> _open() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String path = _controller.text.trim();
     if (chartSourceIsFilePath && path.isEmpty) {
-      setState(() => _status = 'Name a .setlist file to open.');
+      setState(() => _status = l10n.setlistFileNameToOpen);
       return;
     }
     setState(() {
@@ -340,16 +370,16 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status = error.message;
+        _status = l10n.fileChooserCancelled;
       });
-      debugPrint('viewer.setlist.open.cancelled');
+      debugPrint('viewer.setlist.open.cancelled reason="${error.message}"');
     } on ContainerException catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _busy = false;
-        _status = 'Could not open: ${error.message}';
+        _status = l10n.fileOpenFailed(error.message);
       });
       debugPrint('viewer.setlist.open.refused type=${error.runtimeType}');
     } catch (error) {
@@ -358,7 +388,7 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status = 'Could not open: $error';
+        _status = l10n.fileOpenFailed('$error');
       });
       debugPrint('viewer.setlist.open.error error=$error');
     }
@@ -366,9 +396,10 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String? status = _status;
     return AlertDialog(
-      title: const Text('Programme file'),
+      title: Text(l10n.setlistFileDialogTitle),
       content: SizedBox(
         width: 520,
         child: Column(
@@ -383,8 +414,8 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
                 // filesystem its contents address the file, and in a browser they are the name the
                 // chooser and the download are given.
                 labelText: chartSourceIsFilePath
-                    ? '.setlist file'
-                    : 'File name',
+                    ? l10n.setlistFileLabelPath
+                    : l10n.fileNameLabel,
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
@@ -413,25 +444,25 @@ class _SetlistFileDialogState extends State<_SetlistFileDialog> {
         TextButton(
           key: const ValueKey<String>('setlist-file-open'),
           onPressed: _busy ? null : () => unawaited(_open()),
-          child: const Text('Open .setlist'),
+          child: Text(l10n.setlistFileOpenButton),
         ),
         FilledButton.icon(
           key: const ValueKey<String>('setlist-file-save'),
           onPressed: _busy ? null : () => unawaited(_save()),
           icon: const Icon(Icons.save_alt),
-          label: const Text('Save'),
+          label: Text(l10n.save),
         ),
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('Close'),
+          child: Text(l10n.close),
         ),
       ],
     );
   }
 
   /// The part of a status line that reports what was left out, or nothing when nothing was.
-  static String _warningSuffix(List<SetlistFileWarning> warnings) =>
-      warnings.isEmpty
+  String _warningSuffix(List<SetlistFileWarning> warnings) => warnings.isEmpty
       ? ''
-      : ' ${warnings.length} warning(s): ${warnings.first.message}';
+      : ' ${AppLocalizations.of(context).warningCount(warnings.length)}: '
+            '${warnings.first.message}';
 }

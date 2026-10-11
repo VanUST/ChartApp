@@ -52,6 +52,11 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 
 import 'ireal_library.dart';
+import 'l10n/app_localizations.dart';
+// `localizedKeyName` and `localizedSemitoneInterval` are imported rather than re-derived: the key
+// badge, the twelve-key grid, the scene bar and this sheet all name the same key and the same
+// interval with the same words.
+import 'scene_bar.dart';
 import 'setlist_document.dart';
 import 'setlist_file_bar.dart';
 import 'sheet_button.dart';
@@ -178,12 +183,12 @@ class _SetlistSheetState extends State<SetlistSheet> {
   // PURPOSE: Name the chart an entry plays, so a row shows the title a musician knows rather than
   //          the importer's positional id.
   // INPUTS: item — the entry.
-  // OUTPUTS: The title the resolver gave, or `(missing chart)` when it answered null. The missing
-  //          wording lives here because it is UI text; WHICH entries are missing is the resolver's
-  //          answer and is not second-guessed.
-  // KEYWORDS: title-resolution, missing-chart, honest-fallback, one-wording
+  // OUTPUTS: The title the resolver gave, or the catalogue's `(missing chart)` when it answered
+  //          null. The missing wording lives here because it is UI text; WHICH entries are missing
+  //          is the resolver's answer and is not second-guessed.
+  // KEYWORDS: title-resolution, missing-chart, honest-fallback, one-wording, localized
   String _titleFor(SetlistItem item) =>
-      widget.titleFor(item) ?? '(missing chart)';
+      widget.titleFor(item) ?? AppLocalizations.of(context).setlistMissingChart;
 
   // PURPOSE: Count the entries that name a chart this library does not hold, so the sheet can say
   //          how many there are above the list instead of making the musician count rows.
@@ -204,8 +209,9 @@ class _SetlistSheetState extends State<SetlistSheet> {
   //          is replaced — through `setlistSessionFor`, so the tail is folded and the sequence
   //          continues past it — and the caller is handed the same value so the page behind the
   //          sheet cannot keep drawing the previous programme.
-  // KEYWORDS: open-setlist, adopt-session, status-sentence, missing-chart, live-count
+  // KEYWORDS: open-setlist, adopt-session, status-sentence, missing-chart, live-count, localized
   String _adoptOpened(OpenedSetlist opened) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final SetlistSession next = setlistSessionFor(
       docId: opened.docId,
       snapshot: opened.snapshot,
@@ -220,27 +226,39 @@ class _SetlistSheetState extends State<SetlistSheet> {
         .where((SetlistItem item) => widget.titleFor(item) == null)
         .length;
     final String name = next.setlist.title.isEmpty
-        ? 'Untitled programme'
+        ? l10n.untitledProgramme
         : next.setlist.title;
-    return 'Opened "$name" · ${next.items.length} entr'
-        '${next.items.length == 1 ? 'y' : 'ies'}'
-        '${missing == 0 ? '' : ' · $missing NOT found in this library'}.';
+    final String openedSentence = l10n.setlistOpened(
+      name,
+      l10n.entryCount(next.items.length),
+    );
+    // Two sentences, each carrying its own full stop, because Russian agrees the verb of the second
+    // one with the count and a preposition glued on by the caller could not be translated at all.
+    return missing == 0
+        ? openedSentence
+        : '$openedSentence ${l10n.missingEntryCount(missing)}';
   }
 
   // PURPOSE: Word how one entry is played, so a row states the transposition and the note together
   //          and a zero interval is named rather than left blank.
-  // INPUTS: item — the entry.
-  // OUTPUTS: A subtitle such as `written · count off` or `+2 st · ballad`.
-  // KEYWORDS: subtitle, interval-label, notes, reading-order
+  // INPUTS: item — the entry. The catalogue comes from the context.
+  // OUTPUTS: A subtitle such as `written · count off` or `+2 st · ballad`. The interval unit is the
+  //          catalogue's abbreviation, and the note itself is the musician's own data and is printed
+  //          exactly as written.
+  // KEYWORDS: subtitle, interval-label, notes, reading-order, localized
   String _subtitleFor(SetlistItem item) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String interval = item.transposeSem == 0
-        ? 'written'
-        : '${item.transposeSem > 0 ? '+' : ''}${item.transposeSem} st';
-    return item.notes.isEmpty ? interval : '$interval · ${item.notes}';
+        ? l10n.keyGridWritten
+        : localizedSemitoneInterval(l10n, item.transposeSem);
+    return item.notes.isEmpty
+        ? interval
+        : l10n.setlistEntrySubtitle(interval, item.notes);
   }
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Setlist setlist = _session.setlist;
     return SafeArea(
       child: SizedBox(
@@ -252,20 +270,35 @@ class _SetlistSheetState extends State<SetlistSheet> {
             children: <Widget>[
               Row(
                 children: <Widget>[
-                  const Expanded(
-                    child: Text(
-                      'Programme',
-                      style: TextStyle(
-                        color: sheetOnPanelColor,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
+                  Expanded(
+                    // WHY THE HEADING SHRINKS RATHER THAN WRAPS. Measured at 412 logical pixels
+                    // (the phone width A49 records): the Russian heading `Программа` and the two
+                    // Russian button labels `Отменить` and `Вернуть` together are wider than the
+                    // row, and the heading — being the only flexible child — wrapped mid-word into
+                    // `Программ` / `а`. The English words are short enough that this never showed.
+                    // Scaling the heading down keeps the word whole and keeps the three controls
+                    // where a thumb expects them; on a wide sheet the text already fits the
+                    // Expanded box and `scaleDown` changes nothing at all.
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          l10n.setlistSheetTitle,
+                          style: const TextStyle(
+                            color: sheetOnPanelColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                   SheetButton(
                     buttonKey: 'setlist-undo',
                     icon: Icons.undo,
-                    label: 'Undo',
+                    label: l10n.undo,
                     onTap: _session.canUndo
                         ? () => _after(_session.undo())
                         : null,
@@ -274,7 +307,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
                   SheetButton(
                     buttonKey: 'setlist-redo',
                     icon: Icons.redo,
-                    label: 'Redo',
+                    label: l10n.redo,
                     onTap: _session.canRedo
                         ? () => _after(_session.redo())
                         : null,
@@ -299,13 +332,13 @@ class _SetlistSheetState extends State<SetlistSheet> {
                 key: const ValueKey<String>('setlist-title'),
                 controller: _titleController,
                 style: const TextStyle(color: sheetOnPanelColor),
-                decoration: const InputDecoration(
-                  labelText: 'Programme name',
-                  labelStyle: TextStyle(color: sheetMutedColor),
-                  enabledBorder: OutlineInputBorder(
+                decoration: InputDecoration(
+                  labelText: l10n.setlistNameLabel,
+                  labelStyle: const TextStyle(color: sheetMutedColor),
+                  enabledBorder: const OutlineInputBorder(
                     borderSide: BorderSide(color: sheetMutedColor),
                   ),
-                  focusedBorder: OutlineInputBorder(
+                  focusedBorder: const OutlineInputBorder(
                     borderSide: BorderSide(color: sheetAccentColor),
                   ),
                 ),
@@ -317,11 +350,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    '$_missingCount entr${_missingCount == 1 ? 'y' : 'ies'} '
-                    'name${_missingCount == 1 ? 's' : ''} a chart this library '
-                    'does not hold. The programme keeps '
-                    '${_missingCount == 1 ? 'it' : 'them'}; the chart is not '
-                    'here to play.',
+                    l10n.setlistMissingCharts(_missingCount),
                     key: const ValueKey<String>('setlist-missing'),
                     style: const TextStyle(
                       color: Color(0xFFFF8A80),
@@ -332,11 +361,11 @@ class _SetlistSheetState extends State<SetlistSheet> {
               const SizedBox(height: 8),
               Expanded(
                 child: setlist.items.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text(
-                          'The programme is empty.\nAdd a chart from the library.',
+                          l10n.setlistEmpty,
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: sheetMutedColor),
+                          style: const TextStyle(color: sheetMutedColor),
                         ),
                       )
                     : ListView.builder(
@@ -350,7 +379,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
               SheetButton(
                 buttonKey: 'setlist-insert',
                 icon: Icons.playlist_add,
-                label: 'Add a chart to the programme',
+                label: l10n.setlistAddChart,
                 onTap: () => unawaited(_addEntry(context)),
               ),
             ],
@@ -366,102 +395,105 @@ class _SetlistSheetState extends State<SetlistSheet> {
   // OUTPUTS: A row widget. Up is disabled on the first entry, down on the last, and delete is
   //          always available: removing the only entry is legal and leaves the empty programme the
   //          model allows.
-  // KEYWORDS: entry-row, position, play, move, edit, delete, bounds-disabled
-  Widget _entryRow(int index, SetlistItem item) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Material(
-      color: sheetCellColor,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
-        child: Row(
-          children: <Widget>[
-            SizedBox(
-              width: 30,
-              child: Text(
-                '${index + 1}',
-                style: const TextStyle(
-                  color: sheetAccentColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+  // KEYWORDS: entry-row, position, play, move, edit, delete, bounds-disabled, localized
+  Widget _entryRow(int index, SetlistItem item) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: sheetCellColor,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+          child: Row(
+            children: <Widget>[
+              SizedBox(
+                width: 30,
+                child: Text(
+                  '${index + 1}',
+                  style: const TextStyle(
+                    color: sheetAccentColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    _titleFor(item),
-                    key: ValueKey<String>('setlist-entry-title-$index'),
-                    style: const TextStyle(
-                      color: sheetOnPanelColor,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      _titleFor(item),
+                      key: ValueKey<String>('setlist-entry-title-$index'),
+                      style: const TextStyle(
+                        color: sheetOnPanelColor,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    _subtitleFor(item),
-                    key: ValueKey<String>('setlist-entry-subtitle-$index'),
-                    style: const TextStyle(
-                      color: sheetMutedColor,
-                      fontSize: 12,
+                    Text(
+                      _subtitleFor(item),
+                      key: ValueKey<String>('setlist-entry-subtitle-$index'),
+                      style: const TextStyle(
+                        color: sheetMutedColor,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              key: ValueKey<String>('setlist-play-$index'),
-              icon: const Icon(Icons.play_arrow),
-              color: sheetAccentColor,
-              tooltip: 'Play this chart from the programme',
-              onPressed: () {
-                Navigator.of(context).pop();
-                widget.onPlay(index);
-              },
-            ),
-            IconButton(
-              key: ValueKey<String>('setlist-up-$index'),
-              icon: const Icon(Icons.arrow_upward),
-              color: sheetOnPanelColor,
-              tooltip: 'Move earlier',
-              onPressed: index == 0
-                  ? null
-                  : () => _after(_session.moveItem(index, index - 1)),
-            ),
-            IconButton(
-              key: ValueKey<String>('setlist-down-$index'),
-              icon: const Icon(Icons.arrow_downward),
-              color: sheetOnPanelColor,
-              tooltip: 'Move later',
-              onPressed: index == _session.items.length - 1
-                  ? null
-                  : () => _after(_session.moveItem(index, index + 1)),
-            ),
-            IconButton(
-              key: ValueKey<String>('setlist-edit-$index'),
-              icon: const Icon(Icons.tune),
-              color: sheetOnPanelColor,
-              tooltip: 'How this entry is played',
-              onPressed: () => unawaited(_editEntry(context, index, item)),
-            ),
-            IconButton(
-              key: ValueKey<String>('setlist-delete-$index'),
-              icon: const Icon(Icons.delete_outline),
-              color: const Color(0xFFFF8A80),
-              tooltip: 'Remove from the programme',
-              onPressed: () => _after(_session.deleteItem(index)),
-            ),
-          ],
+              IconButton(
+                key: ValueKey<String>('setlist-play-$index'),
+                icon: const Icon(Icons.play_arrow),
+                color: sheetAccentColor,
+                tooltip: l10n.setlistPlayTooltip,
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  widget.onPlay(index);
+                },
+              ),
+              IconButton(
+                key: ValueKey<String>('setlist-up-$index'),
+                icon: const Icon(Icons.arrow_upward),
+                color: sheetOnPanelColor,
+                tooltip: l10n.moveEarlier,
+                onPressed: index == 0
+                    ? null
+                    : () => _after(_session.moveItem(index, index - 1)),
+              ),
+              IconButton(
+                key: ValueKey<String>('setlist-down-$index'),
+                icon: const Icon(Icons.arrow_downward),
+                color: sheetOnPanelColor,
+                tooltip: l10n.moveLater,
+                onPressed: index == _session.items.length - 1
+                    ? null
+                    : () => _after(_session.moveItem(index, index + 1)),
+              ),
+              IconButton(
+                key: ValueKey<String>('setlist-edit-$index'),
+                icon: const Icon(Icons.tune),
+                color: sheetOnPanelColor,
+                tooltip: l10n.setlistEntryTooltip,
+                onPressed: () => unawaited(_editEntry(context, index, item)),
+              ),
+              IconButton(
+                key: ValueKey<String>('setlist-delete-$index'),
+                icon: const Icon(Icons.delete_outline),
+                color: const Color(0xFFFF8A80),
+                tooltip: l10n.setlistRemoveTooltip,
+                onPressed: () => _after(_session.deleteItem(index)),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   // PURPOSE: Change how one entry is played, on one plate: the interval it is transposed by and the
   //          note the performer reads.
@@ -476,6 +508,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
     SetlistItem item,
   ) async {
     final TextEditingController notes = TextEditingController(text: item.notes);
+    final AppLocalizations l10n = AppLocalizations.of(context);
     int semitones = item.transposeSem;
     final bool? confirmed = await showDialog<bool>(
       context: context,
@@ -491,9 +524,12 @@ class _SetlistSheetState extends State<SetlistSheet> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  const Text(
-                    'Transposition for this entry (the chart keeps its written key)',
-                    style: TextStyle(color: sheetMutedColor, fontSize: 12),
+                  Text(
+                    l10n.setlistTranspositionHint,
+                    style: const TextStyle(
+                      color: sheetMutedColor,
+                      fontSize: 12,
+                    ),
                   ),
                   Row(
                     children: <Widget>[
@@ -504,7 +540,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
                         onPressed: () => setDialogState(() => semitones -= 1),
                       ),
                       Text(
-                        '${semitones > 0 ? '+' : ''}$semitones st',
+                        localizedSemitoneInterval(l10n, semitones),
                         key: const ValueKey<String>('setlist-transpose-value'),
                         style: const TextStyle(
                           color: sheetAccentColor,
@@ -524,9 +560,9 @@ class _SetlistSheetState extends State<SetlistSheet> {
                     key: const ValueKey<String>('setlist-notes'),
                     controller: notes,
                     style: const TextStyle(color: sheetOnPanelColor),
-                    decoration: const InputDecoration(
-                      labelText: 'Note for the performer',
-                      labelStyle: TextStyle(color: sheetMutedColor),
+                    decoration: InputDecoration(
+                      labelText: l10n.setlistNotesLabel,
+                      labelStyle: const TextStyle(color: sheetMutedColor),
                     ),
                   ),
                 ],
@@ -534,12 +570,12 @@ class _SetlistSheetState extends State<SetlistSheet> {
               actions: <Widget>[
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
+                  child: Text(l10n.cancel),
                 ),
                 TextButton(
                   key: const ValueKey<String>('setlist-edit-ok'),
                   onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('OK'),
+                  child: Text(l10n.ok),
                 ),
               ],
             ),
@@ -562,13 +598,14 @@ class _SetlistSheetState extends State<SetlistSheet> {
   //          subtitle of the row it lands in.
   // KEYWORDS: add-entry, chart-picker, append, duplicate-allowed, dismissable
   Future<void> _addEntry(BuildContext context) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final IRealSong? picked = await showDialog<IRealSong>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
         backgroundColor: sheetPanelColor,
-        title: const Text(
-          'Add a chart',
-          style: TextStyle(color: sheetOnPanelColor),
+        title: Text(
+          l10n.setlistAddChartTitle,
+          style: const TextStyle(color: sheetOnPanelColor),
         ),
         content: SizedBox(
           width: 420,
@@ -599,7 +636,10 @@ class _SetlistSheetState extends State<SetlistSheet> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(
-                  '${song.song.key} · ${song.song.writtenBarCount} bar(s)',
+                  l10n.setlistSongSubtitle(
+                    localizedKeyName(l10n, song.song.key),
+                    l10n.barCount(song.song.writtenBarCount),
+                  ),
                   style: const TextStyle(color: sheetMutedColor, fontSize: 12),
                 ),
                 onTap: () => Navigator.of(context).pop(song),
@@ -610,7 +650,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
         ],
       ),

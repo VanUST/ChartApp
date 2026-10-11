@@ -559,6 +559,1126 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Language: {language}'**
   String languageChanged(String language);
+
+  /// The button that writes a document to a file, shared by the song-info sheet and both file dialogs.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get save;
+
+  /// The confirming button of the programme sheet's entry-edit dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get ok;
+
+  /// The file dialogs' field label in a browser, where the field holds a name to offer the chooser rather than a path.
+  ///
+  /// In en, this message translates to:
+  /// **'File name'**
+  String get fileNameLabel;
+
+  /// The status a file dialog shows when the write threw. The error text is the platform's own description and is not translated.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save: {error}'**
+  String fileSaveFailed(String error);
+
+  /// The status a file dialog shows when the read or the decode threw. The error text is the platform's or the container's own description and is not translated.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open: {error}'**
+  String fileOpenFailed(String error);
+
+  /// What a file dialog says after the reader dismissed the platform's file chooser. The dialog words the outcome from this catalogue rather than from the exception, because changing one's mind is an outcome and not a fault.
+  ///
+  /// In en, this message translates to:
+  /// **'No file was chosen.'**
+  String get fileChooserCancelled;
+
+  /// The tail of a file dialog's status: how many warnings the container's codec produced, and the first of them. The codec's own message is a diagnostic the container wrote and is not translated.
+  ///
+  /// In en, this message translates to:
+  /// **' {warnings}: {message}'**
+  String fileWarningSuffix(String warnings, String message);
+
+  /// How many bytes a container wrote, as a file dialog reports it.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} byte} other{{count} bytes}}'**
+  String byteCount(int count);
+
+  /// How many log operations a container carries.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} operation} other{{count} operations}}'**
+  String operationCount(int count);
+
+  /// How many warnings a container's codec produced.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} warning} other{{count} warnings}}'**
+  String warningCount(int count);
+
+  /// How many running-order entries a programme holds. Russian needs three written forms here.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} entry} other{{count} entries}}'**
+  String entryCount(int count);
+
+  /// The title of the `.chart` save/open dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Chart file'**
+  String get chartFileDialogTitle;
+
+  /// The `.chart` dialog's field label on a platform where the field holds a path that addresses the file.
+  ///
+  /// In en, this message translates to:
+  /// **'.chart file'**
+  String get chartFileLabelPath;
+
+  /// The `.chart` dialog's button that reads the named file.
+  ///
+  /// In en, this message translates to:
+  /// **'Open .chart'**
+  String get chartFileOpenButton;
+
+  /// What the `.chart` dialog says when Save is pressed with no document on screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Load or import a song before saving it.'**
+  String get chartFileNoDocument;
+
+  /// What the `.chart` dialog says when Save is pressed with an empty field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name a .chart file to save to.'**
+  String get chartFileNameToSave;
+
+  /// What the `.chart` dialog says when Open is pressed with an empty field on a platform where the field is a path.
+  ///
+  /// In en, this message translates to:
+  /// **'Name a .chart file to open.'**
+  String get chartFileNameToOpen;
+
+  /// The `.chart` dialog's success line on a platform where the field names a destination path.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved {bytes} to {path} · {operations}.'**
+  String chartFileSavedTo(String bytes, String path, String operations);
+
+  /// The `.chart` dialog's success line in a browser, where the save hands the reader a file rather than writing a path.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved {bytes} as {path} · {operations}.'**
+  String chartFileSavedAs(String bytes, String path, String operations);
+
+  /// The `.chart` dialog's success line after a file was read and handed to the viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened \"{title}\" · {operations}.'**
+  String chartFileOpened(String title, String operations);
+
+  /// The tail of a file dialog's success line where the browser can overwrite the file it already has a handle on.
+  ///
+  /// In en, this message translates to:
+  /// **'This browser re-writes that file in place, so the next Save updates it.'**
+  String get saveModeRewriteInPlace;
+
+  /// The tail of a file dialog's success line where every save produces a fresh download.
+  ///
+  /// In en, this message translates to:
+  /// **'This browser cannot update a file in place, so each Save downloads a NEW copy.'**
+  String get saveModeDownload;
+
+  /// The `.chart` dialog's up-front promise on a browser with the File System Access API.
+  ///
+  /// In en, this message translates to:
+  /// **'This browser can re-write a chart file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.'**
+  String get chartFileSaveHintRewriteInPlace;
+
+  /// The `.chart` dialog's up-front promise on a browser that can only download.
+  ///
+  /// In en, this message translates to:
+  /// **'This browser cannot re-write a file in place, so every Save downloads a NEW copy. The browser chooses where it lands, and may rename it when a file of that name is already there.'**
+  String get chartFileSaveHintDownload;
+
+  /// The tooltip of the programme sheet's app-bar-shaped `.setlist` control.
+  ///
+  /// In en, this message translates to:
+  /// **'Save or open a .setlist file'**
+  String get setlistFileTooltip;
+
+  /// The title of the `.setlist` save/open dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Programme file'**
+  String get setlistFileDialogTitle;
+
+  /// The `.setlist` dialog's field label on a platform where the field holds a path.
+  ///
+  /// In en, this message translates to:
+  /// **'.setlist file'**
+  String get setlistFileLabelPath;
+
+  /// The `.setlist` dialog's button that reads the named file.
+  ///
+  /// In en, this message translates to:
+  /// **'Open .setlist'**
+  String get setlistFileOpenButton;
+
+  /// What the `.setlist` dialog says when Save is pressed with an empty field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name a .setlist file to save to.'**
+  String get setlistFileNameToSave;
+
+  /// What the `.setlist` dialog says when Open is pressed with an empty field on a platform where the field is a path.
+  ///
+  /// In en, this message translates to:
+  /// **'Name a .setlist file to open.'**
+  String get setlistFileNameToOpen;
+
+  /// The `.setlist` dialog's success line on a platform where the field names a destination path.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved {bytes} to {path} · {entries} · {operations}.'**
+  String setlistFileSavedTo(
+    String bytes,
+    String path,
+    String entries,
+    String operations,
+  );
+
+  /// The `.setlist` dialog's success line in a browser.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved {bytes} as {path} · {entries} · {operations}.'**
+  String setlistFileSavedAs(
+    String bytes,
+    String path,
+    String entries,
+    String operations,
+  );
+
+  /// The `.setlist` dialog's up-front promise on a browser with the File System Access API.
+  ///
+  /// In en, this message translates to:
+  /// **'This browser can re-write a setlist file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.'**
+  String get setlistFileSaveHintRewriteInPlace;
+
+  /// The `.setlist` dialog's up-front promise on a browser that can only download.
+  ///
+  /// In en, this message translates to:
+  /// **'This browser cannot re-write a file in place, so every Save downloads a NEW copy. The browser chooses where it lands, and may rename it when a file of that name is already there.'**
+  String get setlistFileSaveHintDownload;
+
+  /// The `.setlist` dialog's success line after a programme was read and adopted.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened \"{name}\" · {entries}.'**
+  String setlistOpened(String name, String entries);
+
+  /// How many of an opened programme's entries name a chart the loaded library does not hold. English writes the same words for every count; Russian agrees the verb with the noun.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} not found in this library.} other{{count} not found in this library.}}'**
+  String missingEntryCount(int count);
+
+  /// The song-info sheet's label for the tune's name.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get metadataTitle;
+
+  /// What the title field of the song-info sheet is for.
+  ///
+  /// In en, this message translates to:
+  /// **'The name a musician reads at the top of the chart.'**
+  String get metadataTitleHint;
+
+  /// The song-info sheet's label for who wrote the tune.
+  ///
+  /// In en, this message translates to:
+  /// **'Composer'**
+  String get metadataComposer;
+
+  /// What the composer field of the song-info sheet is for, including why its order is not normalised.
+  ///
+  /// In en, this message translates to:
+  /// **'As written; the order is whatever the format stores.'**
+  String get metadataComposerHint;
+
+  /// The song-info sheet's label for the style or feel the tune is played in.
+  ///
+  /// In en, this message translates to:
+  /// **'Style'**
+  String get metadataStyle;
+
+  /// What the style field of the song-info sheet is for. The examples are iReal's own style words and are data a musician types, not interface text.
+  ///
+  /// In en, this message translates to:
+  /// **'Free text, such as Medium Swing or Ballad.'**
+  String get metadataStyleHint;
+
+  /// The song-info sheet's label for the tempo in beats per minute.
+  ///
+  /// In en, this message translates to:
+  /// **'Tempo (BPM)'**
+  String get metadataTempo;
+
+  /// What the tempo field says about the model's zero, when the field holds a number.
+  ///
+  /// In en, this message translates to:
+  /// **'0 means this chart sets no tempo.'**
+  String get metadataTempoHelperZero;
+
+  /// What the tempo field asks for, when the field cannot be read as a whole number.
+  ///
+  /// In en, this message translates to:
+  /// **'Whole beats per minute, or 0 for none.'**
+  String get metadataTempoHelperHint;
+
+  /// The tempo field's own error line while its text cannot be read as a whole number.
+  ///
+  /// In en, this message translates to:
+  /// **'A tempo is a whole number.'**
+  String get metadataTempoError;
+
+  /// The song-info sheet's footer after Save was refused because the tempo is not a number.
+  ///
+  /// In en, this message translates to:
+  /// **'A tempo is a whole number of beats per minute.'**
+  String get metadataTempoRefused;
+
+  /// The song-info sheet's footer after Save found every field already equal to the song's own values.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed, so nothing was written to the log.'**
+  String get metadataNothingChanged;
+
+  /// The song-info sheet's footer before anything is pressed.
+  ///
+  /// In en, this message translates to:
+  /// **'One edit: the four facts above are written together.'**
+  String get metadataFooterHint;
+
+  /// The song-info sheet's footer, in the removal colour, while the tempo cannot be read and Save is disabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Fix the tempo before saving.'**
+  String get metadataFooterFixTempo;
+
+  /// The chord palette's header: which bar and which cell it is about to edit, numbered from one across the whole chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Bar {bar} · cell {cell}'**
+  String palettePosition(int bar, int cell);
+
+  /// The chord palette's subtitle: the key the roots on the grid are spelled in. The key is named through the catalogue so the mode word is the reader's language and the tonic letter stays the chart's own notation.
+  ///
+  /// In en, this message translates to:
+  /// **'Chords in {key}'**
+  String paletteChordsIn(String key);
+
+  /// The chord palette's preview before a root has been tapped.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a root'**
+  String get palettePickRoot;
+
+  /// The chord palette's preview when the edited cell holds no chord.
+  ///
+  /// In en, this message translates to:
+  /// **'This cell is empty.'**
+  String get paletteCellEmpty;
+
+  /// The chord the edited cell holds right now, shown beneath the preview of what a tap would write.
+  ///
+  /// In en, this message translates to:
+  /// **'Now: {chord}'**
+  String paletteNow(String chord);
+
+  /// The chord palette's destructive button that clears the edited cell.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove chord'**
+  String get paletteRemoveChord;
+
+  /// The form sheet's caption over the operations that add, copy and remove one bar.
+  ///
+  /// In en, this message translates to:
+  /// **'BAR'**
+  String get formGroupBar;
+
+  /// The form sheet's caption over the repeat barline and alternative-ending controls.
+  ///
+  /// In en, this message translates to:
+  /// **'REPEAT'**
+  String get formGroupRepeat;
+
+  /// The form sheet's caption over the four signs a bar can carry.
+  ///
+  /// In en, this message translates to:
+  /// **'MARKS'**
+  String get formGroupMarks;
+
+  /// The form sheet's caption over the operations that add, copy, move and remove a section.
+  ///
+  /// In en, this message translates to:
+  /// **'SECTION'**
+  String get formGroupSection;
+
+  /// The form sheet's button that inserts a bar in front of the selected one.
+  ///
+  /// In en, this message translates to:
+  /// **'Bar before'**
+  String get formBarBefore;
+
+  /// The form sheet's button that inserts a bar behind the selected one.
+  ///
+  /// In en, this message translates to:
+  /// **'Bar after'**
+  String get formBarAfter;
+
+  /// The form sheet's button that copies the selected bar behind itself.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate bar'**
+  String get formDuplicateBar;
+
+  /// The form sheet's destructive button that removes the selected bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete bar'**
+  String get formDeleteBar;
+
+  /// The form sheet's toggle for the repeat-start barline on the selected bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat start'**
+  String get formRepeatStart;
+
+  /// The form sheet's toggle for the repeat-end barline on the selected bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat end'**
+  String get formRepeatEnd;
+
+  /// The form sheet's cycle button for the repeat-previous sign, carrying the sign the bar holds now.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous: {state}'**
+  String formPreviousLabel(String state);
+
+  /// The form sheet's button that opens the alternative-ending chooser, carrying the bracket the bar holds now.
+  ///
+  /// In en, this message translates to:
+  /// **'Ending: {state}'**
+  String formEndingLabel(String state);
+
+  /// The form sheet's button that inserts a section in front of the selected one.
+  ///
+  /// In en, this message translates to:
+  /// **'Section before'**
+  String get formSectionBefore;
+
+  /// The form sheet's button that inserts a section behind the selected one.
+  ///
+  /// In en, this message translates to:
+  /// **'Section after'**
+  String get formSectionAfter;
+
+  /// The form sheet's button that copies the selected section, with everything in it, behind itself.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate section'**
+  String get formDuplicateSection;
+
+  /// The form sheet's button that opens the rename box, and the box's own title.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename section'**
+  String get formRenameSection;
+
+  /// The button and tooltip that move a section, or a programme entry, one place towards the top.
+  ///
+  /// In en, this message translates to:
+  /// **'Move earlier'**
+  String get moveEarlier;
+
+  /// The button and tooltip that move a section, or a programme entry, one place towards the end.
+  ///
+  /// In en, this message translates to:
+  /// **'Move later'**
+  String get moveLater;
+
+  /// The form sheet's destructive button that removes the selected section and its bars.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete section'**
+  String get formDeleteSection;
+
+  /// The form sheet's and the text-cue sheet's header when their cursor names no bar in the song.
+  ///
+  /// In en, this message translates to:
+  /// **'No bar selected'**
+  String get formNoBarSelected;
+
+  /// The form sheet's header naming the bar and section the next operation acts on.
+  ///
+  /// In en, this message translates to:
+  /// **'Bar {bar} · section {section}'**
+  String formPosition(int bar, String section);
+
+  /// The form sheet's and the text-cue sheet's header when their cursor names a bar a form edit removed.
+  ///
+  /// In en, this message translates to:
+  /// **'The selected bar is no longer in the song.'**
+  String get formBarGone;
+
+  /// The form sheet's header detail line: how far into its section the cursor's bar is, and where that section sits in the song.
+  ///
+  /// In en, this message translates to:
+  /// **'bar {bar} of {bars} in this section · section {section} of {sections}'**
+  String formDetail(int bar, int bars, int section, int sections);
+
+  /// The form sheet's status when an operation was refused and the caller named no reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: that operation is not possible here.'**
+  String get formRefusedDefault;
+
+  /// The form sheet's status after a bar was inserted in front of the cursor.
+  ///
+  /// In en, this message translates to:
+  /// **'Inserted a bar before.'**
+  String get formBarInsertedBefore;
+
+  /// The form sheet's status after a bar was inserted behind the cursor.
+  ///
+  /// In en, this message translates to:
+  /// **'Inserted a bar after.'**
+  String get formBarInsertedAfter;
+
+  /// The form sheet's status when an insert was refused because the cursor names no bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was inserted: the song has no such bar.'**
+  String get formNoSuchBarInsert;
+
+  /// The form sheet's status after the selected bar was copied.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicated this bar.'**
+  String get formBarDuplicated;
+
+  /// The form sheet's status when a bar copy was refused because the cursor names no bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was copied: the song has no such bar.'**
+  String get formNoSuchBarCopy;
+
+  /// The form sheet's status after the selected bar was removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted this bar.'**
+  String get formBarDeleted;
+
+  /// The form sheet's status when deleting a section's last bar was refused, with the reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was deleted: a section keeps at least one bar, or it could not be shown or selected.'**
+  String get formLastBarRefused;
+
+  /// The form sheet's status after the repeat-start barline was put on the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat start set.'**
+  String get formRepeatStartSet;
+
+  /// The form sheet's status after the repeat-start barline was taken off the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat start cleared.'**
+  String get formRepeatStartCleared;
+
+  /// The form sheet's status when a repeat barline toggle changed nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: the bar already carries that barline.'**
+  String get formBarlineSame;
+
+  /// The form sheet's status after the repeat-end barline was put on the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat end set.'**
+  String get formRepeatEndSet;
+
+  /// The form sheet's status after the repeat-end barline was taken off the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat end cleared.'**
+  String get formRepeatEndCleared;
+
+  /// The form sheet's status after the repeat-previous sign was stepped, naming the state it reached.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat previous: {state}.'**
+  String formRepeatPreviousStatus(String state);
+
+  /// The form sheet's status when the repeat-previous cycle changed nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: the bar already carries that symbol.'**
+  String get formSymbolSame;
+
+  /// The form sheet's status after the alternative-ending bracket was taken off the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Ending bracket removed.'**
+  String get formEndingRemoved;
+
+  /// The form sheet's status after an alternative-ending bracket was chosen. It deliberately carries no full stop: the bracket is named the way it is drawn and already ends in the dot that belongs to it.
+  ///
+  /// In en, this message translates to:
+  /// **'Ending bracket set to {volta}'**
+  String formEndingSetTo(String volta);
+
+  /// The form sheet's status when an ending choice equal to the bar's own was made.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: the bar already carries that bracket.'**
+  String get formBracketSame;
+
+  /// The form sheet's status after a sign was put on the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'{mark} set.'**
+  String formMarkSet(String mark);
+
+  /// The form sheet's status after a sign was taken off the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'{mark} cleared.'**
+  String formMarkCleared(String mark);
+
+  /// The form sheet's status when a sign was already on the bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: the bar already carries that sign.'**
+  String get formSignPresent;
+
+  /// The form sheet's status when a sign was already off the bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: the bar does not carry that sign.'**
+  String get formSignAbsent;
+
+  /// The form sheet's status after a section was inserted in front of the cursor's section.
+  ///
+  /// In en, this message translates to:
+  /// **'Inserted a new section before.'**
+  String get formSectionInsertedBefore;
+
+  /// The form sheet's status after a section was inserted behind the cursor's section.
+  ///
+  /// In en, this message translates to:
+  /// **'Inserted a new section after.'**
+  String get formSectionInsertedAfter;
+
+  /// The form sheet's status when a section insert was refused.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was inserted: the song has no such section.'**
+  String get formNoSuchSectionInsert;
+
+  /// The form sheet's status after the selected section was copied.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicated this section.'**
+  String get formSectionDuplicated;
+
+  /// The form sheet's status when a section copy was refused.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was copied: the song has no such section.'**
+  String get formNoSuchSectionCopy;
+
+  /// The form sheet's status after the selected section was moved one place towards the top.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved this section earlier.'**
+  String get formSectionMovedEarlier;
+
+  /// The form sheet's status after the selected section was moved one place towards the end.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved this section later.'**
+  String get formSectionMovedLater;
+
+  /// The form sheet's status when a section move was refused at either end of the form.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing moved: the section is already at that end of the form.'**
+  String get formSectionAtEnd;
+
+  /// The form sheet's status after the selected section and its bars were removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted this section.'**
+  String get formSectionDeleted;
+
+  /// The form sheet's status when deleting the song's last section was refused, with the reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was deleted: a song keeps at least one section, or there would be nothing left to show.'**
+  String get formLastSectionRefused;
+
+  /// The form sheet's status after the selected section was renamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Renamed this section to \"{name}\".'**
+  String formSectionRenamed(String name);
+
+  /// The form sheet's status when a rename asked for the name the section already had.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was renamed: it already carries that name.'**
+  String get formNameSame;
+
+  /// The form sheet's word for a bar that carries no alternative-ending bracket.
+  ///
+  /// In en, this message translates to:
+  /// **'none'**
+  String get formVoltaNone;
+
+  /// The form sheet's word for the bracket with no figure, which the page draws as a bare bracket. It is a different state from having no bracket.
+  ///
+  /// In en, this message translates to:
+  /// **'unnumbered'**
+  String get formVoltaUnnumbered;
+
+  /// The form sheet's word for a bar that carries no repeat-previous sign.
+  ///
+  /// In en, this message translates to:
+  /// **'off'**
+  String get formRepeatPreviousOff;
+
+  /// The form sheet's word for the repeat-previous sign that means the previous bar.
+  ///
+  /// In en, this message translates to:
+  /// **'1 bar'**
+  String get formRepeatPreviousOneBar;
+
+  /// The form sheet's word for the repeat-previous sign that means the previous two bars.
+  ///
+  /// In en, this message translates to:
+  /// **'2 bars'**
+  String get formRepeatPreviousTwoBars;
+
+  /// The label of the rename box's field.
+  ///
+  /// In en, this message translates to:
+  /// **'Rehearsal letter or name'**
+  String get formRenameLabel;
+
+  /// What the rename box's field is for, and what a one-letter name becomes.
+  ///
+  /// In en, this message translates to:
+  /// **'A single letter becomes a rehearsal letter.'**
+  String get formRenameHelper;
+
+  /// The rename box's confirming button.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename'**
+  String get formRenameButton;
+
+  /// The title of the dialog that chooses an alternative-ending bracket.
+  ///
+  /// In en, this message translates to:
+  /// **'Alternative ending'**
+  String get formEndingTitle;
+
+  /// The ending dialog's choice that removes the bracket. It is not the same as the unnumbered bracket, which the page draws.
+  ///
+  /// In en, this message translates to:
+  /// **'No bracket'**
+  String get formNoBracket;
+
+  /// The ending dialog's choice of the bracket with no figure, written so it echoes the bare bracket the page draws.
+  ///
+  /// In en, this message translates to:
+  /// **'Unnumbered ['**
+  String get formUnnumberedBracket;
+
+  /// The name of the segno sign on the form sheet's toggle. The sign on the page is notation; this is the interface's word for it.
+  ///
+  /// In en, this message translates to:
+  /// **'Segno'**
+  String get markSegno;
+
+  /// The name of the coda sign on the form sheet's toggle.
+  ///
+  /// In en, this message translates to:
+  /// **'Coda'**
+  String get markCoda;
+
+  /// The name of the fermata sign on the form sheet's toggle.
+  ///
+  /// In en, this message translates to:
+  /// **'Fermata'**
+  String get markFermata;
+
+  /// The name of the player's-stop sign on the form sheet's toggle.
+  ///
+  /// In en, this message translates to:
+  /// **'Player end'**
+  String get markPlayerEnding;
+
+  /// The text-cue sheet's caption over the controls that add a cue and walk to another bar.
+  ///
+  /// In en, this message translates to:
+  /// **'THIS BAR'**
+  String get cueGroupThisBar;
+
+  /// The text-cue sheet's caption over the controls that change the selected cue.
+  ///
+  /// In en, this message translates to:
+  /// **'THE CUE'**
+  String get cueGroupTheCue;
+
+  /// The text-cue sheet's button that inserts a cue on the cursor's bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Write words here'**
+  String get cueWriteWords;
+
+  /// The text-cue sheet's button that walks the cursor one bar earlier.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous bar'**
+  String get cuePreviousBar;
+
+  /// The text-cue sheet's button that walks the cursor one bar later.
+  ///
+  /// In en, this message translates to:
+  /// **'Next bar'**
+  String get cueNextBar;
+
+  /// The text-cue sheet's button that writes the field into the selected cue.
+  ///
+  /// In en, this message translates to:
+  /// **'Save words'**
+  String get cueSaveWords;
+
+  /// The text-cue sheet's button that moves the selected cue one bar earlier.
+  ///
+  /// In en, this message translates to:
+  /// **'A bar earlier'**
+  String get cueBarEarlier;
+
+  /// The text-cue sheet's button that moves the selected cue one bar later.
+  ///
+  /// In en, this message translates to:
+  /// **'A bar later'**
+  String get cueBarLater;
+
+  /// The text-cue sheet's button that nudges the selected cue up the page.
+  ///
+  /// In en, this message translates to:
+  /// **'Up a line'**
+  String get cueUpLine;
+
+  /// The text-cue sheet's button that nudges the selected cue down the page.
+  ///
+  /// In en, this message translates to:
+  /// **'Down a line'**
+  String get cueDownLine;
+
+  /// The text-cue sheet's destructive button that removes the selected cue.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove the cue'**
+  String get cueRemove;
+
+  /// The text-cue sheet's header naming the bar the next cue goes on.
+  ///
+  /// In en, this message translates to:
+  /// **'Words · bar {bar}'**
+  String cuePosition(int bar);
+
+  /// The text-cue sheet's header detail line: how far into its section the cursor's bar is, which part of it the cue is anchored to, and how many cues are already on it.
+  ///
+  /// In en, this message translates to:
+  /// **'bar {bar} of {bars} in this section · {place} · {cues} here'**
+  String cueDetail(int bar, int bars, String place, String cues);
+
+  /// How many remarks a bar carries.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} cue} other{{count} cues}}'**
+  String cueCount(int count);
+
+  /// The text-cue sheet's word for a remark anchored to the bar rather than to one of its cells.
+  ///
+  /// In en, this message translates to:
+  /// **'whole bar'**
+  String get cueWholeBar;
+
+  /// The text-cue sheet's word for a remark anchored to one cell of a bar.
+  ///
+  /// In en, this message translates to:
+  /// **'cell {cell}'**
+  String cueCell(int cell);
+
+  /// The text-cue sheet's status when an operation was refused and the caller named no reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: that is not possible here.'**
+  String get cueRefusedDefault;
+
+  /// The text-cue sheet's status when adding a cue was refused, so the refuse branch names what was attempted.
+  ///
+  /// In en, this message translates to:
+  /// **'Added a cue.'**
+  String get cueAdded;
+
+  /// The text-cue sheet's status when a cue insert was refused because the cursor names no bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was added: the song has no such bar.'**
+  String get cueNoSuchBarAdd;
+
+  /// The text-cue sheet's status after a cue was inserted, telling the musician the field is waiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Added a cue — type the words.'**
+  String get cueAddedTypeWords;
+
+  /// The text-cue sheet's status when a press needed a selected cue and there is none, in the cases where the refusal has no more specific reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing happened.'**
+  String get cueNothingHappened;
+
+  /// The text-cue sheet's status when Save words was pressed with nothing selected.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was saved: no cue is selected.'**
+  String get cueNoSelectionSave;
+
+  /// The text-cue sheet's status after the words were written to the selected cue.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved the words.'**
+  String get cueWordsSaved;
+
+  /// The text-cue sheet's status when the field held the words the cue already had.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: the cue already says that.'**
+  String get cueSameWords;
+
+  /// The text-cue sheet's status when the cue was removed with nothing selected.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was removed: no cue is selected.'**
+  String get cueNoSelectionRemove;
+
+  /// The text-cue sheet's status after the selected cue was taken off the chart.
+  ///
+  /// In en, this message translates to:
+  /// **'Removed the cue.'**
+  String get cueRemoved;
+
+  /// The text-cue sheet's status when the selected cue had already been removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was removed: the cue is already gone.'**
+  String get cueAlreadyGone;
+
+  /// The text-cue sheet's status when a move was asked for with nothing selected.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing moved: no cue is selected.'**
+  String get cueNoSelectionMove;
+
+  /// The text-cue sheet's status when a move or a cursor walk would leave the song.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing moved: that is the end of the song.'**
+  String get cueEndOfSong;
+
+  /// The text-cue sheet's status after the selected cue was moved to the previous bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved the cue a bar earlier.'**
+  String get cueMovedEarlier;
+
+  /// The text-cue sheet's status after the selected cue was moved to the next bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved the cue a bar later.'**
+  String get cueMovedLater;
+
+  /// The text-cue sheet's status when a move landed on the bar the cue already sat on.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing moved: the cue is already there.'**
+  String get cueAlreadyThere;
+
+  /// The text-cue sheet's status after the selected cue's offset was moved up.
+  ///
+  /// In en, this message translates to:
+  /// **'Nudged the cue up.'**
+  String get cueNudgedUp;
+
+  /// The text-cue sheet's status after the selected cue's offset was moved down.
+  ///
+  /// In en, this message translates to:
+  /// **'Nudged the cue down.'**
+  String get cueNudgedDown;
+
+  /// The text-cue sheet's status when a nudge changed nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing moved.'**
+  String get cueNothingMoved;
+
+  /// The text-cue sheet's status after the cursor walked to another bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Now on bar {bar}.'**
+  String cueNowOnBar(int bar);
+
+  /// The text-cue sheet's cue list when the cursor's bar carries no remark.
+  ///
+  /// In en, this message translates to:
+  /// **'No words on this bar yet.'**
+  String get cueNoneHere;
+
+  /// The cue list's name for a cue that was inserted and not yet typed into. It is the interface's own word, not the cue's text.
+  ///
+  /// In en, this message translates to:
+  /// **'(no words yet)'**
+  String get cueNoWordsYet;
+
+  /// The label of the text-cue sheet's words field.
+  ///
+  /// In en, this message translates to:
+  /// **'The words'**
+  String get cueWordsLabel;
+
+  /// The text-cue sheet's examples under the words field. The EXAMPLES ARE NOT TRANSLATED AND ARE THE SAME IN EVERY LOCALE: they are the conventional notation a musician writes on a chart, which Russian players read in the Italian/English form, and a translated example would teach them to write a word no other chart carries. Only the framing words 'For example' belong to the interface.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: To Coda · D.C. al Fine · Solo · Vamp · 4×'**
+  String get cueWordsHelper;
+
+  /// The programme sheet's own heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Programme'**
+  String get setlistSheetTitle;
+
+  /// The label of a button that undoes the last edit, distinct from the app-bar icon's tooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get undo;
+
+  /// The label of a button that redoes the last undone edit.
+  ///
+  /// In en, this message translates to:
+  /// **'Redo'**
+  String get redo;
+
+  /// The label of the programme sheet's title field.
+  ///
+  /// In en, this message translates to:
+  /// **'Programme name'**
+  String get setlistNameLabel;
+
+  /// How many of the programme's entries name a chart the loaded library does not hold, and what that means. Russian needs three written forms and agrees its verb with the noun.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} entry names a chart this library does not hold. The programme keeps it; the chart is not here to play.} other{{count} entries name a chart this library does not hold. The programme keeps them; the chart is not here to play.}}'**
+  String setlistMissingCharts(int count);
+
+  /// The programme sheet's body before any entry was added.
+  ///
+  /// In en, this message translates to:
+  /// **'The programme is empty.\nAdd a chart from the library.'**
+  String get setlistEmpty;
+
+  /// The programme sheet's button that opens the chart picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a chart to the programme'**
+  String get setlistAddChart;
+
+  /// The title of the programme sheet's chart picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a chart'**
+  String get setlistAddChartTitle;
+
+  /// The tooltip of a programme row's play button.
+  ///
+  /// In en, this message translates to:
+  /// **'Play this chart from the programme'**
+  String get setlistPlayTooltip;
+
+  /// The tooltip of a programme row's entry-edit button.
+  ///
+  /// In en, this message translates to:
+  /// **'How this entry is played'**
+  String get setlistEntryTooltip;
+
+  /// The tooltip of a programme row's delete button.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from the programme'**
+  String get setlistRemoveTooltip;
+
+  /// The entry-edit dialog's caption over the interval stepper, saying that the document keeps its written key.
+  ///
+  /// In en, this message translates to:
+  /// **'Transposition for this entry (the chart keeps its written key)'**
+  String get setlistTranspositionHint;
+
+  /// The label of the entry-edit dialog's note field.
+  ///
+  /// In en, this message translates to:
+  /// **'Note for the performer'**
+  String get setlistNotesLabel;
+
+  /// A programme row's subtitle: how the entry is transposed, then the note the performer wrote. The note is the musician's own data and is not translated.
+  ///
+  /// In en, this message translates to:
+  /// **'{interval} · {notes}'**
+  String setlistEntrySubtitle(String interval, String notes);
+
+  /// A row of the chart picker: the chart's key, then its bar count.
+  ///
+  /// In en, this message translates to:
+  /// **'{key} · {bars}'**
+  String setlistSongSubtitle(String key, String bars);
+
+  /// The name shown for a programme whose title is empty. Never data: it is the interface's own fallback.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled programme'**
+  String get untitledProgramme;
+
+  /// The programme row's name for an entry that names no chart the loaded library holds.
+  ///
+  /// In en, this message translates to:
+  /// **'(missing chart)'**
+  String get setlistMissingChart;
 }
 
 class _AppLocalizationsDelegate

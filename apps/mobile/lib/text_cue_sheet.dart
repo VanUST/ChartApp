@@ -50,6 +50,7 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 
+import 'l10n/app_localizations.dart';
 import 'sheet_button.dart';
 import 'sheet_surface.dart';
 
@@ -261,22 +262,22 @@ class _TextCueSheetState extends State<TextCueSheet> {
   // PURPOSE: Say what a press did, or why it was refused, because the page the change landed on is
   //          behind the sheet.
   // INPUTS: applied — whether the session took the operation. message — what it did, in the
-  //         musician's words. refusal — what to say instead when it was refused.
+  //         musician's words. refusal — what to say instead when it was refused, or null to take
+  //         the catalogue's generic refusal.
   // OUTPUTS: Nothing. An applied operation ticks the haptic, rebuilds the caller and writes one
   //          structured line carrying the cue count and the document's own counters; a refused one
   //          changes nothing but the status line and writes why.
-  // KEYWORDS: report, status, haptic, structured-log, refusal, single-path
-  void _report(
-    bool applied,
-    String message, {
-    String refusal = 'Nothing changed: that is not possible here.',
-  }) {
+  // KEYWORDS: report, status, haptic, structured-log, refusal, single-path, localized
+  void _report(bool applied, String message, {String? refusal}) {
     if (!applied) {
       debugPrint(
         'viewer.textcue.refused op="$message" section=$_sectionId '
         'bar=$_barIndex selected=${_selectedId ?? 'none'}',
       );
-      setState(() => _status = refusal);
+      setState(
+        () =>
+            _status = refusal ?? AppLocalizations.of(context).cueRefusedDefault,
+      );
       return;
     }
     setState(() => _status = message);
@@ -298,6 +299,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
   //          which only a form edit made elsewhere could have produced.
   // KEYWORDS: insert, empty-until-typed, select-for-editing, cursor-into-field, op-log
   void _addCue() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String? id = widget.session.insertTextCue(
       sectionId: _sectionId,
       barIndex: _barIndex,
@@ -306,11 +308,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
       offsetY: _defaultOffsetY,
     );
     if (id == null) {
-      _report(
-        false,
-        'Added a cue.',
-        refusal: 'Nothing was added: the song has no such bar.',
-      );
+      _report(false, l10n.cueAdded, refusal: l10n.cueNoSuchBarAdd);
       return;
     }
     _touched.add(id);
@@ -323,7 +321,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
       'viewer.textcue.add id=$id section=$_sectionId bar=$_barIndex '
       'beat=${widget.beat ?? 'bar'}',
     );
-    _report(true, 'Added a cue — type the words.');
+    _report(true, l10n.cueAddedTypeWords);
   }
 
   // PURPOSE: Put a cue's current words into the field, so the musician edits what the cue says
@@ -349,22 +347,15 @@ class _TextCueSheetState extends State<TextCueSheet> {
   //          render order and its anchor are untouched by a change of words.
   // KEYWORDS: edit-words, before-after-event, no-op-refusal, identity-kept
   void _saveWords() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final TextCue? cue = _selected;
     if (cue == null) {
-      _report(
-        false,
-        'Nothing happened.',
-        refusal: 'Nothing was saved: no cue is selected.',
-      );
+      _report(false, l10n.cueNothingHappened, refusal: l10n.cueNoSelectionSave);
       return;
     }
     final bool applied = widget.session.editTextCue(cue.id, _words.text);
     _touched.add(cue.id);
-    _report(
-      applied,
-      'Saved the words.',
-      refusal: 'Nothing changed: the cue already says that.',
-    );
+    _report(applied, l10n.cueWordsSaved, refusal: l10n.cueSameWords);
   }
 
   // PURPOSE: Take the selected cue off the chart.
@@ -374,12 +365,13 @@ class _TextCueSheetState extends State<TextCueSheet> {
   //          both its words and its place in the render order.
   // KEYWORDS: delete, whole-value-event, clear-selection, undoable
   void _deleteCue() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final TextCue? cue = _selected;
     if (cue == null) {
       _report(
         false,
-        'Nothing happened.',
-        refusal: 'Nothing was removed: no cue is selected.',
+        l10n.cueNothingHappened,
+        refusal: l10n.cueNoSelectionRemove,
       );
       return;
     }
@@ -391,11 +383,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
         _words.text = '';
       });
     }
-    _report(
-      applied,
-      'Removed the cue.',
-      refusal: 'Nothing was removed: the cue is already gone.',
-    );
+    _report(applied, l10n.cueRemoved, refusal: l10n.cueAlreadyGone);
   }
 
   // PURPOSE: Move the selected cue by whole bars, in the written order, which is how a remark
@@ -409,13 +397,10 @@ class _TextCueSheetState extends State<TextCueSheet> {
   //          section.
   // KEYWORDS: move, re-anchor, bar-shift, section-crossing, bounds-refusal, words-kept
   void _moveCue(int delta) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final TextCue? cue = _selected;
     if (cue == null) {
-      _report(
-        false,
-        'Nothing happened.',
-        refusal: 'Nothing moved: no cue is selected.',
-      );
+      _report(false, l10n.cueNothingHappened, refusal: l10n.cueNoSelectionMove);
       return;
     }
     final int ordinal = _ordinalOf(cue.place.anchor);
@@ -423,11 +408,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
       ordinal + delta,
     );
     if (target == null) {
-      _report(
-        false,
-        'Nothing happened.',
-        refusal: 'Nothing moved: that is the end of the song.',
-      );
+      _report(false, l10n.cueNothingHappened, refusal: l10n.cueEndOfSong);
       return;
     }
     final bool applied = widget.session.moveTextCue(
@@ -440,8 +421,8 @@ class _TextCueSheetState extends State<TextCueSheet> {
     );
     _report(
       applied,
-      delta < 0 ? 'Moved the cue a bar earlier.' : 'Moved the cue a bar later.',
-      refusal: 'Nothing moved: the cue is already there.',
+      delta < 0 ? l10n.cueMovedEarlier : l10n.cueMovedLater,
+      refusal: l10n.cueAlreadyThere,
     );
   }
 
@@ -454,13 +435,10 @@ class _TextCueSheetState extends State<TextCueSheet> {
   //          is fitted or transposed.
   // KEYWORDS: move, offset-only, stacking, anchor-kept, reflow-survival
   void _nudgeCue(double dy) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final TextCue? cue = _selected;
     if (cue == null) {
-      _report(
-        false,
-        'Nothing happened.',
-        refusal: 'Nothing moved: no cue is selected.',
-      );
+      _report(false, l10n.cueNothingHappened, refusal: l10n.cueNoSelectionMove);
       return;
     }
     final AnchoredPlace place = cue.place;
@@ -474,8 +452,8 @@ class _TextCueSheetState extends State<TextCueSheet> {
     );
     _report(
       applied,
-      dy < 0 ? 'Nudged the cue up.' : 'Nudged the cue down.',
-      refusal: 'Nothing moved.',
+      dy < 0 ? l10n.cueNudgedUp : l10n.cueNudgedDown,
+      refusal: l10n.cueNothingMoved,
     );
   }
 
@@ -487,15 +465,12 @@ class _TextCueSheetState extends State<TextCueSheet> {
   //          otherwise show words that are no longer on screen. A walk past either end is refused.
   // KEYWORDS: cursor, bar-walk, selection-dropped, bounds-refusal, no-page-selection-needed
   void _shiftCursor(int delta) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final ({String sectionId, int barIndex})? target = _barForOrdinal(
       _cursorOrdinal + delta,
     );
     if (target == null) {
-      _report(
-        false,
-        'Nothing happened.',
-        refusal: 'Nothing moved: that is the end of the song.',
-      );
+      _report(false, l10n.cueNothingHappened, refusal: l10n.cueEndOfSong);
       return;
     }
     setState(() {
@@ -503,7 +478,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
       _barIndex = target.barIndex;
       _selectedId = null;
       _words.text = '';
-      _status = 'Now on bar ${_cursorOrdinal + 1}.';
+      _status = l10n.cueNowOnBar(_cursorOrdinal + 1);
     });
   }
 
@@ -603,16 +578,19 @@ class _TextCueSheetState extends State<TextCueSheet> {
 
   // PURPOSE: Word the cell a cue is anchored to, so the list on the sheet says WHERE on the bar a
   //          remark sits and not only that it exists.
-  // INPUTS: cue — the cue whose cell to name.
-  // OUTPUTS: `whole bar` for a bar-level anchor, otherwise `cell N` counted as a musician counts.
-  // KEYWORDS: cell-label, one-based, bar-level, total-function
-  String _cellLabel(TextCue cue) {
+  // INPUTS: cue — the cue whose cell to name. l10n — the message catalogue, which carries both
+  //         wordings.
+  // OUTPUTS: The catalogue's word for a bar-level anchor, otherwise `cell N` with N counted as a
+  //          musician counts.
+  // KEYWORDS: cell-label, one-based, bar-level, total-function, localized
+  String _cellLabel(TextCue cue, AppLocalizations l10n) {
     final int? beat = cue.place.anchor.beat;
-    return beat == null ? 'whole bar' : 'cell ${beat + 1}';
+    return beat == null ? l10n.cueWholeBar : l10n.cueCell(beat + 1);
   }
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final TextCue? selected = _selected;
     // PopScope rather than a `dispose` hook, because the cleanup writes EVENTS and calls back into an
     // ancestor: doing that while this state is being unmounted would be a write during teardown.
@@ -638,52 +616,52 @@ class _TextCueSheetState extends State<TextCueSheet> {
                 _buildHeader(),
                 const SizedBox(height: 10),
                 _buildStatus(),
-                _buildGroup('THIS BAR', <Widget>[
+                _buildGroup(l10n.cueGroupThisBar, <Widget>[
                   SheetButton(
                     buttonKey: 'text-cue-add',
                     icon: Icons.note_add_outlined,
-                    label: 'Write words here',
+                    label: l10n.cueWriteWords,
                     onTap: _bar == null ? null : _addCue,
                   ),
                   SheetButton(
                     buttonKey: 'text-cue-bar-before',
                     icon: Icons.arrow_back,
-                    label: 'Previous bar',
+                    label: l10n.cuePreviousBar,
                     onTap: () => _shiftCursor(-1),
                   ),
                   SheetButton(
                     buttonKey: 'text-cue-bar-after',
                     icon: Icons.arrow_forward,
-                    label: 'Next bar',
+                    label: l10n.cueNextBar,
                     onTap: () => _shiftCursor(1),
                   ),
                 ]),
                 const SizedBox(height: 10),
                 _buildCueList(),
                 const SizedBox(height: 14),
-                _buildGroup('THE CUE', <Widget>[
+                _buildGroup(l10n.cueGroupTheCue, <Widget>[
                   SheetButton(
                     buttonKey: 'text-cue-save',
                     icon: Icons.check,
-                    label: 'Save words',
+                    label: l10n.cueSaveWords,
                     onTap: selected == null ? null : _saveWords,
                   ),
                   SheetButton(
                     buttonKey: 'text-cue-earlier',
                     icon: Icons.keyboard_arrow_left,
-                    label: 'A bar earlier',
+                    label: l10n.cueBarEarlier,
                     onTap: selected == null ? null : () => _moveCue(-1),
                   ),
                   SheetButton(
                     buttonKey: 'text-cue-later',
                     icon: Icons.keyboard_arrow_right,
-                    label: 'A bar later',
+                    label: l10n.cueBarLater,
                     onTap: selected == null ? null : () => _moveCue(1),
                   ),
                   SheetButton(
                     buttonKey: 'text-cue-up',
                     icon: Icons.keyboard_arrow_up,
-                    label: 'Up a line',
+                    label: l10n.cueUpLine,
                     onTap: selected == null
                         ? null
                         : () => _nudgeCue(-textCueNudge),
@@ -691,7 +669,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
                   SheetButton(
                     buttonKey: 'text-cue-down',
                     icon: Icons.keyboard_arrow_down,
-                    label: 'Down a line',
+                    label: l10n.cueDownLine,
                     onTap: selected == null
                         ? null
                         : () => _nudgeCue(textCueNudge),
@@ -699,7 +677,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
                   SheetButton(
                     buttonKey: 'text-cue-delete',
                     icon: Icons.delete_outline,
-                    label: 'Remove the cue',
+                    label: l10n.cueRemove,
                     danger: true,
                     onTap: selected == null ? null : _deleteCue,
                   ),
@@ -719,15 +697,19 @@ class _TextCueSheetState extends State<TextCueSheet> {
   // INPUTS: None; reads the cursor and the song.
   // OUTPUTS: The header row: the bar ordinal, the section's label, the counts that make a walk
   //          checkable, and the control that closes the sheet.
-  // KEYWORDS: header, position-label, cursor, section-identity, done
+  // KEYWORDS: header, position-label, cursor, section-identity, done, localized
   Widget _buildHeader() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Section? section = _song.sectionById(_sectionId);
     final int? beat = widget.beat;
     final String detail = section == null
-        ? 'The selected bar is no longer in the song.'
-        : 'bar ${_barIndex + 1} of ${section.bars.length} in this section · '
-              '${beat == null ? 'the whole bar' : 'cell ${beat + 1}'} · '
-              '${_cuesHere.length} cue(s) here';
+        ? l10n.formBarGone
+        : l10n.cueDetail(
+            _barIndex + 1,
+            section.bars.length,
+            beat == null ? l10n.cueWholeBar : l10n.cueCell(beat + 1),
+            l10n.cueCount(_cuesHere.length),
+          );
     return Row(
       children: <Widget>[
         Expanded(
@@ -736,8 +718,8 @@ class _TextCueSheetState extends State<TextCueSheet> {
             children: <Widget>[
               Text(
                 section == null
-                    ? 'No bar selected'
-                    : 'Words · bar $_barOrdinal',
+                    ? l10n.formNoBarSelected
+                    : l10n.cuePosition(_barOrdinal),
                 key: const ValueKey<String>('text-cue-position'),
                 style: const TextStyle(
                   color: sheetOnPanelColor,
@@ -756,7 +738,10 @@ class _TextCueSheetState extends State<TextCueSheet> {
         TextButton(
           key: const ValueKey<String>('text-cue-done'),
           onPressed: _close,
-          child: const Text('Done', style: TextStyle(color: sheetAccentColor)),
+          child: Text(
+            l10n.done,
+            style: const TextStyle(color: sheetAccentColor),
+          ),
         ),
       ],
     );
@@ -795,14 +780,15 @@ class _TextCueSheetState extends State<TextCueSheet> {
   // OUTPUTS: One tappable row per cue, or a line saying the bar has none. The row carries the words
   //          and the cell, and is marked when it is the cue being edited; an empty cue is named as
   //          such rather than shown as a blank row.
-  // KEYWORDS: cue-list, per-bar, selection-mark, empty-words-named, tap-to-edit
+  // KEYWORDS: cue-list, per-bar, selection-mark, empty-words-named, tap-to-edit, localized
   Widget _buildCueList() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final List<TextCue> cues = _cuesHere;
     if (cues.isEmpty) {
-      return const Text(
-        'No words on this bar yet.',
-        key: ValueKey<String>('text-cue-empty'),
-        style: TextStyle(color: sheetMutedColor, fontSize: 13),
+      return Text(
+        l10n.cueNoneHere,
+        key: const ValueKey<String>('text-cue-empty'),
+        style: const TextStyle(color: sheetMutedColor, fontSize: 13),
       );
     }
     return Column(
@@ -827,7 +813,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
                   children: <Widget>[
                     Expanded(
                       child: Text(
-                        cue.text.isEmpty ? '(no words yet)' : cue.text,
+                        cue.text.isEmpty ? l10n.cueNoWordsYet : cue.text,
                         style: TextStyle(
                           color: cue.text.isEmpty
                               ? sheetMutedColor
@@ -841,7 +827,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      _cellLabel(cue),
+                      _cellLabel(cue, l10n),
                       style: const TextStyle(
                         color: sheetMutedColor,
                         fontSize: 12,
@@ -864,8 +850,10 @@ class _TextCueSheetState extends State<TextCueSheet> {
   //          touch the document: Save is what writes the event. Focus is NOT taken here —
   //          `autofocus` fires on the field's first mount and this field is mounted disabled, so the
   //          cursor is placed by [_focusWords] after the frame that enables it.
-  // KEYWORDS: words-field, keyboard-allowed, no-write-until-save, disabled-state, focus-by-hand
+  // KEYWORDS: words-field, keyboard-allowed, no-write-until-save, disabled-state, focus-by-hand,
+  //           notation-examples-untranslated
   Widget _buildWordsField(TextCue? selected) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     return TextField(
       key: const ValueKey<String>('text-cue-field'),
       controller: _words,
@@ -874,10 +862,17 @@ class _TextCueSheetState extends State<TextCueSheet> {
       textInputAction: TextInputAction.done,
       onSubmitted: (String _) => _saveWords(),
       style: const TextStyle(color: sheetOnPanelColor),
-      decoration: const InputDecoration(
-        labelText: 'The words',
-        helperText: 'For example: To Coda · D.C. al Fine · Solo · Vamp · 4×',
-        border: OutlineInputBorder(),
+      decoration: InputDecoration(
+        labelText: l10n.cueWordsLabel,
+        // THE EXAMPLES ARE NOT TRANSLATED, IN EITHER DIRECTION. `To Coda`, `D.C. al Fine`, `Solo`,
+        // `Vamp` and `4×` are the CONVENTIONAL NOTATION a musician writes ON THE CHART, and Russian
+        // players read them in this Italian/English form. The examples are the only place a musician
+        // is shown what a remark is supposed to look like, so a Russian example would teach them to
+        // write a word no other chart in the world carries, and this text is their DATA, not our
+        // interface. Only the framing words ("For example" / "Например") are translated. The
+        // decision is recorded in `docs/sdd.md` so the next reader does not "finish" it by mistake.
+        helperText: l10n.cueWordsHelper,
+        border: const OutlineInputBorder(),
         isDense: true,
       ),
     );

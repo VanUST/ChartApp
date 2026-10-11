@@ -48,7 +48,7 @@ import 'package:flutter/material.dart';
 import 'chart_document.dart';
 import 'chart_source.dart';
 import 'document_file_name.dart';
-import 'ireal_library.dart';
+import 'l10n/app_localizations.dart';
 
 /// Moves a container's bytes to the place the reader named.
 typedef ChartFileSaver = Future<void> Function(String path, Uint8List bytes);
@@ -168,6 +168,14 @@ class ChartFileAction extends StatelessWidget {
   /// How the reader's file becomes bytes.
   final ChartFileOpener open;
 
+  // PURPOSE: The app-bar button's tooltip, which the catalogue words because the phone's overflow
+  //          menu row that opens the same dialog already reads those words.
+  // INPUTS: None; the wording comes from the context this builder was given.
+  // OUTPUTS: The tooltip string.
+  // KEYWORDS: tooltip, chart-file, one-wording
+  String _tooltip(BuildContext context) =>
+      AppLocalizations.of(context).menuChartFile;
+
   @override
   Widget build(BuildContext context) {
     // Shown on every platform. It used to render nothing in a browser, while the two functions
@@ -176,7 +184,7 @@ class ChartFileAction extends StatelessWidget {
     // the sentence describing what a save does, and the dialog is the only place that has to know.
     return IconButton(
       icon: const Icon(Icons.description_outlined),
-      tooltip: 'Save or open a .chart file',
+      tooltip: _tooltip(context),
       onPressed: () => unawaited(
         showChartFileDialog(
           context,
@@ -274,14 +282,15 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
   //          reported in the status line rather than silently doing nothing.
   // KEYWORDS: save, encode, chart-file, operation-tail, d19, save-mode, status, error-reporting
   Future<void> _save() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final DocumentState? document = widget.document;
     if (document == null) {
-      setState(() => _status = 'Load or import a song before saving it.');
+      setState(() => _status = l10n.chartFileNoDocument);
       return;
     }
     final String path = _controller.text.trim();
     if (path.isEmpty) {
-      setState(() => _status = 'Name a .chart file to save to.');
+      setState(() => _status = l10n.chartFileNameToSave);
       return;
     }
     setState(() {
@@ -317,16 +326,21 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status = error.message;
+        // The outcome is worded by the catalogue rather than by the exception: the exception
+        // carries the platform's own description of what happened, while "you changed your mind"
+        // is interface text, and a dialog is the only side that can reach a message catalogue.
+        _status = l10n.fileChooserCancelled;
       });
-      debugPrint('viewer.chart.save.cancelled mode=${_mode.name}');
+      debugPrint(
+        'viewer.chart.save.cancelled mode=${_mode.name} reason="${error.message}"',
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _busy = false;
-        _status = 'Could not save: $error';
+        _status = l10n.fileSaveFailed('$error');
       });
       debugPrint('viewer.chart.save.error error=$error');
     }
@@ -340,42 +354,58 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
   //          platform's own promise about what a second save will do.
   // KEYWORDS: status, save-mode, in-place, download, honest-reporting
   String _savedStatus(ChartFileEncodeResult encoded, String path) {
-    final String destination = _mode == ChartSaveMode.namedPath
-        ? 'to $path'
-        : 'as $path';
-    return 'Saved ${encoded.bytes.length} bytes $destination'
-        ' · ${widget.events.length} operation(s).'
-        '${_warningSuffix(encoded.warnings)}${_saveModeSuffix()}';
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String bytes = l10n.byteCount(encoded.bytes.length);
+    final String operations = l10n.operationCount(widget.events.length);
+    // `to` and `as` are two different promises — replacing a path, or being handed a file — and the
+    // catalogue carries one sentence for each rather than a preposition the locale would have to
+    // place itself.
+    final String base = _mode == ChartSaveMode.namedPath
+        ? l10n.chartFileSavedTo(bytes, path, operations)
+        : l10n.chartFileSavedAs(bytes, path, operations);
+    return _withSuffix(
+      _withSuffix(base, _warningSuffix(encoded.warnings)),
+      _saveModeSuffix(),
+    );
   }
+
+  // PURPOSE: Join a status sentence with a trailing clause that may be absent, so a sentence and a
+  //          clause that is sometimes empty cannot run together with no space or keep a leading one.
+  // INPUTS: base — the sentence. suffix — the clause, or the empty string when there is none.
+  // OUTPUTS: The sentence alone, or the two joined by one space. Both empty inputs give the empty
+  //          string.
+  // KEYWORDS: text-join, optional-clause, spacing, empty-safe
+  String _withSuffix(String base, String suffix) =>
+      suffix.isEmpty ? base : '$base $suffix';
 
   // PURPOSE: Say, in the status line, what this platform's save did to the file that was already
   //          there — which is not the same answer on Chrome, on Safari and on a desktop.
-  // INPUTS: None; [_mode].
+  // INPUTS: None; [_mode] and the catalogue.
   // OUTPUTS: One sentence, or the empty string where the platform replaces the named file and there
   //          is nothing surprising to say.
-  // KEYWORDS: save-mode, status-suffix, in-place, download, named-path
+  // KEYWORDS: save-mode, status-suffix, in-place, download, named-path, localized
   String _saveModeSuffix() => switch (_mode) {
     ChartSaveMode.namedPath => '',
-    ChartSaveMode.rewriteInPlace => ' This browser re-writes that file in place, so the next Save updates it.',
-    ChartSaveMode.download => ' This browser cannot update a file in place, so each Save downloads a NEW copy.',
+    ChartSaveMode.rewriteInPlace => AppLocalizations.of(
+      context,
+    ).saveModeRewriteInPlace,
+    ChartSaveMode.download => AppLocalizations.of(context).saveModeDownload,
   };
 
   // PURPOSE: Tell the reader, before they press Save, what this platform will do to a file that
   //          already exists — the difference between replacing their file and handing them another.
-  // INPUTS: None; [_mode].
+  // INPUTS: None; [_mode] and the catalogue.
   // OUTPUTS: One sentence in a browser, and the empty string where a path addresses the file
   //          directly, because there the promise is already what the field and the button say.
-  // KEYWORDS: save-hint, file-system-access, download, up-front-disclosure, save-mode
+  // KEYWORDS: save-hint, file-system-access, download, up-front-disclosure, save-mode, localized
   String _saveHint() => switch (_mode) {
     ChartSaveMode.namedPath => '',
-    ChartSaveMode.rewriteInPlace =>
-      'This browser can re-write a chart file it has already been given. The '
-          'first Save asks where to put the file; every Save after that updates '
-          'that same file.',
-    ChartSaveMode.download =>
-      'This browser cannot re-write a file in place, so every Save downloads a '
-          'NEW copy. The browser chooses where it lands, and may rename it when a '
-          'file of that name is already there.',
+    ChartSaveMode.rewriteInPlace => AppLocalizations.of(
+      context,
+    ).chartFileSaveHintRewriteInPlace,
+    ChartSaveMode.download => AppLocalizations.of(
+      context,
+    ).chartFileSaveHintDownload,
   };
 
   // PURPOSE: Read the `.chart` file the reader named and hand its document and operation tail to the
@@ -390,13 +420,15 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
   //          because the session folds the tail in itself; handing over the reduction as well would
   //          apply every operation twice. The tail travels beside it so a session can continue the
   //          log rather than restart its numbering. A chooser the reader dismisses is reported with
-  //          the [ChartFileCancelledException]'s own sentence, because changing one's mind is not a
-  //          failure.
+  //          the catalogue's own sentence for a cancelled chooser, because changing one's mind is not
+  //          a failure; the exception's own message is the platform's description of the dismissal
+  //          and is written to the log beside the outcome, not onto the screen.
   // KEYWORDS: open, read, decode, snapshot, operation-tail, typed-failure, cancellation, status
   Future<void> _open() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String path = _controller.text.trim();
     if (chartSourceIsFilePath && path.isEmpty) {
-      setState(() => _status = 'Name a .chart file to open.');
+      setState(() => _status = l10n.chartFileNameToOpen);
       return;
     }
     setState(() {
@@ -427,10 +459,16 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       widget.onOpened((document: document, events: decoded.file.events));
       setState(() {
         _busy = false;
-        _status =
-            'Opened "${songDisplayTitle(shown)}" · '
-            '${decoded.file.events.length} operation(s).'
-            '${_warningSuffix(decoded.warnings)}';
+        _status = _withSuffix(
+          l10n.chartFileOpened(
+            // The catalogue's own fallback for a nameless tune, not `songDisplayTitle`'s English
+            // one: that helper's words are a default for the interface and belong to the same
+            // catalogue as everything else this dialog prints.
+            shown.title.isEmpty ? l10n.untitled : shown.title,
+            l10n.operationCount(decoded.file.events.length),
+          ),
+          _warningSuffix(decoded.warnings),
+        );
       });
       debugPrint(
         'viewer.chart.open.ok bars=${shown.writtenBarCount} '
@@ -443,16 +481,16 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status = error.message;
+        _status = l10n.fileChooserCancelled;
       });
-      debugPrint('viewer.chart.open.cancelled');
+      debugPrint('viewer.chart.open.cancelled reason="${error.message}"');
     } on ChartFileException catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
         _busy = false;
-        _status = 'Could not open: ${error.message}';
+        _status = l10n.fileOpenFailed(error.message);
       });
       debugPrint('viewer.chart.open.refused type=${error.runtimeType}');
     } catch (error) {
@@ -461,7 +499,7 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       }
       setState(() {
         _busy = false;
-        _status = 'Could not open: $error';
+        _status = l10n.fileOpenFailed('$error');
       });
       debugPrint('viewer.chart.open.error error=$error');
     }
@@ -469,9 +507,10 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String? status = _status;
     return AlertDialog(
-      title: const Text('Chart file'),
+      title: Text(l10n.chartFileDialogTitle),
       content: SizedBox(
         width: 520,
         child: Column(
@@ -485,7 +524,9 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
                 // filesystem its contents address the file, and in a browser they are the name the
                 // chooser and the download are given. A reader who typed a path into a browser field
                 // labelled "path" would be told nothing and misled by the label.
-                labelText: chartSourceIsFilePath ? '.chart file' : 'File name',
+                labelText: chartSourceIsFilePath
+                    ? l10n.chartFileLabelPath
+                    : l10n.fileNameLabel,
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
@@ -513,24 +554,24 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: _busy ? null : () => unawaited(_open()),
-          child: const Text('Open .chart'),
+          child: Text(l10n.chartFileOpenButton),
         ),
         FilledButton.icon(
           onPressed: _busy ? null : () => unawaited(_save()),
           icon: const Icon(Icons.save_alt),
-          label: const Text('Save'),
+          label: Text(l10n.save),
         ),
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('Close'),
+          child: Text(l10n.close),
         ),
       ],
     );
   }
 
   /// The part of a status line that reports what was left out, or nothing when nothing was.
-  static String _warningSuffix(List<ChartFileWarning> warnings) =>
-      warnings.isEmpty
+  String _warningSuffix(List<ChartFileWarning> warnings) => warnings.isEmpty
       ? ''
-      : ' ${warnings.length} warning(s): ${warnings.first.message}';
+      : ' ${AppLocalizations.of(context).warningCount(warnings.length)}: '
+            '${warnings.first.message}';
 }

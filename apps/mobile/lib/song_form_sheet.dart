@@ -95,6 +95,7 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 
+import 'l10n/app_localizations.dart';
 import 'sheet_button.dart';
 import 'sheet_surface.dart';
 
@@ -154,47 +155,60 @@ SectionLabel sectionLabelFrom(String text) {
 
 // PURPOSE: Word the repeat-previous symbol of a bar, so the sheet's control and the text a
 //          verification quotes name the state the same way.
-// INPUTS: previous — the symbol the bar carries, or null when no bar is selected.
-// OUTPUTS: `off`, `1 bar` or `2 bars`, and `off` for null: a bar nobody selected carries no symbol
-//          as far as this label is concerned, and inventing a fourth word for "no bar" would make
-//          the label describe the selection rather than the sign.
-// KEYWORDS: repeat-previous, percent-bar, label, total-function, shared-wording
+// INPUTS: previous — the symbol the bar carries, or null when no bar is selected. l10n — the
+//         message catalogue, which carries the three words.
+// OUTPUTS: The catalogue's word for "no symbol", "the previous bar" or "the previous two bars", and
+//          the word for none for null: a bar nobody selected carries no symbol as far as this label
+//          is concerned, and inventing a fourth word for "no bar" would make the label describe the
+//          selection rather than the sign.
+//          WHY THE CATALOGUE IS A PARAMETER AND NOT A DEFAULT: a default would have to be an
+//          English catalogue living beside the real one, which is a second source of English text.
+//          Every caller in the application has a context to read it from.
+// KEYWORDS: repeat-previous, percent-bar, label, total-function, shared-wording, localized
 /// Returns the words that name [previous] on the sheet's button.
-String repeatPreviousText(RepeatPrevious? previous) => switch (previous) {
-  null || RepeatPrevious.none => 'off',
-  RepeatPrevious.oneBar => '1 bar',
-  RepeatPrevious.twoBars => '2 bars',
-};
+String repeatPreviousText(RepeatPrevious? previous, AppLocalizations l10n) =>
+    switch (previous) {
+      null || RepeatPrevious.none => l10n.formRepeatPreviousOff,
+      RepeatPrevious.oneBar => l10n.formRepeatPreviousOneBar,
+      RepeatPrevious.twoBars => l10n.formRepeatPreviousTwoBars,
+    };
 
 // PURPOSE: Word an alternative-ending bracket the way it is drawn on the page, so the button and
 //          the engraved `[1.` cannot be read as two different things.
-// INPUTS: volta — the bracket, or null when the bar carries none.
-// OUTPUTS: `none`, `unnumbered`, or the figure with a leading dot as in `1.` / `2.`. Null and the
-//          unnumbered bracket are given different words because they are different states: the
-//          first draws nothing and the second draws an empty bracket.
-// KEYWORDS: volta, ending, bracket, label, unnumbered-is-not-none
+// INPUTS: volta — the bracket, or null when the bar carries none. l10n — the message catalogue,
+//         which carries the two words.
+// OUTPUTS: The catalogue's word for "no bracket", its word for the unnumbered bracket, or the
+//          figure with a leading dot as in `1.` / `2.`. Null and the unnumbered bracket are given
+//          different words because they are different states: the first draws nothing and the
+//          second draws an empty bracket. The FIGURE is not a word and is not translated: it is the
+//          number the page engraves.
+// KEYWORDS: volta, ending, bracket, label, unnumbered-is-not-none, localized
 /// Returns the words that name [volta] on the sheet's button.
-String voltaText(Volta? volta) {
+String voltaText(Volta? volta, AppLocalizations l10n) {
   if (volta == null) {
-    return 'none';
+    return l10n.formVoltaNone;
   }
-  return volta.number == 0 ? 'unnumbered' : '${volta.number}.';
+  return volta.number == 0 ? l10n.formVoltaUnnumbered : '${volta.number}.';
 }
 
 // PURPOSE: Word one of the signs a bar can carry, so the sheet's button and the text a verification
 //          quotes name the same sign the same way — and so the four signs are labelled in one place
 //          rather than in a switch at each call site.
-// INPUTS: mark — the sign, one of [BarMark]'s four values.
-// OUTPUTS: The words for that sign: `Segno`, `Coda`, `Fermata` or `Player end`. Total over the
-//          enum: there is no null case, because a bar-level control only ever names a sign it can
-//          set, and "the bar does not carry it" is what the button's `active` state says.
-// KEYWORDS: bar-mark, segno, coda, fermata, player-ending, label, shared-wording
+// INPUTS: mark — the sign, one of [BarMark]'s four values. l10n — the message catalogue, which
+//         carries the four names.
+// OUTPUTS: The catalogue's name for that sign. Total over the enum: there is no null case, because
+//          a bar-level control only ever names a sign it can set, and "the bar does not carry it" is
+//          what the button's `active` state says.
+//          WHY THE FOUR NAMES ARE TRANSLATED RATHER THAN LEFT AS NOTATION: these are the words on
+//          OUR buttons. The glyph the painter draws on the page is the notation, and it is drawn the
+//          same in every locale; the label a musician reads to find the button is interface text.
+// KEYWORDS: bar-mark, segno, coda, fermata, player-ending, label, shared-wording, localized
 /// Returns the words that name [mark] on the sheet's button.
-String barMarkText(BarMark mark) => switch (mark) {
-  BarMark.segno => 'Segno',
-  BarMark.coda => 'Coda',
-  BarMark.fermata => 'Fermata',
-  BarMark.playerEnding => 'Player end',
+String barMarkText(BarMark mark, AppLocalizations l10n) => switch (mark) {
+  BarMark.segno => l10n.markSegno,
+  BarMark.coda => l10n.markCoda,
+  BarMark.fermata => l10n.markFermata,
+  BarMark.playerEnding => l10n.markPlayerEnding,
 };
 
 // The glyph beside each mark button, in one switch rather than four literals at the call site, so
@@ -267,16 +281,17 @@ class _SongFormSheetState extends State<SongFormSheet> {
   // INPUTS: applied — whether the session took the operation. message — what it did, in the words
   //         the musician used. refusal — what to say instead when it was refused; it stands alone,
   //         because a past-tense success message followed by a reason would open with a claim that
-  //         the operation happened. sectionId and barIndex — the address the cursor should take,
-  //         omitted when the operation did not move it.
+  //         the operation happened. Null asks the catalogue for the generic refusal, which is what a
+  //         caller that has nothing more specific to say passes. sectionId and barIndex — the
+  //         address the cursor should take, omitted when the operation did not move it.
   // OUTPUTS: Nothing. An applied operation moves the cursor, ticks the haptic, rebuilds the caller
   //          and writes one structured line carrying the resulting form; a refused one changes
   //          nothing but the status line and writes why.
-  // KEYWORDS: apply, cursor, haptic, structured-log, refusal-reporting, single-path
+  // KEYWORDS: apply, cursor, haptic, structured-log, refusal-reporting, single-path, localized
   void _report(
     bool applied,
     String message, {
-    String refusal = 'Nothing changed: that operation is not possible here.',
+    String? refusal,
     String? sectionId,
     int? barIndex,
   }) {
@@ -284,7 +299,10 @@ class _SongFormSheetState extends State<SongFormSheet> {
       debugPrint(
         'viewer.form.refused op="$message" section=$_sectionId bar=$_barIndex',
       );
-      setState(() => _status = refusal);
+      setState(
+        () => _status =
+            refusal ?? AppLocalizations.of(context).formRefusedDefault,
+      );
       return;
     }
     setState(() {
@@ -315,6 +333,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          with it.
   // KEYWORDS: bar-insert, cursor-follows, before-after, form-building
   void _insertBar({required bool before}) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final bool applied = before
         ? widget.session.insertBarBefore(
             sectionId: _sectionId,
@@ -326,8 +345,8 @@ class _SongFormSheetState extends State<SongFormSheet> {
           );
     _report(
       applied,
-      before ? 'Inserted a bar before.' : 'Inserted a bar after.',
-      refusal: 'Nothing was inserted: the song has no such bar.',
+      before ? l10n.formBarInsertedBefore : l10n.formBarInsertedAfter,
+      refusal: l10n.formNoSuchBarInsert,
       barIndex: before ? _barIndex : _barIndex + 1,
     );
   }
@@ -338,14 +357,15 @@ class _SongFormSheetState extends State<SongFormSheet> {
   // OUTPUTS: Nothing. The cursor moves to `barIndex + 1`.
   // KEYWORDS: bar-duplicate, cursor-on-copy, repeat-bar
   void _duplicateBar() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final bool applied = widget.session.duplicateBar(
       sectionId: _sectionId,
       barIndex: _barIndex,
     );
     _report(
       applied,
-      'Duplicated this bar.',
-      refusal: 'Nothing was copied: the song has no such bar.',
+      l10n.formBarDuplicated,
+      refusal: l10n.formNoSuchBarCopy,
       barIndex: _barIndex + 1,
     );
   }
@@ -356,6 +376,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   // OUTPUTS: Nothing. The last bar of a section is refused, with the reason on screen.
   // KEYWORDS: bar-delete, cursor-clamp, last-bar-refusal
   void _deleteBar() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final bool applied = widget.session.deleteBar(
       sectionId: _sectionId,
       barIndex: _barIndex,
@@ -367,10 +388,8 @@ class _SongFormSheetState extends State<SongFormSheet> {
         : (_barIndex < remaining ? _barIndex : remaining - 1);
     _report(
       applied,
-      'Deleted this bar.',
-      refusal:
-          'Nothing was deleted: a section keeps at least one bar, or it could '
-          'not be shown or selected.',
+      l10n.formBarDeleted,
+      refusal: l10n.formLastBarRefused,
       barIndex: next,
     );
   }
@@ -386,6 +405,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          so rather than the sheet refusing it.
   // KEYWORDS: repeat-start, toggle, unmatched-start-note, op-log, rebuild-on-apply
   void _toggleRepeatStart() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Bar? bar = _bar;
     if (bar == null) {
       return;
@@ -398,8 +418,8 @@ class _SongFormSheetState extends State<SongFormSheet> {
     );
     _report(
       applied,
-      starts ? 'Repeat start set.' : 'Repeat start cleared.',
-      refusal: 'Nothing changed: the bar already carries that barline.',
+      starts ? l10n.formRepeatStartSet : l10n.formRepeatStartCleared,
+      refusal: l10n.formBarlineSame,
     );
   }
 
@@ -410,6 +430,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          derivation instead of being refused here.
   // KEYWORDS: repeat-end, toggle, unmatched-end-note, op-log, rebuild-on-apply
   void _toggleRepeatEnd() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Bar? bar = _bar;
     if (bar == null) {
       return;
@@ -422,8 +443,8 @@ class _SongFormSheetState extends State<SongFormSheet> {
     );
     _report(
       applied,
-      ends ? 'Repeat end set.' : 'Repeat end cleared.',
-      refusal: 'Nothing changed: the bar already carries that barline.',
+      ends ? l10n.formRepeatEndSet : l10n.formRepeatEndCleared,
+      refusal: l10n.formBarlineSame,
     );
   }
 
@@ -438,6 +459,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          is cannot tell what the next press will do.
   // KEYWORDS: repeat-previous, percent-bar, cycle, three-states, op-log, rebuild-on-apply
   void _cycleRepeatPrevious() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Bar? bar = _bar;
     if (bar == null) {
       return;
@@ -454,8 +476,8 @@ class _SongFormSheetState extends State<SongFormSheet> {
     );
     _report(
       applied,
-      'Repeat previous: ${repeatPreviousText(next)}.',
-      refusal: 'Nothing changed: the bar already carries that symbol.',
+      l10n.formRepeatPreviousStatus(repeatPreviousText(next, l10n)),
+      refusal: l10n.formSymbolSame,
     );
   }
 
@@ -468,6 +490,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          the unnumbered bracket, which the page draws and the musician asked for.
   // KEYWORDS: volta, ending, bracket, dialog, no-keyboard, clear-by-null, op-log
   Future<void> _chooseVolta() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Bar? bar = _bar;
     if (bar == null) {
       return;
@@ -488,11 +511,12 @@ class _SongFormSheetState extends State<SongFormSheet> {
       applied,
       // No full stop after the figure: `voltaText` names a bracket the way it is drawn, and the
       // figure already carries the dot that belongs to it, so a sentence ending here would print
-      // `[1..` — two dots where the page has one.
+      // `[1..` — two dots where the page has one. The Russian wording ends on the figure for the
+      // same reason, which is why the message itself carries no full stop either.
       choice.volta == null
-          ? 'Ending bracket removed.'
-          : 'Ending bracket set to ${voltaText(choice.volta!)}',
-      refusal: 'Nothing changed: the bar already carries that bracket.',
+          ? l10n.formEndingRemoved
+          : l10n.formEndingSetTo(voltaText(choice.volta!, l10n)),
+      refusal: l10n.formBracketSame,
     );
   }
 
@@ -510,6 +534,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   // KEYWORDS: bar-mark, segno, coda, fermata, player-ending, toggle, set-semantics, op-log,
   //           rebuild-on-apply, no-keyboard
   void _toggleMark(BarMark mark) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Bar? bar = _bar;
     if (bar == null) {
       return;
@@ -523,10 +548,10 @@ class _SongFormSheetState extends State<SongFormSheet> {
     );
     _report(
       applied,
-      '${barMarkText(mark)} ${present ? 'set' : 'cleared'}.',
-      refusal: present
-          ? 'Nothing changed: the bar already carries that sign.'
-          : 'Nothing changed: the bar does not carry that sign.',
+      present
+          ? l10n.formMarkSet(barMarkText(mark, l10n))
+          : l10n.formMarkCleared(barMarkText(mark, l10n)),
+      refusal: present ? l10n.formSignPresent : l10n.formSignAbsent,
     );
   }
 
@@ -536,15 +561,14 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          section the musician cannot see would leave them pressing buttons at nothing.
   // KEYWORDS: section-insert, cursor-to-new-section, rehearsal-letter, one-bar
   void _insertSection({required bool before}) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String? created = before
         ? widget.session.insertSectionBefore(_sectionId)
         : widget.session.insertSectionAfter(_sectionId);
     _report(
       created != null,
-      before
-          ? 'Inserted a new section before.'
-          : 'Inserted a new section after.',
-      refusal: 'Nothing was inserted: the song has no such section.',
+      before ? l10n.formSectionInsertedBefore : l10n.formSectionInsertedAfter,
+      refusal: l10n.formNoSuchSectionInsert,
       sectionId: created,
       barIndex: 0,
     );
@@ -556,11 +580,12 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          so an annotation anchored in the original stays anchored in the original.
   // KEYWORDS: section-duplicate, fresh-identity, cursor-to-copy
   void _duplicateSection() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String? created = widget.session.duplicateSection(_sectionId);
     _report(
       created != null,
-      'Duplicated this section.',
-      refusal: 'Nothing was copied: the song has no such section.',
+      l10n.formSectionDuplicated,
+      refusal: l10n.formNoSuchSectionCopy,
       sectionId: created,
       barIndex: 0,
     );
@@ -573,11 +598,12 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          refused with the reason on screen.
   // KEYWORDS: section-reorder, identity-stable, cursor-stays, form-repair
   void _moveSection(int places) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final bool applied = widget.session.moveSection(_sectionId, places);
     _report(
       applied,
-      places < 0 ? 'Moved this section earlier.' : 'Moved this section later.',
-      refusal: 'Nothing moved: the section is already at that end of the form.',
+      places < 0 ? l10n.formSectionMovedEarlier : l10n.formSectionMovedLater,
+      refusal: l10n.formSectionAtEnd,
     );
   }
 
@@ -587,6 +613,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   // OUTPUTS: Nothing. The song's only section is refused, with the reason on screen.
   // KEYWORDS: section-delete, cursor-to-successor, last-section-refusal
   void _deleteSection() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final int index = _sectionIndex;
     final bool applied = widget.session.deleteSection(_sectionId);
     String? next;
@@ -596,10 +623,8 @@ class _SongFormSheetState extends State<SongFormSheet> {
     }
     _report(
       applied,
-      'Deleted this section.',
-      refusal:
-          'Nothing was deleted: a song keeps at least one section, or there '
-          'would be nothing left to show.',
+      l10n.formSectionDeleted,
+      refusal: l10n.formLastSectionRefused,
       sectionId: next,
       barIndex: 0,
     );
@@ -612,6 +637,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          the cursor where it is, because a label is not part of an address.
   // KEYWORDS: section-rename, dialog, keyboard-allowed, empty-refusal
   Future<void> _renameSection() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Section? section = _song.sectionById(_sectionId);
     if (section == null) {
       return;
@@ -628,8 +654,8 @@ class _SongFormSheetState extends State<SongFormSheet> {
     final bool applied = widget.session.renameSection(_sectionId, label);
     _report(
       applied,
-      'Renamed this section to "${label.text}".',
-      refusal: 'Nothing was renamed: it already carries that name.',
+      l10n.formSectionRenamed(label.text),
+      refusal: l10n.formNameSame,
     );
   }
 
@@ -652,6 +678,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final Section? section = _section;
     final Bar? bar = _bar;
     final int sectionIndex = _sectionIndex;
@@ -673,29 +700,29 @@ class _SongFormSheetState extends State<SongFormSheet> {
               _buildHeader(section, sectionIndex),
               const SizedBox(height: 10),
               _buildStatus(),
-              _buildGroup('BAR', <Widget>[
+              _buildGroup(l10n.formGroupBar, <Widget>[
                 SheetButton(
                   buttonKey: 'song-form-bar-insert-before',
                   icon: Icons.add,
-                  label: 'Bar before',
+                  label: l10n.formBarBefore,
                   onTap: hasBar ? () => _insertBar(before: true) : null,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-bar-insert-after',
                   icon: Icons.add,
-                  label: 'Bar after',
+                  label: l10n.formBarAfter,
                   onTap: hasBar ? () => _insertBar(before: false) : null,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-bar-duplicate',
                   icon: Icons.copy_all_outlined,
-                  label: 'Duplicate bar',
+                  label: l10n.formDuplicateBar,
                   onTap: hasBar ? _duplicateBar : null,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-bar-delete',
                   icon: Icons.delete_outline,
-                  label: 'Delete bar',
+                  label: l10n.formDeleteBar,
                   danger: true,
                   onTap: canDeleteBar ? _deleteBar : null,
                 ),
@@ -705,25 +732,27 @@ class _SongFormSheetState extends State<SongFormSheet> {
               // state of the cursor's bar as well as the action, because a sign that is present or
               // absent is something a musician reads before deciding what to press; a row of
               // identical buttons would say what CAN be done and not what IS.
-              _buildGroup('REPEAT', <Widget>[
+              _buildGroup(l10n.formGroupRepeat, <Widget>[
                 SheetButton(
                   buttonKey: 'song-form-repeat-start',
                   icon: Icons.first_page,
-                  label: 'Repeat start',
+                  label: l10n.formRepeatStart,
                   active: bar?.openingBarline == Barline.repeatStart,
                   onTap: hasBar ? _toggleRepeatStart : null,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-repeat-end',
                   icon: Icons.last_page,
-                  label: 'Repeat end',
+                  label: l10n.formRepeatEnd,
                   active: bar?.closingBarline == Barline.repeatEnd,
                   onTap: hasBar ? _toggleRepeatEnd : null,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-repeat-previous',
                   icon: Icons.repeat,
-                  label: 'Previous: ${repeatPreviousText(bar?.repeatPrevious)}',
+                  label: l10n.formPreviousLabel(
+                    repeatPreviousText(bar?.repeatPrevious, l10n),
+                  ),
                   active:
                       bar != null && bar.repeatPrevious != RepeatPrevious.none,
                   onTap: hasBar ? _cycleRepeatPrevious : null,
@@ -731,7 +760,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
                 SheetButton(
                   buttonKey: 'song-form-volta',
                   icon: Icons.bookmark_border,
-                  label: 'Ending: ${voltaText(bar?.volta)}',
+                  label: l10n.formEndingLabel(voltaText(bar?.volta, l10n)),
                   active: bar?.volta != null,
                   onTap: hasBar ? () => _chooseVolta() : null,
                 ),
@@ -741,22 +770,22 @@ class _SongFormSheetState extends State<SongFormSheet> {
               // and the player's stop. Every one is an independent toggle over the bar's own set of
               // marks, so the buttons show what the bar carries now and a bar may carry several at
               // once — see the header note on why this is a group and not a cycle.
-              _buildGroup('MARKS', <Widget>[
+              _buildGroup(l10n.formGroupMarks, <Widget>[
                 for (final BarMark mark in BarMark.values)
                   SheetButton(
                     buttonKey: 'song-form-mark-${mark.name}',
                     icon: _markIcon(mark),
-                    label: barMarkText(mark),
+                    label: barMarkText(mark, l10n),
                     active: bar?.marks.contains(mark) ?? false,
                     onTap: hasBar ? () => _toggleMark(mark) : null,
                   ),
               ]),
               const SizedBox(height: 14),
-              _buildGroup('SECTION', <Widget>[
+              _buildGroup(l10n.formGroupSection, <Widget>[
                 SheetButton(
                   buttonKey: 'song-form-section-insert-before',
                   icon: Icons.playlist_add,
-                  label: 'Section before',
+                  label: l10n.formSectionBefore,
                   onTap: section == null
                       ? null
                       : () => _insertSection(before: true),
@@ -764,7 +793,7 @@ class _SongFormSheetState extends State<SongFormSheet> {
                 SheetButton(
                   buttonKey: 'song-form-section-insert-after',
                   icon: Icons.playlist_add,
-                  label: 'Section after',
+                  label: l10n.formSectionAfter,
                   onTap: section == null
                       ? null
                       : () => _insertSection(before: false),
@@ -772,31 +801,31 @@ class _SongFormSheetState extends State<SongFormSheet> {
                 SheetButton(
                   buttonKey: 'song-form-section-duplicate',
                   icon: Icons.copy_all_outlined,
-                  label: 'Duplicate section',
+                  label: l10n.formDuplicateSection,
                   onTap: section == null ? null : _duplicateSection,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-section-rename',
                   icon: Icons.edit_outlined,
-                  label: 'Rename section',
+                  label: l10n.formRenameSection,
                   onTap: section == null ? null : () => _renameSection(),
                 ),
                 SheetButton(
                   buttonKey: 'song-form-section-up',
                   icon: Icons.arrow_upward,
-                  label: 'Move earlier',
+                  label: l10n.moveEarlier,
                   onTap: canMoveUp ? () => _moveSection(-1) : null,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-section-down',
                   icon: Icons.arrow_downward,
-                  label: 'Move later',
+                  label: l10n.moveLater,
                   onTap: canMoveDown ? () => _moveSection(1) : null,
                 ),
                 SheetButton(
                   buttonKey: 'song-form-section-delete',
                   icon: Icons.delete_outline,
-                  label: 'Delete section',
+                  label: l10n.formDeleteSection,
                   danger: true,
                   onTap: canDeleteSection ? _deleteSection : null,
                 ),
@@ -814,15 +843,20 @@ class _SongFormSheetState extends State<SongFormSheet> {
   //          sectionIndex — its position in the song, or -1.
   // OUTPUTS: The header row: the position, the section's label and place, the counts that make a
   //          reorder or a delete checkable, and the control that closes the sheet.
-  // KEYWORDS: header, position-label, cursor, section-identity, done
+  // KEYWORDS: header, position-label, cursor, section-identity, done, localized
   Widget _buildHeader(Section? section, int sectionIndex) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String position = section == null
-        ? 'No bar selected'
-        : 'Bar $_barOrdinal · section ${section.label}';
+        ? l10n.formNoBarSelected
+        : l10n.formPosition(_barOrdinal, '${section.label}');
     final String detail = section == null
-        ? 'The selected bar is no longer in the song.'
-        : 'bar ${_barIndex + 1} of ${section.bars.length} in this section · '
-              'section ${sectionIndex + 1} of ${_song.sections.length}';
+        ? l10n.formBarGone
+        : l10n.formDetail(
+            _barIndex + 1,
+            section.bars.length,
+            sectionIndex + 1,
+            _song.sections.length,
+          );
     return Row(
       children: <Widget>[
         Expanded(
@@ -849,7 +883,10 @@ class _SongFormSheetState extends State<SongFormSheet> {
         TextButton(
           key: const ValueKey<String>('song-form-done'),
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Done', style: TextStyle(color: sheetAccentColor)),
+          child: Text(
+            l10n.done,
+            style: const TextStyle(color: sheetAccentColor),
+          ),
         ),
       ],
     );
@@ -942,35 +979,38 @@ class _RenameSectionDialogState extends State<_RenameSectionDialog> {
   void _submit() => Navigator.of(context).pop(_controller.text);
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Rename section'),
-    content: TextField(
-      key: const ValueKey<String>('song-form-rename-field'),
-      controller: _controller,
-      autofocus: true,
-      decoration: const InputDecoration(
-        labelText: 'Rehearsal letter or name',
-        helperText: 'A single letter becomes a rehearsal letter.',
-        border: OutlineInputBorder(),
-        isDense: true,
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(l10n.formRenameSection),
+      content: TextField(
+        key: const ValueKey<String>('song-form-rename-field'),
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          labelText: l10n.formRenameLabel,
+          helperText: l10n.formRenameHelper,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+        onChanged: (String _) => setState(() {}),
+        onSubmitted: (String _) => _submit(),
       ),
-      onChanged: (String _) => setState(() {}),
-      onSubmitted: (String _) => _submit(),
-    ),
-    actions: <Widget>[
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        key: const ValueKey<String>('song-form-rename-save'),
-        // Disabled on an empty name: a section whose label prints nothing looks unlabelled, and the
-        // sheet would then be the only place the difference could be seen.
-        onPressed: _controller.text.trim().isEmpty ? null : _submit,
-        child: const Text('Rename'),
-      ),
-    ],
-  );
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          key: const ValueKey<String>('song-form-rename-save'),
+          // Disabled on an empty name: a section whose label prints nothing looks unlabelled, and the
+          // sheet would then be the only place the difference could be seen.
+          onPressed: _controller.text.trim().isEmpty ? null : _submit,
+          child: Text(l10n.formRenameButton),
+        ),
+      ],
+    );
+  }
 }
 
 /// What the ending dialog gave back: whether the musician chose anything at all, and the bracket
@@ -1013,34 +1053,37 @@ class _VoltaDialog extends StatelessWidget {
   final Volta? current;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Alternative ending'),
-    content: Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: <Widget>[
-        for (final _VoltaChoice choice in _voltaChoices)
-          SheetButton(
-            buttonKey: 'song-form-volta-${_voltaChoiceKey(choice.volta)}',
-            icon: choice.volta == null ? Icons.block : Icons.bookmark_border,
-            label: choice.volta == null
-                ? 'No bracket'
-                : (choice.volta!.number == 0
-                      ? 'Unnumbered ['
-                      : '[${choice.volta!.number}.'),
-            active: current == choice.volta,
-            onTap: () => Navigator.of(context).pop(choice),
-          ),
-      ],
-    ),
-    actions: <Widget>[
-      TextButton(
-        key: const ValueKey<String>('song-form-volta-cancel'),
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(l10n.formEndingTitle),
+      content: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: <Widget>[
+          for (final _VoltaChoice choice in _voltaChoices)
+            SheetButton(
+              buttonKey: 'song-form-volta-${_voltaChoiceKey(choice.volta)}',
+              icon: choice.volta == null ? Icons.block : Icons.bookmark_border,
+              label: choice.volta == null
+                  ? l10n.formNoBracket
+                  : (choice.volta!.number == 0
+                        ? l10n.formUnnumberedBracket
+                        : '[${choice.volta!.number}.'),
+              active: current == choice.volta,
+              onTap: () => Navigator.of(context).pop(choice),
+            ),
+        ],
       ),
-    ],
-  );
+      actions: <Widget>[
+        TextButton(
+          key: const ValueKey<String>('song-form-volta-cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+      ],
+    );
+  }
 }
 
 /// The key fragment naming one ending choice, so a test and a driving tool can address each option

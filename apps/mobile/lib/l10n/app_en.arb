@@ -302,5 +302,664 @@
   "@languageChanged": {
     "description": "The confirmation shown after the language is switched.",
     "placeholders": { "language": { "type": "String" } }
-  }
+  },
+
+  "save": "Save",
+  "@save": { "description": "The button that writes a document to a file, shared by the song-info sheet and both file dialogs." },
+
+  "ok": "OK",
+  "@ok": { "description": "The confirming button of the programme sheet's entry-edit dialog." },
+
+  "fileNameLabel": "File name",
+  "@fileNameLabel": { "description": "The file dialogs' field label in a browser, where the field holds a name to offer the chooser rather than a path." },
+
+  "fileSaveFailed": "Could not save: {error}",
+  "@fileSaveFailed": {
+    "description": "The status a file dialog shows when the write threw. The error text is the platform's own description and is not translated.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "fileOpenFailed": "Could not open: {error}",
+  "@fileOpenFailed": {
+    "description": "The status a file dialog shows when the read or the decode threw. The error text is the platform's or the container's own description and is not translated.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "fileChooserCancelled": "No file was chosen.",
+  "@fileChooserCancelled": { "description": "What a file dialog says after the reader dismissed the platform's file chooser. The dialog words the outcome from this catalogue rather than from the exception, because changing one's mind is an outcome and not a fault." },
+
+  "fileWarningSuffix": " {warnings}: {message}",
+  "@fileWarningSuffix": {
+    "description": "The tail of a file dialog's status: how many warnings the container's codec produced, and the first of them. The codec's own message is a diagnostic the container wrote and is not translated.",
+    "placeholders": { "warnings": { "type": "String" }, "message": { "type": "String" } }
+  },
+
+  "byteCount": "{count, plural, one{{count} byte} other{{count} bytes}}",
+  "@byteCount": {
+    "description": "How many bytes a container wrote, as a file dialog reports it.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "operationCount": "{count, plural, one{{count} operation} other{{count} operations}}",
+  "@operationCount": {
+    "description": "How many log operations a container carries.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "warningCount": "{count, plural, one{{count} warning} other{{count} warnings}}",
+  "@warningCount": {
+    "description": "How many warnings a container's codec produced.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "entryCount": "{count, plural, one{{count} entry} other{{count} entries}}",
+  "@entryCount": {
+    "description": "How many running-order entries a programme holds. Russian needs three written forms here.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "chartFileDialogTitle": "Chart file",
+  "@chartFileDialogTitle": { "description": "The title of the `.chart` save/open dialog." },
+
+  "chartFileLabelPath": ".chart file",
+  "@chartFileLabelPath": { "description": "The `.chart` dialog's field label on a platform where the field holds a path that addresses the file." },
+
+  "chartFileOpenButton": "Open .chart",
+  "@chartFileOpenButton": { "description": "The `.chart` dialog's button that reads the named file." },
+
+  "chartFileNoDocument": "Load or import a song before saving it.",
+  "@chartFileNoDocument": { "description": "What the `.chart` dialog says when Save is pressed with no document on screen." },
+
+  "chartFileNameToSave": "Name a .chart file to save to.",
+  "@chartFileNameToSave": { "description": "What the `.chart` dialog says when Save is pressed with an empty field." },
+
+  "chartFileNameToOpen": "Name a .chart file to open.",
+  "@chartFileNameToOpen": { "description": "What the `.chart` dialog says when Open is pressed with an empty field on a platform where the field is a path." },
+
+  "chartFileSavedTo": "Saved {bytes} to {path} · {operations}.",
+  "@chartFileSavedTo": {
+    "description": "The `.chart` dialog's success line on a platform where the field names a destination path.",
+    "placeholders": { "bytes": { "type": "String" }, "path": { "type": "String" }, "operations": { "type": "String" } }
+  },
+
+  "chartFileSavedAs": "Saved {bytes} as {path} · {operations}.",
+  "@chartFileSavedAs": {
+    "description": "The `.chart` dialog's success line in a browser, where the save hands the reader a file rather than writing a path.",
+    "placeholders": { "bytes": { "type": "String" }, "path": { "type": "String" }, "operations": { "type": "String" } }
+  },
+
+  "chartFileOpened": "Opened \"{title}\" · {operations}.",
+  "@chartFileOpened": {
+    "description": "The `.chart` dialog's success line after a file was read and handed to the viewer.",
+    "placeholders": { "title": { "type": "String" }, "operations": { "type": "String" } }
+  },
+
+  "saveModeRewriteInPlace": "This browser re-writes that file in place, so the next Save updates it.",
+  "@saveModeRewriteInPlace": { "description": "The tail of a file dialog's success line where the browser can overwrite the file it already has a handle on." },
+
+  "saveModeDownload": "This browser cannot update a file in place, so each Save downloads a NEW copy.",
+  "@saveModeDownload": { "description": "The tail of a file dialog's success line where every save produces a fresh download." },
+
+  "chartFileSaveHintRewriteInPlace": "This browser can re-write a chart file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.",
+  "@chartFileSaveHintRewriteInPlace": { "description": "The `.chart` dialog's up-front promise on a browser with the File System Access API." },
+
+  "chartFileSaveHintDownload": "This browser cannot re-write a file in place, so every Save downloads a NEW copy. The browser chooses where it lands, and may rename it when a file of that name is already there.",
+  "@chartFileSaveHintDownload": { "description": "The `.chart` dialog's up-front promise on a browser that can only download." },
+
+  "setlistFileTooltip": "Save or open a .setlist file",
+  "@setlistFileTooltip": { "description": "The tooltip of the programme sheet's app-bar-shaped `.setlist` control." },
+
+  "setlistFileDialogTitle": "Programme file",
+  "@setlistFileDialogTitle": { "description": "The title of the `.setlist` save/open dialog." },
+
+  "setlistFileLabelPath": ".setlist file",
+  "@setlistFileLabelPath": { "description": "The `.setlist` dialog's field label on a platform where the field holds a path." },
+
+  "setlistFileOpenButton": "Open .setlist",
+  "@setlistFileOpenButton": { "description": "The `.setlist` dialog's button that reads the named file." },
+
+  "setlistFileNameToSave": "Name a .setlist file to save to.",
+  "@setlistFileNameToSave": { "description": "What the `.setlist` dialog says when Save is pressed with an empty field." },
+
+  "setlistFileNameToOpen": "Name a .setlist file to open.",
+  "@setlistFileNameToOpen": { "description": "What the `.setlist` dialog says when Open is pressed with an empty field on a platform where the field is a path." },
+
+  "setlistFileSavedTo": "Saved {bytes} to {path} · {entries} · {operations}.",
+  "@setlistFileSavedTo": {
+    "description": "The `.setlist` dialog's success line on a platform where the field names a destination path.",
+    "placeholders": { "bytes": { "type": "String" }, "path": { "type": "String" }, "entries": { "type": "String" }, "operations": { "type": "String" } }
+  },
+
+  "setlistFileSavedAs": "Saved {bytes} as {path} · {entries} · {operations}.",
+  "@setlistFileSavedAs": {
+    "description": "The `.setlist` dialog's success line in a browser.",
+    "placeholders": { "bytes": { "type": "String" }, "path": { "type": "String" }, "entries": { "type": "String" }, "operations": { "type": "String" } }
+  },
+
+  "setlistFileSaveHintRewriteInPlace": "This browser can re-write a setlist file it has already been given. The first Save asks where to put the file; every Save after that updates that same file.",
+  "@setlistFileSaveHintRewriteInPlace": { "description": "The `.setlist` dialog's up-front promise on a browser with the File System Access API." },
+
+  "setlistFileSaveHintDownload": "This browser cannot re-write a file in place, so every Save downloads a NEW copy. The browser chooses where it lands, and may rename it when a file of that name is already there.",
+  "@setlistFileSaveHintDownload": { "description": "The `.setlist` dialog's up-front promise on a browser that can only download." },
+
+  "setlistOpened": "Opened \"{name}\" · {entries}.",
+  "@setlistOpened": {
+    "description": "The `.setlist` dialog's success line after a programme was read and adopted.",
+    "placeholders": { "name": { "type": "String" }, "entries": { "type": "String" } }
+  },
+
+  "missingEntryCount": "{count, plural, one{{count} not found in this library.} other{{count} not found in this library.}}",
+  "@missingEntryCount": {
+    "description": "How many of an opened programme's entries name a chart the loaded library does not hold. English writes the same words for every count; Russian agrees the verb with the noun.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "metadataTitle": "Title",
+  "@metadataTitle": { "description": "The song-info sheet's label for the tune's name." },
+
+  "metadataTitleHint": "The name a musician reads at the top of the chart.",
+  "@metadataTitleHint": { "description": "What the title field of the song-info sheet is for." },
+
+  "metadataComposer": "Composer",
+  "@metadataComposer": { "description": "The song-info sheet's label for who wrote the tune." },
+
+  "metadataComposerHint": "As written; the order is whatever the format stores.",
+  "@metadataComposerHint": { "description": "What the composer field of the song-info sheet is for, including why its order is not normalised." },
+
+  "metadataStyle": "Style",
+  "@metadataStyle": { "description": "The song-info sheet's label for the style or feel the tune is played in." },
+
+  "metadataStyleHint": "Free text, such as Medium Swing or Ballad.",
+  "@metadataStyleHint": { "description": "What the style field of the song-info sheet is for. The examples are iReal's own style words and are data a musician types, not interface text." },
+
+  "metadataTempo": "Tempo (BPM)",
+  "@metadataTempo": { "description": "The song-info sheet's label for the tempo in beats per minute." },
+
+  "metadataTempoHelperZero": "0 means this chart sets no tempo.",
+  "@metadataTempoHelperZero": { "description": "What the tempo field says about the model's zero, when the field holds a number." },
+
+  "metadataTempoHelperHint": "Whole beats per minute, or 0 for none.",
+  "@metadataTempoHelperHint": { "description": "What the tempo field asks for, when the field cannot be read as a whole number." },
+
+  "metadataTempoError": "A tempo is a whole number.",
+  "@metadataTempoError": { "description": "The tempo field's own error line while its text cannot be read as a whole number." },
+
+  "metadataTempoRefused": "A tempo is a whole number of beats per minute.",
+  "@metadataTempoRefused": { "description": "The song-info sheet's footer after Save was refused because the tempo is not a number." },
+
+  "metadataNothingChanged": "Nothing changed, so nothing was written to the log.",
+  "@metadataNothingChanged": { "description": "The song-info sheet's footer after Save found every field already equal to the song's own values." },
+
+  "metadataFooterHint": "One edit: the four facts above are written together.",
+  "@metadataFooterHint": { "description": "The song-info sheet's footer before anything is pressed." },
+
+  "metadataFooterFixTempo": "Fix the tempo before saving.",
+  "@metadataFooterFixTempo": { "description": "The song-info sheet's footer, in the removal colour, while the tempo cannot be read and Save is disabled." },
+
+  "palettePosition": "Bar {bar} · cell {cell}",
+  "@palettePosition": {
+    "description": "The chord palette's header: which bar and which cell it is about to edit, numbered from one across the whole chart.",
+    "placeholders": { "bar": { "type": "int" }, "cell": { "type": "int" } }
+  },
+
+  "paletteChordsIn": "Chords in {key}",
+  "@paletteChordsIn": {
+    "description": "The chord palette's subtitle: the key the roots on the grid are spelled in. The key is named through the catalogue so the mode word is the reader's language and the tonic letter stays the chart's own notation.",
+    "placeholders": { "key": { "type": "String" } }
+  },
+
+  "palettePickRoot": "Pick a root",
+  "@palettePickRoot": { "description": "The chord palette's preview before a root has been tapped." },
+
+  "paletteCellEmpty": "This cell is empty.",
+  "@paletteCellEmpty": { "description": "The chord palette's preview when the edited cell holds no chord." },
+
+  "paletteNow": "Now: {chord}",
+  "@paletteNow": {
+    "description": "The chord the edited cell holds right now, shown beneath the preview of what a tap would write.",
+    "placeholders": { "chord": { "type": "String" } }
+  },
+
+  "paletteRemoveChord": "Remove chord",
+  "@paletteRemoveChord": { "description": "The chord palette's destructive button that clears the edited cell." },
+
+  "formGroupBar": "BAR",
+  "@formGroupBar": { "description": "The form sheet's caption over the operations that add, copy and remove one bar." },
+
+  "formGroupRepeat": "REPEAT",
+  "@formGroupRepeat": { "description": "The form sheet's caption over the repeat barline and alternative-ending controls." },
+
+  "formGroupMarks": "MARKS",
+  "@formGroupMarks": { "description": "The form sheet's caption over the four signs a bar can carry." },
+
+  "formGroupSection": "SECTION",
+  "@formGroupSection": { "description": "The form sheet's caption over the operations that add, copy, move and remove a section." },
+
+  "formBarBefore": "Bar before",
+  "@formBarBefore": { "description": "The form sheet's button that inserts a bar in front of the selected one." },
+
+  "formBarAfter": "Bar after",
+  "@formBarAfter": { "description": "The form sheet's button that inserts a bar behind the selected one." },
+
+  "formDuplicateBar": "Duplicate bar",
+  "@formDuplicateBar": { "description": "The form sheet's button that copies the selected bar behind itself." },
+
+  "formDeleteBar": "Delete bar",
+  "@formDeleteBar": { "description": "The form sheet's destructive button that removes the selected bar." },
+
+  "formRepeatStart": "Repeat start",
+  "@formRepeatStart": { "description": "The form sheet's toggle for the repeat-start barline on the selected bar." },
+
+  "formRepeatEnd": "Repeat end",
+  "@formRepeatEnd": { "description": "The form sheet's toggle for the repeat-end barline on the selected bar." },
+
+  "formPreviousLabel": "Previous: {state}",
+  "@formPreviousLabel": {
+    "description": "The form sheet's cycle button for the repeat-previous sign, carrying the sign the bar holds now.",
+    "placeholders": { "state": { "type": "String" } }
+  },
+
+  "formEndingLabel": "Ending: {state}",
+  "@formEndingLabel": {
+    "description": "The form sheet's button that opens the alternative-ending chooser, carrying the bracket the bar holds now.",
+    "placeholders": { "state": { "type": "String" } }
+  },
+
+  "formSectionBefore": "Section before",
+  "@formSectionBefore": { "description": "The form sheet's button that inserts a section in front of the selected one." },
+
+  "formSectionAfter": "Section after",
+  "@formSectionAfter": { "description": "The form sheet's button that inserts a section behind the selected one." },
+
+  "formDuplicateSection": "Duplicate section",
+  "@formDuplicateSection": { "description": "The form sheet's button that copies the selected section, with everything in it, behind itself." },
+
+  "formRenameSection": "Rename section",
+  "@formRenameSection": { "description": "The form sheet's button that opens the rename box, and the box's own title." },
+
+  "moveEarlier": "Move earlier",
+  "@moveEarlier": { "description": "The button and tooltip that move a section, or a programme entry, one place towards the top." },
+
+  "moveLater": "Move later",
+  "@moveLater": { "description": "The button and tooltip that move a section, or a programme entry, one place towards the end." },
+
+  "formDeleteSection": "Delete section",
+  "@formDeleteSection": { "description": "The form sheet's destructive button that removes the selected section and its bars." },
+
+  "formNoBarSelected": "No bar selected",
+  "@formNoBarSelected": { "description": "The form sheet's and the text-cue sheet's header when their cursor names no bar in the song." },
+
+  "formPosition": "Bar {bar} · section {section}",
+  "@formPosition": {
+    "description": "The form sheet's header naming the bar and section the next operation acts on.",
+    "placeholders": { "bar": { "type": "int" }, "section": { "type": "String" } }
+  },
+
+  "formBarGone": "The selected bar is no longer in the song.",
+  "@formBarGone": { "description": "The form sheet's and the text-cue sheet's header when their cursor names a bar a form edit removed." },
+
+  "formDetail": "bar {bar} of {bars} in this section · section {section} of {sections}",
+  "@formDetail": {
+    "description": "The form sheet's header detail line: how far into its section the cursor's bar is, and where that section sits in the song.",
+    "placeholders": { "bar": { "type": "int" }, "bars": { "type": "int" }, "section": { "type": "int" }, "sections": { "type": "int" } }
+  },
+
+  "formRefusedDefault": "Nothing changed: that operation is not possible here.",
+  "@formRefusedDefault": { "description": "The form sheet's status when an operation was refused and the caller named no reason." },
+
+  "formBarInsertedBefore": "Inserted a bar before.",
+  "@formBarInsertedBefore": { "description": "The form sheet's status after a bar was inserted in front of the cursor." },
+
+  "formBarInsertedAfter": "Inserted a bar after.",
+  "@formBarInsertedAfter": { "description": "The form sheet's status after a bar was inserted behind the cursor." },
+
+  "formNoSuchBarInsert": "Nothing was inserted: the song has no such bar.",
+  "@formNoSuchBarInsert": { "description": "The form sheet's status when an insert was refused because the cursor names no bar." },
+
+  "formBarDuplicated": "Duplicated this bar.",
+  "@formBarDuplicated": { "description": "The form sheet's status after the selected bar was copied." },
+
+  "formNoSuchBarCopy": "Nothing was copied: the song has no such bar.",
+  "@formNoSuchBarCopy": { "description": "The form sheet's status when a bar copy was refused because the cursor names no bar." },
+
+  "formBarDeleted": "Deleted this bar.",
+  "@formBarDeleted": { "description": "The form sheet's status after the selected bar was removed." },
+
+  "formLastBarRefused": "Nothing was deleted: a section keeps at least one bar, or it could not be shown or selected.",
+  "@formLastBarRefused": { "description": "The form sheet's status when deleting a section's last bar was refused, with the reason." },
+
+  "formRepeatStartSet": "Repeat start set.",
+  "@formRepeatStartSet": { "description": "The form sheet's status after the repeat-start barline was put on the cursor's bar." },
+
+  "formRepeatStartCleared": "Repeat start cleared.",
+  "@formRepeatStartCleared": { "description": "The form sheet's status after the repeat-start barline was taken off the cursor's bar." },
+
+  "formBarlineSame": "Nothing changed: the bar already carries that barline.",
+  "@formBarlineSame": { "description": "The form sheet's status when a repeat barline toggle changed nothing." },
+
+  "formRepeatEndSet": "Repeat end set.",
+  "@formRepeatEndSet": { "description": "The form sheet's status after the repeat-end barline was put on the cursor's bar." },
+
+  "formRepeatEndCleared": "Repeat end cleared.",
+  "@formRepeatEndCleared": { "description": "The form sheet's status after the repeat-end barline was taken off the cursor's bar." },
+
+  "formRepeatPreviousStatus": "Repeat previous: {state}.",
+  "@formRepeatPreviousStatus": {
+    "description": "The form sheet's status after the repeat-previous sign was stepped, naming the state it reached.",
+    "placeholders": { "state": { "type": "String" } }
+  },
+
+  "formSymbolSame": "Nothing changed: the bar already carries that symbol.",
+  "@formSymbolSame": { "description": "The form sheet's status when the repeat-previous cycle changed nothing." },
+
+  "formEndingRemoved": "Ending bracket removed.",
+  "@formEndingRemoved": { "description": "The form sheet's status after the alternative-ending bracket was taken off the cursor's bar." },
+
+  "formEndingSetTo": "Ending bracket set to {volta}",
+  "@formEndingSetTo": {
+    "description": "The form sheet's status after an alternative-ending bracket was chosen. It deliberately carries no full stop: the bracket is named the way it is drawn and already ends in the dot that belongs to it.",
+    "placeholders": { "volta": { "type": "String" } }
+  },
+
+  "formBracketSame": "Nothing changed: the bar already carries that bracket.",
+  "@formBracketSame": { "description": "The form sheet's status when an ending choice equal to the bar's own was made." },
+
+  "formMarkSet": "{mark} set.",
+  "@formMarkSet": {
+    "description": "The form sheet's status after a sign was put on the cursor's bar.",
+    "placeholders": { "mark": { "type": "String" } }
+  },
+
+  "formMarkCleared": "{mark} cleared.",
+  "@formMarkCleared": {
+    "description": "The form sheet's status after a sign was taken off the cursor's bar.",
+    "placeholders": { "mark": { "type": "String" } }
+  },
+
+  "formSignPresent": "Nothing changed: the bar already carries that sign.",
+  "@formSignPresent": { "description": "The form sheet's status when a sign was already on the bar." },
+
+  "formSignAbsent": "Nothing changed: the bar does not carry that sign.",
+  "@formSignAbsent": { "description": "The form sheet's status when a sign was already off the bar." },
+
+  "formSectionInsertedBefore": "Inserted a new section before.",
+  "@formSectionInsertedBefore": { "description": "The form sheet's status after a section was inserted in front of the cursor's section." },
+
+  "formSectionInsertedAfter": "Inserted a new section after.",
+  "@formSectionInsertedAfter": { "description": "The form sheet's status after a section was inserted behind the cursor's section." },
+
+  "formNoSuchSectionInsert": "Nothing was inserted: the song has no such section.",
+  "@formNoSuchSectionInsert": { "description": "The form sheet's status when a section insert was refused." },
+
+  "formSectionDuplicated": "Duplicated this section.",
+  "@formSectionDuplicated": { "description": "The form sheet's status after the selected section was copied." },
+
+  "formNoSuchSectionCopy": "Nothing was copied: the song has no such section.",
+  "@formNoSuchSectionCopy": { "description": "The form sheet's status when a section copy was refused." },
+
+  "formSectionMovedEarlier": "Moved this section earlier.",
+  "@formSectionMovedEarlier": { "description": "The form sheet's status after the selected section was moved one place towards the top." },
+
+  "formSectionMovedLater": "Moved this section later.",
+  "@formSectionMovedLater": { "description": "The form sheet's status after the selected section was moved one place towards the end." },
+
+  "formSectionAtEnd": "Nothing moved: the section is already at that end of the form.",
+  "@formSectionAtEnd": { "description": "The form sheet's status when a section move was refused at either end of the form." },
+
+  "formSectionDeleted": "Deleted this section.",
+  "@formSectionDeleted": { "description": "The form sheet's status after the selected section and its bars were removed." },
+
+  "formLastSectionRefused": "Nothing was deleted: a song keeps at least one section, or there would be nothing left to show.",
+  "@formLastSectionRefused": { "description": "The form sheet's status when deleting the song's last section was refused, with the reason." },
+
+  "formSectionRenamed": "Renamed this section to \"{name}\".",
+  "@formSectionRenamed": {
+    "description": "The form sheet's status after the selected section was renamed.",
+    "placeholders": { "name": { "type": "String" } }
+  },
+
+  "formNameSame": "Nothing was renamed: it already carries that name.",
+  "@formNameSame": { "description": "The form sheet's status when a rename asked for the name the section already had." },
+
+  "formVoltaNone": "none",
+  "@formVoltaNone": { "description": "The form sheet's word for a bar that carries no alternative-ending bracket." },
+
+  "formVoltaUnnumbered": "unnumbered",
+  "@formVoltaUnnumbered": { "description": "The form sheet's word for the bracket with no figure, which the page draws as a bare bracket. It is a different state from having no bracket." },
+
+  "formRepeatPreviousOff": "off",
+  "@formRepeatPreviousOff": { "description": "The form sheet's word for a bar that carries no repeat-previous sign." },
+
+  "formRepeatPreviousOneBar": "1 bar",
+  "@formRepeatPreviousOneBar": { "description": "The form sheet's word for the repeat-previous sign that means the previous bar." },
+
+  "formRepeatPreviousTwoBars": "2 bars",
+  "@formRepeatPreviousTwoBars": { "description": "The form sheet's word for the repeat-previous sign that means the previous two bars." },
+
+  "formRenameLabel": "Rehearsal letter or name",
+  "@formRenameLabel": { "description": "The label of the rename box's field." },
+
+  "formRenameHelper": "A single letter becomes a rehearsal letter.",
+  "@formRenameHelper": { "description": "What the rename box's field is for, and what a one-letter name becomes." },
+
+  "formRenameButton": "Rename",
+  "@formRenameButton": { "description": "The rename box's confirming button." },
+
+  "formEndingTitle": "Alternative ending",
+  "@formEndingTitle": { "description": "The title of the dialog that chooses an alternative-ending bracket." },
+
+  "formNoBracket": "No bracket",
+  "@formNoBracket": { "description": "The ending dialog's choice that removes the bracket. It is not the same as the unnumbered bracket, which the page draws." },
+
+  "formUnnumberedBracket": "Unnumbered [",
+  "@formUnnumberedBracket": { "description": "The ending dialog's choice of the bracket with no figure, written so it echoes the bare bracket the page draws." },
+
+  "markSegno": "Segno",
+  "@markSegno": { "description": "The name of the segno sign on the form sheet's toggle. The sign on the page is notation; this is the interface's word for it." },
+
+  "markCoda": "Coda",
+  "@markCoda": { "description": "The name of the coda sign on the form sheet's toggle." },
+
+  "markFermata": "Fermata",
+  "@markFermata": { "description": "The name of the fermata sign on the form sheet's toggle." },
+
+  "markPlayerEnding": "Player end",
+  "@markPlayerEnding": { "description": "The name of the player's-stop sign on the form sheet's toggle." },
+
+  "cueGroupThisBar": "THIS BAR",
+  "@cueGroupThisBar": { "description": "The text-cue sheet's caption over the controls that add a cue and walk to another bar." },
+
+  "cueGroupTheCue": "THE CUE",
+  "@cueGroupTheCue": { "description": "The text-cue sheet's caption over the controls that change the selected cue." },
+
+  "cueWriteWords": "Write words here",
+  "@cueWriteWords": { "description": "The text-cue sheet's button that inserts a cue on the cursor's bar." },
+
+  "cuePreviousBar": "Previous bar",
+  "@cuePreviousBar": { "description": "The text-cue sheet's button that walks the cursor one bar earlier." },
+
+  "cueNextBar": "Next bar",
+  "@cueNextBar": { "description": "The text-cue sheet's button that walks the cursor one bar later." },
+
+  "cueSaveWords": "Save words",
+  "@cueSaveWords": { "description": "The text-cue sheet's button that writes the field into the selected cue." },
+
+  "cueBarEarlier": "A bar earlier",
+  "@cueBarEarlier": { "description": "The text-cue sheet's button that moves the selected cue one bar earlier." },
+
+  "cueBarLater": "A bar later",
+  "@cueBarLater": { "description": "The text-cue sheet's button that moves the selected cue one bar later." },
+
+  "cueUpLine": "Up a line",
+  "@cueUpLine": { "description": "The text-cue sheet's button that nudges the selected cue up the page." },
+
+  "cueDownLine": "Down a line",
+  "@cueDownLine": { "description": "The text-cue sheet's button that nudges the selected cue down the page." },
+
+  "cueRemove": "Remove the cue",
+  "@cueRemove": { "description": "The text-cue sheet's destructive button that removes the selected cue." },
+
+  "cuePosition": "Words · bar {bar}",
+  "@cuePosition": {
+    "description": "The text-cue sheet's header naming the bar the next cue goes on.",
+    "placeholders": { "bar": { "type": "int" } }
+  },
+
+  "cueDetail": "bar {bar} of {bars} in this section · {place} · {cues} here",
+  "@cueDetail": {
+    "description": "The text-cue sheet's header detail line: how far into its section the cursor's bar is, which part of it the cue is anchored to, and how many cues are already on it.",
+    "placeholders": { "bar": { "type": "int" }, "bars": { "type": "int" }, "place": { "type": "String" }, "cues": { "type": "String" } }
+  },
+
+  "cueCount": "{count, plural, one{{count} cue} other{{count} cues}}",
+  "@cueCount": {
+    "description": "How many remarks a bar carries.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "cueWholeBar": "whole bar",
+  "@cueWholeBar": { "description": "The text-cue sheet's word for a remark anchored to the bar rather than to one of its cells." },
+
+  "cueCell": "cell {cell}",
+  "@cueCell": {
+    "description": "The text-cue sheet's word for a remark anchored to one cell of a bar.",
+    "placeholders": { "cell": { "type": "int" } }
+  },
+
+  "cueRefusedDefault": "Nothing changed: that is not possible here.",
+  "@cueRefusedDefault": { "description": "The text-cue sheet's status when an operation was refused and the caller named no reason." },
+
+  "cueAdded": "Added a cue.",
+  "@cueAdded": { "description": "The text-cue sheet's status when adding a cue was refused, so the refuse branch names what was attempted." },
+
+  "cueNoSuchBarAdd": "Nothing was added: the song has no such bar.",
+  "@cueNoSuchBarAdd": { "description": "The text-cue sheet's status when a cue insert was refused because the cursor names no bar." },
+
+  "cueAddedTypeWords": "Added a cue — type the words.",
+  "@cueAddedTypeWords": { "description": "The text-cue sheet's status after a cue was inserted, telling the musician the field is waiting." },
+
+  "cueNothingHappened": "Nothing happened.",
+  "@cueNothingHappened": { "description": "The text-cue sheet's status when a press needed a selected cue and there is none, in the cases where the refusal has no more specific reason." },
+
+  "cueNoSelectionSave": "Nothing was saved: no cue is selected.",
+  "@cueNoSelectionSave": { "description": "The text-cue sheet's status when Save words was pressed with nothing selected." },
+
+  "cueWordsSaved": "Saved the words.",
+  "@cueWordsSaved": { "description": "The text-cue sheet's status after the words were written to the selected cue." },
+
+  "cueSameWords": "Nothing changed: the cue already says that.",
+  "@cueSameWords": { "description": "The text-cue sheet's status when the field held the words the cue already had." },
+
+  "cueNoSelectionRemove": "Nothing was removed: no cue is selected.",
+  "@cueNoSelectionRemove": { "description": "The text-cue sheet's status when the cue was removed with nothing selected." },
+
+  "cueRemoved": "Removed the cue.",
+  "@cueRemoved": { "description": "The text-cue sheet's status after the selected cue was taken off the chart." },
+
+  "cueAlreadyGone": "Nothing was removed: the cue is already gone.",
+  "@cueAlreadyGone": { "description": "The text-cue sheet's status when the selected cue had already been removed." },
+
+  "cueNoSelectionMove": "Nothing moved: no cue is selected.",
+  "@cueNoSelectionMove": { "description": "The text-cue sheet's status when a move was asked for with nothing selected." },
+
+  "cueEndOfSong": "Nothing moved: that is the end of the song.",
+  "@cueEndOfSong": { "description": "The text-cue sheet's status when a move or a cursor walk would leave the song." },
+
+  "cueMovedEarlier": "Moved the cue a bar earlier.",
+  "@cueMovedEarlier": { "description": "The text-cue sheet's status after the selected cue was moved to the previous bar." },
+
+  "cueMovedLater": "Moved the cue a bar later.",
+  "@cueMovedLater": { "description": "The text-cue sheet's status after the selected cue was moved to the next bar." },
+
+  "cueAlreadyThere": "Nothing moved: the cue is already there.",
+  "@cueAlreadyThere": { "description": "The text-cue sheet's status when a move landed on the bar the cue already sat on." },
+
+  "cueNudgedUp": "Nudged the cue up.",
+  "@cueNudgedUp": { "description": "The text-cue sheet's status after the selected cue's offset was moved up." },
+
+  "cueNudgedDown": "Nudged the cue down.",
+  "@cueNudgedDown": { "description": "The text-cue sheet's status after the selected cue's offset was moved down." },
+
+  "cueNothingMoved": "Nothing moved.",
+  "@cueNothingMoved": { "description": "The text-cue sheet's status when a nudge changed nothing." },
+
+  "cueNowOnBar": "Now on bar {bar}.",
+  "@cueNowOnBar": {
+    "description": "The text-cue sheet's status after the cursor walked to another bar.",
+    "placeholders": { "bar": { "type": "int" } }
+  },
+
+  "cueNoneHere": "No words on this bar yet.",
+  "@cueNoneHere": { "description": "The text-cue sheet's cue list when the cursor's bar carries no remark." },
+
+  "cueNoWordsYet": "(no words yet)",
+  "@cueNoWordsYet": { "description": "The cue list's name for a cue that was inserted and not yet typed into. It is the interface's own word, not the cue's text." },
+
+  "cueWordsLabel": "The words",
+  "@cueWordsLabel": { "description": "The label of the text-cue sheet's words field." },
+
+  "cueWordsHelper": "For example: To Coda · D.C. al Fine · Solo · Vamp · 4×",
+  "@cueWordsHelper": {
+    "description": "The text-cue sheet's examples under the words field. The EXAMPLES ARE NOT TRANSLATED AND ARE THE SAME IN EVERY LOCALE: they are the conventional notation a musician writes on a chart, which Russian players read in the Italian/English form, and a translated example would teach them to write a word no other chart carries. Only the framing words 'For example' belong to the interface."
+  },
+
+  "setlistSheetTitle": "Programme",
+  "@setlistSheetTitle": { "description": "The programme sheet's own heading." },
+
+  "undo": "Undo",
+  "@undo": { "description": "The label of a button that undoes the last edit, distinct from the app-bar icon's tooltip." },
+
+  "redo": "Redo",
+  "@redo": { "description": "The label of a button that redoes the last undone edit." },
+
+  "setlistNameLabel": "Programme name",
+  "@setlistNameLabel": { "description": "The label of the programme sheet's title field." },
+
+  "setlistMissingCharts": "{count, plural, one{{count} entry names a chart this library does not hold. The programme keeps it; the chart is not here to play.} other{{count} entries name a chart this library does not hold. The programme keeps them; the chart is not here to play.}}",
+  "@setlistMissingCharts": {
+    "description": "How many of the programme's entries name a chart the loaded library does not hold, and what that means. Russian needs three written forms and agrees its verb with the noun.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "setlistEmpty": "The programme is empty.\nAdd a chart from the library.",
+  "@setlistEmpty": { "description": "The programme sheet's body before any entry was added." },
+
+  "setlistAddChart": "Add a chart to the programme",
+  "@setlistAddChart": { "description": "The programme sheet's button that opens the chart picker." },
+
+  "setlistAddChartTitle": "Add a chart",
+  "@setlistAddChartTitle": { "description": "The title of the programme sheet's chart picker." },
+
+  "setlistPlayTooltip": "Play this chart from the programme",
+  "@setlistPlayTooltip": { "description": "The tooltip of a programme row's play button." },
+
+  "setlistEntryTooltip": "How this entry is played",
+  "@setlistEntryTooltip": { "description": "The tooltip of a programme row's entry-edit button." },
+
+  "setlistRemoveTooltip": "Remove from the programme",
+  "@setlistRemoveTooltip": { "description": "The tooltip of a programme row's delete button." },
+
+  "setlistTranspositionHint": "Transposition for this entry (the chart keeps its written key)",
+  "@setlistTranspositionHint": { "description": "The entry-edit dialog's caption over the interval stepper, saying that the document keeps its written key." },
+
+  "setlistNotesLabel": "Note for the performer",
+  "@setlistNotesLabel": { "description": "The label of the entry-edit dialog's note field." },
+
+  "setlistEntrySubtitle": "{interval} · {notes}",
+  "@setlistEntrySubtitle": {
+    "description": "A programme row's subtitle: how the entry is transposed, then the note the performer wrote. The note is the musician's own data and is not translated.",
+    "placeholders": { "interval": { "type": "String" }, "notes": { "type": "String" } }
+  },
+
+  "setlistSongSubtitle": "{key} · {bars}",
+  "@setlistSongSubtitle": {
+    "description": "A row of the chart picker: the chart's key, then its bar count.",
+    "placeholders": { "key": { "type": "String" }, "bars": { "type": "String" } }
+  },
+
+  "untitledProgramme": "Untitled programme",
+  "@untitledProgramme": { "description": "The name shown for a programme whose title is empty. Never data: it is the interface's own fallback." },
+
+  "setlistMissingChart": "(missing chart)",
+  "@setlistMissingChart": { "description": "The programme row's name for an entry that names no chart the loaded library holds." }
 }
