@@ -6,7 +6,9 @@
 //          agent that pops one to look at its own output interferes with its user. The same test
 //          renders the song in a requested key, so a transposition can be checked by eye against
 //          the PNG and against the chord list printed beside it.
-// INPUTS: The owner's export at [defaultIRealPath]. A real system font is loaded when one is found,
+// INPUTS: The owner's export, named by the IREAL_RENDER_EXPORT environment variable — NOT by the
+//         value the application ships, which a test must not depend on and which silently silenced
+//         this test when it was emptied. A real system font is loaded when one is found,
 //         because the framework's default test font draws every glyph as a filled box and a page
 //         of boxes proves the layout but nothing about the text. IREAL_RENDER_TRANSPOSE selects a
 //         key by the interval the twelve-key grid uses.
@@ -190,7 +192,19 @@ Future<void> _renderPageToPng(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final File fixture = File(defaultIRealPath);
+
+  // NAMED BY THE RUNNER, NOT BY THE PRODUCT. This used to be `File(defaultIRealPath)` — the value the
+  // application ships as the path it opens on launch. That is a coupling between a test and a
+  // production default, and it broke silently the moment the default was emptied for a good reason
+  // (an absolute path from one developer's home directory was compiled into the Android build and
+  // opened the app on a red error on the tablet). Emptying it turned this test from PASSING into
+  // SKIPPED, so the suite stayed green while a real render against the owner's own export stopped
+  // being exercised. A test that stops running because a product default changed is a test whose
+  // green means less than it looks.
+  //
+  // IREAL_RENDER_EXPORT names the file explicitly. Unset, the test skips and SAYS SO, which is the
+  // honest outcome on a machine that does not hold the owner's export — CI included.
+  final File fixture = File(Platform.environment['IREAL_RENDER_EXPORT'] ?? '');
 
   // Overridable, because a verification instrument that can only render one song stops being one
   // the moment a different song needs checking. IREAL_RENDER_SONG takes a title substring and
@@ -210,7 +224,10 @@ void main() {
   test(
     'renders $song to PNG files without opening a window',
     () async {
-      final IRealLibrary library = _loadOwnerLibrary(defaultIRealPath)!;
+      // THE SAME PATH the skip above checked. Reading it from the production default instead is what
+      // turned this from a skipped test into a CRASHING one — `_loadOwnerLibrary('')` answers null and
+      // the `!` throws, so a machine without the export would fail rather than skip.
+      final IRealLibrary library = _loadOwnerLibrary(fixture.path)!;
       final IRealSong? entry = _songTitled(library, song);
       expect(entry, isNotNull, reason: 'the owner export must contain "$song"');
       final Song written = entry!.song;
@@ -346,6 +363,7 @@ void main() {
     },
     skip: fixture.existsSync()
         ? null
-        : 'no owner export at $defaultIRealPath on this machine',
+        : 'set IREAL_RENDER_EXPORT to the owner\'s iReal export to run this render; '
+            'nothing exists at "${fixture.path}" on this machine',
   );
 }
