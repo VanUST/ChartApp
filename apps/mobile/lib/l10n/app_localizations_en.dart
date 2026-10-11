@@ -126,6 +126,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cancel => 'Cancel';
 
   @override
+  String get newChart => 'New chart';
+
+  @override
+  String newChartIntro(String bars) {
+    return 'A new chart starts as one section of $bars. Choose a key and a meter — the editor cannot change either afterwards.';
+  }
+
+  @override
+  String get newChartMeterLabel => 'Meter';
+
+  @override
+  String get newChartKeyLabel => 'Key';
+
+  @override
+  String get newChartMajor => 'Major';
+
+  @override
+  String get newChartMinor => 'Minor';
+
+  @override
+  String get create => 'Create';
+
+  @override
   String get tooltipInkOn => 'Drawing: the pen draws, a finger still selects';
 
   @override

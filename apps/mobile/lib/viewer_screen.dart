@@ -151,6 +151,7 @@ import 'package:chart_ui/chart_ui.dart';
 // names the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
 import 'package:flutter/material.dart' hide Key;
 
+import 'chart_document.dart';
 import 'chart_file_bar.dart';
 import 'chord_palette_sheet.dart';
 import 'document_file_name.dart';
@@ -162,6 +163,7 @@ import 'ireal_library.dart';
 import 'ireal_source.dart';
 import 'key_grid.dart';
 import 'l10n/app_localizations.dart';
+import 'new_chart_dialog.dart';
 import 'scene_bar.dart';
 import 'setlist_import.dart';
 import 'setlist_resolution.dart';
@@ -1550,7 +1552,19 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         document: _documentOfSelection,
         events: session?.log ?? const <ChartEvent>[],
         initialPath: chartPathBeside(widget.initialPath),
+        // The title the proposed FILE name is built from — the one on screen, not the one in the
+        // snapshot. `document` above is the written snapshot, and a rename this session made lives
+        // in the operations beside it, so a chart typed from scratch and then named would otherwise
+        // be offered as `untitled.chart`. Measured on the owner's tablet before this argument:
+        // naming the chart "Moya Pesnya" and pressing Save proposed `untitled.chart`.
+        nameTitle: session?.song.title,
         onOpened: _adoptOpenedSong,
+        // The third thing a musician does with a chart document, beside saving one and opening one,
+        // and it lives here for the same reason the other two do: this bar is where a charter's
+        // attention already is, and a fourth control beside the save/open button costs no width in
+        // an app bar whose width A49 measured as the scarce resource. On a phone this dialog is
+        // reached from the overflow menu, so both shells get it without a new toolbar row.
+        onNew: () => unawaited(_newChart(context)),
       ),
       // --- SETTINGS, AND WHY IT IS HERE ------------------------------------------------
       // The language switch is the one SETTING this application has, and a setting belongs
@@ -1601,6 +1615,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               events: session?.log ?? const <ChartEvent>[],
               initialPath: chartPathBeside(widget.initialPath),
               onOpened: _adoptOpenedSong,
+              // The same title-on-screen rule the app-bar action follows; see its own comment.
+              nameTitle: session?.song.title,
+              // The phone's way to the same action the tablet's app-bar file dialog offers. It is
+              // passed rather than made a menu row of its own so that "New chart" means one thing
+              // on both shells and sits beside Save and Open wherever a musician finds either.
+              onNew: () => unawaited(_newChart(context)),
             ),
           );
         } else if (picked == 'settings') {
@@ -1802,6 +1822,55 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return _sessionFor(library.songs[index]).baseDocument;
   }
 
+  // PURPOSE: Start a chart from nothing — the one way music enters this application that does not
+  //          come from an iReal export — and put it on screen through the SAME door an opened
+  //          `.chart` file uses, so a made-up chart and an imported one are one kind of thing
+  //          everywhere downstream.
+  // INPUTS: context — where the new-chart dialog is shown from.
+  // OUTPUTS: A future completing when the dialog closes. On a choice it builds the song with the
+  //          chosen key and meter through `newChartSong` and hands it to [_adoptOpenedSong] as a
+  //          document with an EMPTY operation tail — because a new chart has exactly that: a
+  //          snapshot and no history. On a dismissal nothing is created and the screen is untouched,
+  //          which is why the dismissal is logged rather than treated as a failure.
+  //
+  //          WHY THERE IS NO SECOND ADOPTION PATH. The rail, the programme of one, the session, the
+  //          ink layer, the scene bar and the save button all read the library and the sessions this
+  //          screen holds; seeding them here by hand would be a second implementation of
+  //          [_adoptOpenedSong] that could disagree with the first about any of them. A new chart is
+  //          a document, and a document is what that method takes.
+  //
+  //          WHAT IS NOT ASKED HERE, AND WHY. The title is not: it is renamed through the song-info
+  //          sheet, which is the same `song.update` a rename of an imported chart goes through, so
+  //          asking for it at creation would be a second naming mechanism. Tempo and style are not:
+  //          both are editable afterwards and neither is required for the page to be read.
+  // KEYWORDS: new-chart, from-scratch, one-adoption-path, empty-tail, d21, structured-log
+  Future<void> _newChart(BuildContext context) async {
+    final NewChartChoice? choice = await showNewChartDialog(context);
+    if (!mounted || choice == null) {
+      debugPrint('viewer.chart.new.cancelled');
+      return;
+    }
+    final Song song = newChartSong(
+      key: choice.key,
+      timeSignature: choice.timeSignature,
+    );
+    // The identity is printed here and not only computed inside the adoption, because it is the
+    // answer to a question this feature raises and nothing else can show: two charts made with the
+    // same key and meter hold identical MUSIC, and an identity that names music must therefore be
+    // identical too. A reader of this line can see that happen rather than have it asserted.
+    debugPrint(
+      'viewer.chart.new.created key=${song.key} '
+      'meter=${song.sections.first.bars.first.timeSignature} '
+      'bars=${song.writtenBarCount} '
+      'sections=${song.sections.length} '
+      'identity=${chartIdentityOf(song)}',
+    );
+    _adoptOpenedSong((
+      document: DocumentState(song: song),
+      events: const <ChartEvent>[],
+    ));
+  }
+
   // PURPOSE: Replace the shown library with the one song a `.chart` file produced, so the chart the
   //          file describes is the one on screen, and seed its session from the operation tail the
   //          file carried.
@@ -1844,7 +1913,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ..clear()
         ..[0] = EditSession(
           document: opened.document,
-          docId: opened.document.song.id,
+          // THE ID THE FILE ITSELF IS WRITTEN UNDER, not the song's own id, because those differ
+          // for exactly one kind of document and it is the kind this screen can now make: a chart
+          // typed from scratch carries no song id (`Song.id` is empty until a store assigns one),
+          // and `chartFileFor` writes such a chart under `untitledDocumentId`. Passing the empty id
+          // through would give the session a doc id of `''` while the file it saves declares
+          // `chartapp-untitled`, and the container refuses a file whose operations name a different
+          // document than its header — so the first edit would make the chart unsavable. Both
+          // sides read the rule from `documentIdFor`, so they cannot answer differently.
+          docId: documentIdFor(opened.document.song),
           seq: _highestSeq(opened.events),
           restored: opened.events,
         );
@@ -2035,7 +2112,26 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(prompt, textAlign: TextAlign.center),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(prompt, textAlign: TextAlign.center),
+              // THE ONE GESTURE. A musician who opens the application to write a tune has nothing
+              // else to look at on this screen, so the action that starts a chart stands ON the
+              // empty state rather than in the app bar or behind the overflow menu: those are the
+              // places a musician with a chart already open looks, and this is the place a musician
+              // with nothing looks. It is a button and not a sentence about a button, because the
+              // empty state already carries one instruction — how to open an export — and a second
+              // paragraph about writing would be read as part of the first.
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                key: const ValueKey<String>('viewer-new-chart'),
+                onPressed: () => unawaited(_newChart(context)),
+                icon: const Icon(Icons.add),
+                label: Text(l10n.newChart),
+              ),
+            ],
+          ),
         ),
       );
     }

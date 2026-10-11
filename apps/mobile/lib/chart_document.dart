@@ -31,6 +31,25 @@ import 'package:chart_core/chart_core.dart';
 /// eventually disagree.
 const String untitledDocumentId = EditSession.untitledDocumentId;
 
+// PURPOSE: Name the document a song is EDITED AND SAVED UNDER, so that a chart typed from scratch
+//          and an imported one reach the same answer, and so the session that applies an event and
+//          the file that stores it cannot name two different documents.
+// INPUTS: song — any song, including one whose `id` is empty, which is every chart that has never
+//         been stored.
+// OUTPUTS: The song's own id when it has one, and [untitledDocumentId] otherwise. Never empty: a
+//          `.chart` container rejects a header whose document id is empty, and an event whose
+//          `docId` is empty would name no document at all.
+// KEYWORDS: document-id, untitled, from-scratch-chart, one-rule, session-vs-container
+//
+// WHY THIS IS A FUNCTION AND NOT A TERNARY WRITTEN TWICE. The rule is needed in two places that
+// must agree — the session that writes the operation log and the container header that the log is
+// checked against — and a container refuses a file whose operations name a different document than
+// its header. Two copies of `id.isEmpty ? … : id` would be two chances for that check to fail on a
+// chart the musician can actually reach: one typed from scratch, whose `Song.id` is empty.
+/// Returns the document id [song] is edited and saved under.
+String documentIdFor(Song song) =>
+    song.id.isEmpty ? untitledDocumentId : song.id;
+
 // PURPOSE: Build the document a session is saved as.
 // INPUTS: document — the state to write, whose song is the WRITTEN chart and never the transposed
 //         view. It must be the document BEFORE [events], which is `EditSession.baseDocument` for a
@@ -52,7 +71,7 @@ ChartFile chartFileFor(
   DateTime? modifiedAt,
 }) => ChartFile(
   metadata: ChartMetadata(
-    docId: document.song.id.isEmpty ? untitledDocumentId : document.song.id,
+    docId: documentIdFor(document.song),
     modifiedAt: modifiedAt?.toUtc(),
     writer: 'chartapp',
   ),

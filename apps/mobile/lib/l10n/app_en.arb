@@ -94,6 +94,30 @@
   "cancel": "Cancel",
   "@cancel": { "description": "The button that dismisses a picker without applying anything." },
 
+  "newChart": "New chart",
+  "@newChart": { "description": "The action that starts a chart from scratch. It stands in the empty state, in the `.chart` dialog and in the phone overflow menu, and it is also the title of the dialog it opens." },
+
+  "newChartIntro": "A new chart starts as one section of {bars}. Choose a key and a meter — the editor cannot change either afterwards.",
+  "@newChartIntro": {
+    "description": "What the new-chart dialog says about the chart it is about to make, and why it asks for two things here. The bar count is passed as an already-worded plural so the number and the catalogue's own bar wording cannot drift apart; the claim about the key and the meter being unchangeable is a fact about the editor and must be corrected here when the editor gains those controls.",
+    "placeholders": { "bars": { "type": "String" } }
+  },
+
+  "newChartMeterLabel": "Meter",
+  "@newChartMeterLabel": { "description": "The caption above the row of meters a new chart can start in." },
+
+  "newChartKeyLabel": "Key",
+  "@newChartKeyLabel": { "description": "The caption above the key a new chart is written in: the mode switch and the twelve tonics under it." },
+
+  "newChartMajor": "Major",
+  "@newChartMajor": { "description": "The mode switch's major half in the new-chart dialog." },
+
+  "newChartMinor": "Minor",
+  "@newChartMinor": { "description": "The mode switch's minor half in the new-chart dialog." },
+
+  "create": "Create",
+  "@create": { "description": "The button that makes the new chart with the key and meter chosen beside it." },
+
   "tooltipInkOn": "Drawing: the pen draws, a finger still selects",
   "@tooltipInkOn": { "description": "The pen toggle's tooltip while drawing is on." },
 

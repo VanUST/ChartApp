@@ -100,13 +100,17 @@ String chartFileNameFor(String title) =>
 //          both places that offer it.
 // INPUTS: context — where the dialog is shown. document — the written document to save, or null when
 //         nothing is loaded. events — the operation tail that produced it. initialPath — the text the
-//         field starts with. onOpened — called with the document and tail a file decoded to. save and
-//         open default to the platform implementations, so only a test passes them.
+//         field starts with. nameTitle — the title the proposed FILE name is built from, or null to
+//         build it from [document]'s own title. onOpened — called with the document and tail a file
+//         decoded to. onNew — called when the musician asks for a chart from scratch instead, or null
+//         when the caller offers no such action, in which case the button is absent rather than dead.
+//         save and open default to the platform implementations, so only a test passes them.
 // OUTPUTS: A future completing when the dialog is dismissed. The dialog itself is unchanged and
 //          behaves identically whichever caller opened it, which is the point of the function: the
 //          tablet's app-bar button and the phone's overflow menu call this same function, so the two
 //          shells cannot come to mean different things by "Save or open a .chart file".
-// KEYWORDS: chart-file, dialog-entry, one-dialog-two-callers, phone-overflow, tablet-app-bar
+// KEYWORDS: chart-file, dialog-entry, one-dialog-two-callers, phone-overflow, tablet-app-bar,
+//           new-chart, proposed-name
 /// Shows the `.chart` save/open dialog described by the arguments.
 Future<void> showChartFileDialog(
   BuildContext context, {
@@ -116,6 +120,8 @@ Future<void> showChartFileDialog(
   String initialPath = '',
   ChartFileSaver save = saveChartFile,
   ChartFileOpener open = loadChartFile,
+  String? nameTitle,
+  VoidCallback? onNew,
 }) => showDialog<void>(
   context: context,
   builder: (BuildContext context) => _ChartFileDialog(
@@ -125,6 +131,8 @@ Future<void> showChartFileDialog(
     initialPath: initialPath,
     save: save,
     open: open,
+    nameTitle: nameTitle,
+    onNew: onNew,
   ),
 );
 
@@ -134,7 +142,9 @@ class ChartFileAction extends StatelessWidget {
   ///
   /// [save] and [open] default to the platform implementations from `chart_source.dart`, so the
   /// viewer passes neither and a test can pass both without a filesystem. [events] is the operation
-  /// tail that produced [document] and is written beside the snapshot unchanged.
+  /// tail that produced [document] and is written beside the snapshot unchanged. [onNew] is the
+  /// chart-from-scratch action the dialog offers beside the two file operations, or null to leave
+  /// it out.
   const ChartFileAction({
     super.key,
     required this.document,
@@ -143,6 +153,8 @@ class ChartFileAction extends StatelessWidget {
     this.initialPath = '',
     this.save = saveChartFile,
     this.open = loadChartFile,
+    this.nameTitle,
+    this.onNew,
   });
 
   /// The written document to save, or null when nothing is loaded.
@@ -160,15 +172,31 @@ class ChartFileAction extends StatelessWidget {
   /// The text the dialog's field starts with, normally [chartPathBeside] of the loaded export.
   ///
   /// On a platform with a filesystem that is a path; in a browser it is empty, because the iReal
-  /// export was chosen rather than named, and the dialog then offers [chartFileNameFor] of the
-  /// song's title instead — a name the reader can accept, edit or clear before saving.
+  /// export was chosen rather than named, and the dialog then offers [chartFileNameFor] of
+  /// [nameTitle] — a name the reader can accept, edit or clear before saving.
   final String initialPath;
+
+  /// The title the proposed file name is built from, or null to build it from the document's own.
+  ///
+  /// THE DOCUMENT PASSED TO THIS WIDGET IS THE WRITTEN SNAPSHOT, and a rename made in this session
+  /// is an operation in the tail rather than part of that snapshot. A chart typed from scratch is
+  /// therefore saved under `untitled.chart` after the musician has just named it, which is what the
+  /// owner's tablet showed. The title on SCREEN is the one to propose, so the viewer passes it here
+  /// and the document keeps its snapshot meaning.
+  final String? nameTitle;
 
   /// How the container's bytes reach the reader's disk.
   final ChartFileSaver save;
 
   /// How the reader's file becomes bytes.
   final ChartFileOpener open;
+
+  /// What to do when the musician asks for a chart from scratch instead of a file, or null when
+  /// the caller offers no such action.
+  ///
+  /// Null is a real state and not a placeholder: a caller that has nowhere to put a new chart must
+  /// not be given a button that does nothing, so the dialog draws the button only when this is set.
+  final VoidCallback? onNew;
 
   // PURPOSE: The app-bar button's tooltip, which the catalogue words because the phone's overflow
   //          menu row that opens the same dialog already reads those words.
@@ -196,6 +224,8 @@ class ChartFileAction extends StatelessWidget {
           initialPath: initialPath,
           save: save,
           open: open,
+          nameTitle: nameTitle,
+          onNew: onNew,
         ),
       ),
     );
@@ -215,6 +245,8 @@ class _ChartFileDialog extends StatefulWidget {
     required this.initialPath,
     required this.save,
     required this.open,
+    required this.nameTitle,
+    required this.onNew,
   });
 
   final DocumentState? document;
@@ -223,6 +255,8 @@ class _ChartFileDialog extends StatefulWidget {
   final String initialPath;
   final ChartFileSaver save;
   final ChartFileOpener open;
+  final String? nameTitle;
+  final VoidCallback? onNew;
 
   @override
   State<_ChartFileDialog> createState() => _ChartFileDialogState();
@@ -257,21 +291,19 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
 
   // PURPOSE: Decide what the field starts with, which is a path where the platform has one and a
   //          proposed file name where it does not.
-  // INPUTS: None; [ChartFileAction.initialPath] and the document on screen.
-  // OUTPUTS: The initial path when there is one, otherwise [chartFileNameFor] of the song's title,
-  //          and the empty string when there is neither a path nor a document to name. An empty
-  //          result is honest: there is nothing to propose, so the reader is asked to type one.
-  // KEYWORDS: initial-value, file-name, path, title-fallback, empty-state
+  // INPUTS: None; [ChartFileAction.initialPath], [ChartFileAction.nameTitle] and the document.
+  // OUTPUTS: The initial path when there is one, otherwise [chartFileNameFor] of the title the
+  //          caller says is on screen — the document's own title when the caller said nothing —
+  //          and the empty string when there is neither a path nor a title. An empty result is
+  //          honest: there is nothing to propose, so the reader is asked to type one.
+  // KEYWORDS: initial-value, file-name, path, title-fallback, empty-state, current-not-snapshot
   String _initialFieldText() {
     final String given = widget.initialPath.trim();
     if (given.isNotEmpty) {
       return given;
     }
-    final DocumentState? document = widget.document;
-    if (document == null) {
-      return '';
-    }
-    return chartFileNameFor(document.song.title);
+    final String? title = widget.nameTitle ?? widget.document?.song.title;
+    return title == null ? '' : chartFileNameFor(title);
   }
 
   // PURPOSE: Write the document on screen to the file the reader named, snapshot and operation tail
@@ -565,6 +597,26 @@ class _ChartFileDialogState extends State<_ChartFileDialog> {
         ),
       ),
       actions: <Widget>[
+        // THE THIRD THING THIS DIALOG DOES. It stands first because it is the one action here that
+        // makes a document rather than moving one: Save writes what is on screen and Open replaces
+        // it with a file, and a musician who came here to write something new should find the door
+        // before the two that assume they already have music.
+        if (widget.onNew != null)
+          TextButton(
+            key: const ValueKey<String>('chart-file-new'),
+            onPressed: _busy
+                ? null
+                : () {
+                    // The callback is read BEFORE the pop: this widget is unmounted by the pop, and
+                    // reading a field of an unmounted state afterwards would be reading a disposal
+                    // order rather than a value. The dialog closes first so the new-chart dialog is
+                    // not stacked on top of it, which would make dismissing one reveal the other.
+                    final VoidCallback start = widget.onNew!;
+                    Navigator.of(context).pop();
+                    start();
+                  },
+            child: Text(l10n.newChart),
+          ),
         TextButton(
           onPressed: _busy ? null : () => unawaited(_open()),
           child: Text(l10n.chartFileOpenButton),

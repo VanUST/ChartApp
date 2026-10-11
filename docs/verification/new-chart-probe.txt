@@ -1,0 +1,75 @@
+=== A. the shape of a chart written from scratch ===
+newChartSong() -> Song(untitled, C major, 1 section(s), 8 bar(s), StaffSet(chords only)) staff=StaffSet(chords only) key=C major title="" id="" tempo=0
+[ok] one section
+[ok] the section is labelled A
+[ok] eight bars
+[ok] 4/4
+[ok] C major
+[ok] no chords yet
+[ok] no title yet
+[ok] no document id yet
+[ok] no tempo yet
+[ok] no style yet
+[ok] chords only
+newChartSong(Bb major, 3/4, 12) -> Bb major 3/4 12 bar(s)
+[ok] a chosen meter reaches every bar
+[ok] a chosen bar count is honoured
+[ok] a chosen key is honoured
+[ok] a section of zero bars is refused — ArgumentError
+    Invalid argument (bars): a section of a chart needs at least one bar, or it can be neither seen nor selected: 0
+
+=== B. what two charts made from nothing have in common ===
+chartIdentityOf(newChartSong()) = song-v1-4aa22ac12d791fde
+[ok] two charts of identical music share an identity, by decision
+[ok] the unnamed document id is the one a file is written under
+[ok] renaming an untouched chart is one edit
+[ok] a rename does NOT change the identity
+[ok] ONE chord makes it different music, and a different identity
+after one chord: song-v1-22f8f88750e40357 (was song-v1-4aa22ac12d791fde)
+
+=== C. the document id, and the failure it would have caused ===
+old way: session.docId="" header.docId="chartapp-untitled" event.docId=""
+[ok] a session named by an empty Song.id cannot be saved — ContainerWriteException
+    events[0] belongs to document "" but the file is document "chartapp-untitled"
+[ok] the fixed session saves
+[ok] the header and the operation name one document
+
+=== D. the whole journey: make it, edit it, save it, reopen it ===
+[ok] insert a bar after the first
+[ok] insert a bar before the last
+[ok] insert a section after A
+[ok] the new section is labelled B
+[ok] the new section holds one bar
+[ok] a chord in bar 1 of A
+[ok] a second chord in bar 2 of A
+[ok] a chord in B
+[ok] a segno on bar 3 of A
+[ok] a volta on bar 3 of A
+[ok] a word written on bar 1 of A
+[ok] the chart is named through song.update
+edited: sections=2 bars=11 chords=3 marks={BarMark.segno} volta=volta(1) cues=1 strokes=1 title="Новый чарт" tempo=120 operations=11
+[ok] the file exists
+[ok] the file holds what was encoded
+[ok] the file is the one that was written
+[ok] no warnings on a clean file
+[ok] the file is written under the untitled id
+[ok] REOPENED_DOCUMENT_EQUAL
+[ok] the sections came back
+[ok] the bars came back
+[ok] the chords came back
+[ok] the marks came back
+[ok] the volta came back
+[ok] the words came back
+[ok] the handwriting came back
+[ok] the handwriting kept its points
+[ok] the handwriting kept its anchor
+[ok] the title came back
+[ok] the composer came back
+[ok] the style came back
+[ok] the tempo came back
+[ok] the key came back
+[ok] the identity of the reopened chart is the identity of the edited one
+[ok] reopening does not renumber the log: the next edit continues it
+reopened: DocumentState(Song(Новый чарт, C major, 2 section(s), 11 bar(s), StaffSet(chords only)), 1 stroke(s), 0 annotation(s), 1 text cue(s))
+
+CHECKS=57 FAILURES=0

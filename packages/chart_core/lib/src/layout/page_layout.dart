@@ -8,6 +8,7 @@
 // KEYWORDS: layout-result, placed-chord, hit-testing, value-equality, cache-key, anchor-address
 import '../chord.dart';
 import 'geometry.dart';
+import 'melody_staff.dart';
 
 /// A chord drawn at a position, with the address that identifies it in the song.
 class PlacedChord {
@@ -183,6 +184,7 @@ class PlacedBar {
     required this.chords,
     this.staffText = const <PlacedStaffText>[],
     this.textCues = const <PlacedTextCue>[],
+    this.melody = PlacedMelodyStaff.empty,
   });
 
   /// The section the bar belongs to.
@@ -225,6 +227,22 @@ class PlacedBar {
   /// say gets no row.
   final List<PlacedTextCue> textCues;
 
+  /// The melody staff drawn under this bar, from `Bar.melody`.
+  ///
+  /// ONE STAFF PER BAR rather than one per system, so that the five lines and everything on them
+  /// are addressed exactly as a chord and a cell are: by the bar's own rectangle. The bounds of two
+  /// neighbouring bars on a system tile, so the lines read as one continuous staff.
+  ///
+  /// [PlacedMelodyStaff.empty] for a song whose bars carry no melody at all — every imported chart
+  /// — and in that state nothing is reserved, nothing is drawn, and this bar's [bounds], [cells]
+  /// and [chords] are exactly what they were before a melody staff existed.
+  ///
+  /// THE STAFF LIES BELOW [bounds], NOT INSIDE IT. A bar's rectangle is its chord-line stave, and
+  /// that is what the hit test measures a tap against, so extending it over the staff would change
+  /// what a tap on the chord line means. The melody has its own rectangle instead; a point in the
+  /// staff is over no bar until note entry gives it meaning.
+  final PlacedMelodyStaff melody;
+
   @override
   bool operator ==(Object other) {
     if (other is! PlacedBar ||
@@ -234,7 +252,8 @@ class PlacedBar {
         other.cells.length != cells.length ||
         other.chords.length != chords.length ||
         other.staffText.length != staffText.length ||
-        other.textCues.length != textCues.length) {
+        other.textCues.length != textCues.length ||
+        other.melody != melody) {
       return false;
     }
     for (int index = 0; index < cells.length; index++) {
@@ -269,6 +288,7 @@ class PlacedBar {
     Object.hashAll(chords),
     Object.hashAll(staffText),
     Object.hashAll(textCues),
+    melody,
   );
 
   @override

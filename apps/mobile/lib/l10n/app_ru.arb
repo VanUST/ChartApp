@@ -47,6 +47,20 @@
 
   "cancel": "Отмена",
 
+  "newChart": "Новый чарт",
+
+  "newChartIntro": "Новый чарт — это один раздел из {bars}. Выберите тональность и размер: потом их нельзя будет изменить.",
+
+  "newChartMeterLabel": "Размер",
+
+  "newChartKeyLabel": "Тональность",
+
+  "newChartMajor": "Мажор",
+
+  "newChartMinor": "Минор",
+
+  "create": "Создать",
+
   "tooltipInkOn": "Рисование: перо рисует, палец по-прежнему выбирает",
 
   "tooltipInkOffEraserOn": "Перо выключено: ластик включён",

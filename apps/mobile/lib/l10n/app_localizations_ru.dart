@@ -136,6 +136,29 @@ class AppLocalizationsRu extends AppLocalizations {
   String get cancel => 'Отмена';
 
   @override
+  String get newChart => 'Новый чарт';
+
+  @override
+  String newChartIntro(String bars) {
+    return 'Новый чарт — это один раздел из $bars. Выберите тональность и размер: потом их нельзя будет изменить.';
+  }
+
+  @override
+  String get newChartMeterLabel => 'Размер';
+
+  @override
+  String get newChartKeyLabel => 'Тональность';
+
+  @override
+  String get newChartMajor => 'Мажор';
+
+  @override
+  String get newChartMinor => 'Минор';
+
+  @override
+  String get create => 'Создать';
+
+  @override
   String get tooltipInkOn =>
       'Рисование: перо рисует, палец по-прежнему выбирает';
 

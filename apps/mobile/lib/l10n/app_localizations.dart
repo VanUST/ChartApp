@@ -236,6 +236,48 @@ abstract class AppLocalizations {
   /// **'Cancel'**
   String get cancel;
 
+  /// The action that starts a chart from scratch. It stands in the empty state, in the `.chart` dialog and in the phone overflow menu, and it is also the title of the dialog it opens.
+  ///
+  /// In en, this message translates to:
+  /// **'New chart'**
+  String get newChart;
+
+  /// What the new-chart dialog says about the chart it is about to make, and why it asks for two things here. The bar count is passed as an already-worded plural so the number and the catalogue's own bar wording cannot drift apart; the claim about the key and the meter being unchangeable is a fact about the editor and must be corrected here when the editor gains those controls.
+  ///
+  /// In en, this message translates to:
+  /// **'A new chart starts as one section of {bars}. Choose a key and a meter — the editor cannot change either afterwards.'**
+  String newChartIntro(String bars);
+
+  /// The caption above the row of meters a new chart can start in.
+  ///
+  /// In en, this message translates to:
+  /// **'Meter'**
+  String get newChartMeterLabel;
+
+  /// The caption above the key a new chart is written in: the mode switch and the twelve tonics under it.
+  ///
+  /// In en, this message translates to:
+  /// **'Key'**
+  String get newChartKeyLabel;
+
+  /// The mode switch's major half in the new-chart dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Major'**
+  String get newChartMajor;
+
+  /// The mode switch's minor half in the new-chart dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Minor'**
+  String get newChartMinor;
+
+  /// The button that makes the new chart with the key and meter chosen beside it.
+  ///
+  /// In en, this message translates to:
+  /// **'Create'**
+  String get create;
+
   /// The pen toggle's tooltip while drawing is on.
   ///
   /// In en, this message translates to:

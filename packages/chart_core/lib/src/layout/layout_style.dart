@@ -49,6 +49,10 @@ class LayoutStyle {
     this.barHeight = 44,
     this.systemSpacing = 12,
     this.sectionLabelHeight = 22,
+    this.melodyStaffSpace = 9,
+    this.melodyStaffGap = 8,
+    this.melodyStaffHeight = 36,
+    this.melodyBandHeight = 270,
   });
 
   /// How text is measured.
@@ -95,4 +99,50 @@ class LayoutStyle {
 
   /// Vertical room reserved above a system that begins a section.
   final double sectionLabelHeight;
+
+  /// The distance between two adjacent lines of the melody staff.
+  ///
+  /// THE UNIT OF THE WHOLE STAFF. Every vertical position on the melody staff — a notehead's own
+  /// height, a stem's length, how far a note lies outside the five lines and therefore how many
+  /// ledger lines it needs — is an exact multiple of this value, measured in it rather than in
+  /// pixels. That is what lets the geometry be derived by hand and asserted exactly, and it is why
+  /// a change to the staff's size is one number rather than a page of arithmetic.
+  final double melodyStaffSpace;
+
+  /// The vertical gap between the chord line's bottom edge and the melody staff's own band.
+  ///
+  /// It is what keeps a chord symbol from touching the top of the melody staff, and it is a
+  /// constant rather than a share of the leftover room so that the staff lands at the same
+  /// distance below the chords in every system and on every page.
+  final double melodyStaffGap;
+
+  /// The distance from the staff's top line to its bottom line: four [melodyStaffSpace] steps.
+  ///
+  /// A field rather than a getter because a caller may want a deliberately different staff, and
+  /// because the engine reports the staff's own top and bottom line to the painter instead of
+  /// letting the painter re-derive them; see [PlacedMelodyStaff].
+  final double melodyStaffHeight;
+
+  /// The vertical room a system gives up when the song carries any melody at all.
+  ///
+  /// FIXED FOR THE WHOLE SONG, on purpose, and this is the property that makes an undulating
+  /// tune readable: the staff must sit at the same height in every system, so the band cannot be
+  /// sized to the notes a particular system happens to contain. Any note lies within its own
+  /// five staff spaces above or below the five lines, which is five ledger lines, so
+  /// `melodyStaffHeight + 2 * 5 * melodyStaffSpace` is the guarantee this value encodes: every
+  /// step [melodyStepOf] can return has a glyph inside its own band. It also keeps the pagination
+  /// arithmetic honest — the SF4 and A30 bounds are found by bisection over a page whose system
+  /// height is a constant, not a function of the music.
+  ///
+  /// It is ZERO for a song with no melody, which is what makes a chords-only chart paginate and
+  /// print exactly as it did before a melody staff existed.
+  final double melodyBandHeight;
+
+  /// The distance from the staff's TOP LINE up to the top of [melodyBandHeight].
+  ///
+  /// It is the room a ledger line above the staff is drawn in: five [melodyStaffSpace] steps (as
+  /// many lines as [melodyStepOf] can ask for) plus the style's [melodyStaffGap], with the
+  /// remainder of the band left below the staff for the ledger lines and the ties that hang
+  /// under it.
+  double get melodyTopSpace => melodyStaffHeight / 2 + 5 * melodyStaffSpace;
 }

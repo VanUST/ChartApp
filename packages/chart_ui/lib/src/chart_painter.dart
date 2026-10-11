@@ -51,6 +51,7 @@ class ChartPainter extends CustomPainter {
     this.spellingTable = const SpellingTable(),
     this.selection,
     this.lineColor = const Color(0xFF102A43),
+    this.melodyLineColor = const Color(0xFF243B53),
     this.backgroundColor = const Color(0xFFFFFFFF),
     this.selectionFillColor = const Color(0x2E2F80ED),
     this.selectionStrokeColor = const Color(0xFF2F80ED),
@@ -78,6 +79,14 @@ class ChartPainter extends CustomPainter {
 
   /// Colour of barlines, repeat dots and text.
   final Color lineColor;
+
+  /// Colour of the melody staff and everything engraved on it.
+  ///
+  /// Slightly lighter than [lineColor] so that the music the chart is read for stays the darkest
+  /// ink on the page. It is a property of the painter rather than of the layout because it is a
+  /// rendering decision: the same geometry serves a screen and a printed page, and neither the
+  /// noteheads nor their ledger lines carry a colour in the model.
+  final Color melodyLineColor;
 
   /// Colour the page is filled with before anything is drawn.
   final Color backgroundColor;
@@ -130,6 +139,7 @@ class ChartPainter extends CustomPainter {
       oldDelegate.metrics != metrics ||
       oldDelegate.selection != selection ||
       oldDelegate.lineColor != lineColor ||
+      oldDelegate.melodyLineColor != melodyLineColor ||
       oldDelegate.backgroundColor != backgroundColor ||
       oldDelegate.selectionFillColor != selectionFillColor ||
       oldDelegate.selectionStrokeColor != selectionStrokeColor;
@@ -239,6 +249,10 @@ class ChartPainter extends CustomPainter {
     // because the musician is trying to check that the selection landed on the chord they meant.
     _paintSelection(canvas, placed);
 
+    // The melody staff is underneath the chord line with its own extent, so it is drawn before the
+    // chords: a chord symbol that runs a little low must stay the topmost thing on its own line.
+    _paintMelody(canvas, placed);
+
     // An interior barline is shared: the previous bar's closing line already draws it. So the
     // opening barline is drawn when it opens the system, or when it is a SIGN rather than a plain
     // single line — a repeat start in the middle of a system must not be dropped.
@@ -267,6 +281,195 @@ class ChartPainter extends CustomPainter {
     for (final PlacedChord placedChord in placed.chords) {
       _paintChord(canvas, bar, placedChord);
     }
+  }
+
+  // PURPOSE: Draw the melody staff under a bar: its five lines, the barlines that carry them, and
+  //          every glyph the layout placed on them.
+  // INPUTS: canvas — the target. placed — the bar's layout, carrying the staff the engine engraved.
+  // OUTPUTS: Nothing. A bar whose system reserved no melody band draws NOTHING AT ALL, which is
+  //          what makes a chords-only chart print identically to the way it printed before a melody
+  //          staff existed: the empty staff the engine publishes has no extent, so this returns
+  //          before touching the canvas.
+  //
+  //          THE FIVE LINES ARE DERIVED HERE FROM THE STAFF'S OWN BOX, and that is the one number
+  //          this painter has to agree with the engine about. The box's top and bottom edges are
+  //          the staff's outer lines and the engine's [LayoutStyle.melodyStaffSpace] is the
+  //          distance between two of them, so four equal divisions of the box is the whole of the
+  //          staff: there is no second geometry here to drift from the one a notehead's y was
+  //          computed against.
+  // KEYWORDS: melody-staff, staff-lines, five-lines, notehead, stem, flag, ledger, accidental,
+  //           tie, draw-order
+  void _paintMelody(Canvas canvas, PlacedBar placed) {
+    final PlacedMelodyStaff staff = placed.melody;
+    if (staff.isEmpty) {
+      return;
+    }
+    final LayoutRect bounds = staff.bounds;
+    final Paint stroke = Paint()
+      ..color = melodyLineColor
+      ..strokeWidth = 1;
+    // The five lines, from the top edge down; four equal divisions of the box the engine published.
+    for (int line = 0; line < 5; line++) {
+      final double y = bounds.top + bounds.size.height * line / 4;
+      canvas.drawLine(Offset(bounds.left, y), Offset(bounds.right, y), stroke);
+    }
+    // Barlines reach from the staff's top line to its bottom line at both edges of the bar. The
+    // chord line already draws its own, which stops at the stave; without these the staff would
+    // read as one unmeasured strip of five lines.
+    canvas.drawLine(
+      Offset(bounds.left, bounds.top),
+      Offset(bounds.left, bounds.bottom),
+      stroke,
+    );
+    canvas.drawLine(
+      Offset(bounds.right, bounds.top),
+      Offset(bounds.right, bounds.bottom),
+      stroke,
+    );
+
+    // The clef, on the bar that opens a system. It is drawn at the staff's own left edge, inside
+    // it, so it reads as belonging to the staff rather than to the margin; the layout places the
+    // notes of that bar far enough right of it for the two not to collide in the ordinary case.
+    final String? clef = staff.clef;
+    if (clef != null) {
+      _paintText(
+        canvas,
+        clef,
+        Offset(bounds.left + 1, bounds.top),
+        metrics.staffTextStyle.copyWith(color: melodyLineColor),
+      );
+    }
+
+    // The glyphs are drawn in the order the engine published them, and that order is the contract:
+    // a ledger line before the notehead that hides its end, a stem before the notehead that covers
+    // it, an accidental and a dot after the head they belong to, and ties last so a tie is never
+    // buried under the note it joins.
+    for (final MelodyGlyph glyph in staff.glyphs) {
+      _paintMelodyGlyph(canvas, glyph);
+    }
+  }
+
+  // PURPOSE: Draw one glyph of a melody staff.
+  // INPUTS: canvas — the target. glyph — the element and the box the layout placed it in, with the
+  //         weight, the flag length and the tie's own curve points published alongside it.
+  // OUTPUTS: Nothing. Every position comes from the box; this method makes no musical decision, so
+  //          a notehead cannot be drawn at a height the layout did not reserve.
+  // KEYWORDS: glyph-switch, notehead, stem, flag, ledger, accidental, dot, tie, no-musical-logic
+  void _paintMelodyGlyph(Canvas canvas, MelodyGlyph glyph) {
+    final LayoutRect box = glyph.bounds;
+    final Paint stroke = Paint()
+      ..color = melodyLineColor
+      ..strokeWidth = glyph.strokeWidth > 0 ? glyph.strokeWidth : 1;
+    switch (glyph.kind) {
+      case MelodyGlyphKind.notehead:
+        final Rect ellipse = Rect.fromLTWH(
+          box.left,
+          box.top,
+          box.size.width,
+          box.size.height,
+        );
+        if (glyph.filled) {
+          canvas.drawOval(ellipse, Paint()..color = melodyLineColor);
+        } else {
+          // A hollow notehead keeps its own weight rather than the glyph's, because a whole note's
+          // ring drawn at a stem's weight reads as a filled head on a small page.
+          canvas.drawOval(
+            ellipse,
+            Paint()
+              ..color = melodyLineColor
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6,
+          );
+        }
+      case MelodyGlyphKind.stem:
+        // The stem is drawn as a line down the centre of its box, so its published weight and what
+        // the reader sees are the same number.
+        final double x = box.left + box.size.width / 2;
+        canvas.drawLine(Offset(x, box.top), Offset(x, box.bottom), stroke);
+        if (glyph.flagLength > 0) {
+          _paintMelodyFlag(canvas, box, glyph, stroke);
+        }
+      case MelodyGlyphKind.ledgerLine:
+        canvas.drawLine(
+          Offset(box.left, box.top + box.size.height / 2),
+          Offset(box.right, box.top + box.size.height / 2),
+          stroke,
+        );
+      case MelodyGlyphKind.accidental:
+        _paintText(
+          canvas,
+          glyph.text ?? '',
+          Offset(box.left, box.top),
+          metrics.staffTextStyle.copyWith(color: melodyLineColor),
+        );
+      case MelodyGlyphKind.dot:
+        canvas.drawOval(
+          Rect.fromLTWH(box.left, box.top, box.size.width, box.size.height),
+          Paint()..color = melodyLineColor,
+        );
+      case MelodyGlyphKind.tie:
+        // A quadratic curve, which is what an engraved tie is: it leaves one notehead, bulges away
+        // from the slope between the two, and reaches the next. The three points come from the
+        // layout, so the curve is drawn exactly where the tie was measured to be.
+        final Path path = Path()
+          ..moveTo(glyph.from.x, glyph.from.y)
+          ..quadraticBezierTo(
+            glyph.control.x,
+            glyph.control.y,
+            glyph.to.x,
+            glyph.to.y,
+          );
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = melodyLineColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = stroke.strokeWidth
+            ..strokeCap = StrokeCap.round,
+        );
+      case MelodyGlyphKind.flag:
+        // A flag is generated from a stem rather than placed on its own, so no glyph of this kind
+        // is ever published; the branch exists because the enum is exhaustive.
+        break;
+    }
+  }
+
+  // PURPOSE: Draw the flag of an eighth note or shorter, as a curve from the end of the stem.
+  // INPUTS: canvas — the target. stem — the stem's box. glyph — the stem glyph, carrying the
+  //         direction and the flag's length in page pixels. stroke — the staff's own paint.
+  // OUTPUTS: Nothing. The curve starts at the free end of the stem, in the direction the stem
+  //          points, and sweeps back toward the staff.
+  //
+  //          A DRAWING RATHER THAN A GLYPH, for the reason the bar signs are glyphs and this is
+  //          not: a flag has no ASCII stand-in a font is certain to carry, and a wrong glyph is
+  //          worse than a plain curve, which every musician reads correctly at any size.
+  // KEYWORDS: flag, eighth-note, curve, glyph-free, stroke
+  void _paintMelodyFlag(
+    Canvas canvas,
+    LayoutRect stem,
+    MelodyGlyph glyph,
+    Paint stroke,
+  ) {
+    final double x = stem.left + stem.size.width / 2;
+    final double tip = glyph.stemUp ? stem.top : stem.bottom;
+    final double direction = glyph.stemUp ? 1 : -1;
+    final double reach = glyph.flagLength * direction;
+    final Path path = Path()
+      ..moveTo(x, tip)
+      ..quadraticBezierTo(
+        x + glyph.flagLength * 0.9,
+        tip + reach * 0.25,
+        x + glyph.flagLength * 1.1,
+        tip + reach,
+      );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = melodyLineColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke.strokeWidth
+        ..strokeCap = StrokeCap.round,
+    );
   }
 
   // PURPOSE: Draw one chord symbol in the box the layout reserved for it.
