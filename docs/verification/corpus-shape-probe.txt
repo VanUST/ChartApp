@@ -39,28 +39,19 @@ songsWithStyle=22 songsWithTempo=5 tempoZero=17
   6/4 x12
   3/4 x1
 --- key ---
-  Song(Где-то на белом свете, A minor, 1 section(s), 79 bar(s), StaffSet(chords only)).key x1
-  Song(Наш сосед, E minor, 1 section(s), 24 bar(s), StaffSet(chords only)).key x1
-  Song(Черный Кот, D minor, 8 section(s), 107 bar(s), StaffSet(chords only)).key x1
-  Song(Московские окна, C minor, 1 section(s), 24 bar(s), StaffSet(chords only)).key x1
-  Song(Неудачное Свидание - www.tradjazz.ru, D major, 3 section(s), 26 bar(s), StaffSet(chords only)).key x1
-  Song(Лесенка, Eb major, 3 section(s), 39 bar(s), StaffSet(chords only)).key x1
-  Song(Говори, B major, 11 section(s), 79 bar(s), StaffSet(chords only)).key x1
-  Song(Утомленное солнце, E minor, 6 section(s), 73 bar(s), StaffSet(chords only)).key x1
-  Song(У Самовара Я И Моя Маша, A minor, 3 section(s), 50 bar(s), StaffSet(chords only)).key x1
-  Song(все что было, G minor, 3 section(s), 32 bar(s), StaffSet(chords only)).key x1
-  Song(Пароход, D major, 4 section(s), 42 bar(s), StaffSet(chords only)).key x1
-  Song(Белая ночь, G# minor, 3 section(s), 22 bar(s), StaffSet(chords only)).key x1
-  Song(В Парке Чаир 1, D major, 2 section(s), 31 bar(s), StaffSet(chords only)).key x1
-  Song(старый клен, Bb minor, 3 section(s), 31 bar(s), StaffSet(chords only)).key x1
-  Song(Вася 1, E minor, 4 section(s), 21 bar(s), StaffSet(chords only)).key x1
-  Song(Московский бит, E minor, 4 section(s), 81 bar(s), StaffSet(chords only)).key x1
-  Song(Хорошие девчата, Bb major, 4 section(s), 73 bar(s), StaffSet(chords only)).key x1
-  Song(Любите Девушки, G major, 3 section(s), 35 bar(s), StaffSet(chords only)).key x1
-  Song(Оставайся, Мальчик, с нами - будешь нашим королем, A minor, 8 section(s), 30 bar(s), StaffSet(chords only)).key x1
-  Song(Подмосковные Вечера, A minor, 3 section(s), 86 bar(s), StaffSet(chords only)).key x1
-  Song(Король Оранжевое Лето, C major, 9 section(s), 28 bar(s), StaffSet(chords only)).key x1
-  Song(Оттепель 1, A minor, 3 section(s), 32 bar(s), StaffSet(chords only)).key x1
+  A minor x5
+  E minor x4
+  D major x3
+  D minor x1
+  C minor x1
+  Eb major x1
+  B major x1
+  G minor x1
+  G# minor x1
+  Bb minor x1
+  Bb major x1
+  G major x1
+  C major x1
 --- style ---
   Medium Swing x12
   Twist x2
@@ -89,4 +80,33 @@ songsWithStyle=22 songsWithTempo=5 tempoZero=17
   30 x1
   86 x1
   28 x1
+--- meter changes ---
+  songsWithChange=2 of 22 songsOpeningNon44=0 changeBars=5 totalBars=1045
+--- meter transitions ---
+  4/4->6/4 x2
+  6/4->4/4 x1
+  4/4->3/4 x1
+  3/4->4/4 x1
+  "Где-то на белом свете" bars=79 opens=4/4 meters=4/4x79 changes=none
+  "Наш сосед" bars=24 opens=4/4 meters=4/4x24 changes=none
+  "Черный Кот" bars=107 opens=4/4 meters=4/4x107 changes=none
+  "Московские окна" bars=24 opens=4/4 meters=4/4x24 changes=none
+  "Неудачное Свидание - www.tradjazz.ru" bars=26 opens=4/4 meters=4/4x26 changes=none
+  "Лесенка" bars=39 opens=4/4 meters=4/4x27 6/4x12 changes=4/4->6/4@25,6/4->4/4@26,4/4->6/4@29
+  "Говори" bars=79 opens=4/4 meters=4/4x79 changes=none
+  "Утомленное солнце" bars=73 opens=4/4 meters=4/4x73 changes=none
+  "У Самовара Я И Моя Маша" bars=50 opens=4/4 meters=4/4x50 changes=none
+  "все что было" bars=32 opens=4/4 meters=4/4x32 changes=none
+  "Пароход" bars=42 opens=4/4 meters=4/4x42 changes=none
+  "Белая ночь" bars=22 opens=4/4 meters=4/4x22 changes=none
+  "В Парке Чаир 1" bars=31 opens=4/4 meters=4/4x31 changes=none
+  "старый клен" bars=31 opens=4/4 meters=4/4x31 changes=none
+  "Вася 1" bars=21 opens=4/4 meters=4/4x21 changes=none
+  "Московский бит" bars=81 opens=4/4 meters=4/4x81 changes=none
+  "Хорошие девчата" bars=73 opens=4/4 meters=4/4x73 changes=none
+  "Любите Девушки" bars=35 opens=4/4 meters=4/4x35 changes=none
+  "Оставайся, Мальчик, с нами - будешь нашим королем" bars=30 opens=4/4 meters=4/4x29 3/4x1 changes=4/4->3/4@9,3/4->4/4@10
+  "Подмосковные Вечера" bars=86 opens=4/4 meters=4/4x86 changes=none
+  "Король Оранжевое Лето" bars=28 opens=4/4 meters=4/4x28 changes=none
+  "Оттепель 1" bars=32 opens=4/4 meters=4/4x32 changes=none
 staves: pitchedStaffSongs=0 melodyBars=0 percussionBars=0
