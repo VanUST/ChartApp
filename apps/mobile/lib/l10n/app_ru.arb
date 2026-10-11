@@ -626,5 +626,35 @@
 
   "formMeterErrorNotPositive": "Оба числа должны быть больше нуля.",
 
-  "formMeterErrorTooLarge": "Слишком большой размер: каждое число не больше {max}."
+  "formMeterErrorTooLarge": "Слишком большой размер: каждое число не больше {max}.",
+
+  "paletteSymbolLabel": "Напишите аккорд",
+
+  "paletteSymbolHelper": "Dm7 · G7 · Cmaj7 · F#7#11",
+
+  "paletteSymbolApply": "Записать",
+
+  "paletteSymbolErrorEmpty": "Напишите обозначение аккорда, например Dm7.",
+
+  "paletteSymbolErrorNotANoteLetter": "Аккорд начинается с ноты от A до G. «{character}» — не нота.",
+
+  "paletteSymbolErrorUnclosedBracket": "Скобка открыта и не закрыта.",
+
+  "paletteSymbolErrorBadBass": "После косой черты пишется нота, например Cmaj7/A.",
+
+  "paletteSymbolErrorBadAccidental": "У основы не больше двух диезов или двух бемолей.",
+
+  "paletteSymbolErrorCellNotWritable": "В эту ячейку аккорд не встанет: доля вне такта.",
+
+  "formGroupStaff": "НОТНЫЙ СТАН",
+
+  "formStaffMelodyOn": "Нотный стан: есть",
+
+  "formStaffMelodyOff": "Нотный стан: нет",
+
+  "formStaffMelodyShown": "Стан нарисован на каждом такте ча́рта, даже пустом.",
+
+  "formStaffMelodyHidden": "Включите стан, чтобы записывать ноты. Уже написанное сохранится.",
+
+  "melodyTapStaffHint": "Коснитесь доли на стане, чтобы записать ноту."
 }

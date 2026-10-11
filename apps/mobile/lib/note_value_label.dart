@@ -49,6 +49,35 @@ String noteBaseNotation(NoteBase base) => switch (base) {
   NoteBase.thirtySecond => '32nd',
 };
 
+/// The duration a note value is worth, as the fraction of a bar a musician already reads.
+///
+/// WHY A CHIP CARRIES `1/4` AND NOT ONLY `Quarter`. Owner decision D28 asks for the duration to be
+/// held, reused and changed with as few actions as possible, and the action count is decided by
+/// what the musician can READ at a glance: a row of five words (`Whole Half Quarter Eighth 16th`)
+/// says what each chip is CALLED and not how long it lasts, so a musician changing one note's
+/// duration has to translate the word into a length before he can choose, and a musician setting up
+/// a run has to hold five words in mind. The fraction is the length itself, it is the same in every
+/// language of the interface (owner decision A53: this is notation, not interface), and it is what
+/// the bar's own division is measured in — so `1/4` under a bar of four cells needs no translation
+/// step. The word is kept BESIDE it, because `Whole` is what a musician says out loud and a fraction
+/// alone would make the palette unreadable to a beginner.
+String noteBaseFraction(NoteBase base) => switch (base) {
+  NoteBase.whole => '1',
+  NoteBase.half => '1/2',
+  NoteBase.quarter => '1/4',
+  NoteBase.eighth => '1/8',
+  NoteBase.sixteenth => '1/16',
+  NoteBase.thirtySecond => '1/32',
+};
+
+/// The label a duration chip shows: the fraction, then the notation's own name for the value.
+///
+/// `1/4 · Quarter`, and for the 16th `1/16 · 16th` — a repetition, and it is kept because the two
+/// halves do different jobs: the fraction is read at a glance while choosing, and the name is what
+/// the palette's other line and the note list print.
+String noteBaseChipLabel(NoteBase base) =>
+    '${noteBaseFraction(base)} · ${noteBaseNotation(base)}';
+
 /// A pitch and its written duration as one line of notation, such as `F#4 · Quarter`.
 String noteNotationLabel(PitchedNote pitch, NoteValue value) =>
     '$pitch · ${noteBaseNotation(value.base)}';

@@ -27,6 +27,23 @@
 // open is what makes that worth anything: an apply-and-close sheet would charge a reopen for every
 // cell and turn two taps into four, which is the opposite of the budget D2 set.
 //
+// WHY THERE IS NOW A TYPED FIELD ABOVE THE GRID, AND WHAT HAPPENS TO THE GRID.
+//
+// Owner decision D28 asks for a chord in the fewest possible actions and names the shape: a jazz
+// musician writes `Dm7`, `G7`, `Cmaj7`, `F#7#11` — the SYMBOL is how he names a chord, so typing it
+// is one action where a root, a quality and a tension are three separate decisions. The field is
+// therefore placed FIRST in the sheet, before the preview, and it writes through
+// `EditSession.applyChordSymbolToCell`, which reads the text in the chart's WRITTEN key and appends
+// the same `chord.insert`/`chord.update` a tap appends.
+//
+// THE GRID IS KEPT, NOT REPLACED, because the two reach different chords. The field is the shortest
+// way to a chord whose symbol you already know. The grid is the way to a chord when you know its
+// SOUND and not its spelling — a musician reaching for the bVI of the key does that on the degree
+// labels — and it is also the only way to reach a root whose spelling the typed form cannot always
+// preserve, because a chord stores a sounding pitch class and a three-valued preference rather than
+// a fixed spelling (see `readTypedChord` and owner decision A8). A palette that deleted the grid to
+// save a row would trade a fast path for a narrower one.
+//
 // WHY THE PREVIEW IS RENDERED IN THE SHOWN KEY.
 //
 // The chord is stored as a SOUNDING root, and the page renders it by spelling that root in whatever
@@ -145,7 +162,8 @@ class ChordPaletteSheet extends StatefulWidget {
   State<ChordPaletteSheet> createState() => _ChordPaletteSheetState();
 }
 
-/// The sheet's state: the sticky quality, the root being previewed, and the chord draft.
+/// The sheet's state: the sticky quality, the root being previewed, the chord draft and the typed
+/// symbol field.
 class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   /// The quality every tap currently applies.
   ///
@@ -168,10 +186,102 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   /// The chord the cell held when the sheet opened, so the grid can mark where the edit started.
   late final BeatChord? _opening = widget.initialChord;
 
+  /// What the musician has typed into the symbol field, unfinished.
+  final TextEditingController _symbol = TextEditingController();
+
+  /// The focus node of the symbol field, so the field can be re-armed after a chord is written and
+  /// the next symbol typed without a second tap on the field.
+  final FocusNode _symbolFocus = FocusNode();
+
+  /// Why the last typed symbol was refused, or null when nothing is being refused.
+  ///
+  /// A message rather than a boolean because the refusal names the character that stopped it, and
+  /// the musician is looking at what he typed: "«X» is not a note" tells him where the typo is,
+  /// while "invalid" does not.
+  String? _symbolError;
+
   @override
   void initState() {
     super.initState();
     _quality = _opening?.chord.quality ?? ChordQuality.majorTriad;
+    // The field opens holding the chord the cell already carries, spelled in the WRITTEN key: a
+    // musician editing a chord should be able to see what he wrote and change one character of it,
+    // rather than retype a symbol the editor already holds.
+    final BeatChord? existing = widget.initialChord;
+    if (existing != null) {
+      _symbol.text = existing.chord.render(
+        widget.session.song.key,
+        const SpellingTable(),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _symbol.dispose();
+    _symbolFocus.dispose();
+    super.dispose();
+  }
+
+  // PURPOSE: Read the typed symbol, write the chord it names into the cell, and report a refusal in
+  //          the field's own line, which is the only way a musician learns why nothing was written.
+  // INPUTS: None; the text is the controller's.
+  // OUTPUTS: Nothing. On a read the chord is appended through the session, the field is cleared and
+  //          re-focused so the next symbol can be typed straight away, and the caller is told the
+  //          page needs rebuilding. On a refusal NOTHING is written and the reason is shown: a
+  //          half-applied chord would be worse than none, and a silent no-op would leave the
+  //          musician tapping a button that does nothing.
+  // KEYWORDS: typed-chord, apply, refusal-message, clear-and-refocus, no-silent-write
+  void _applySymbol() {
+    final ChordSymbolParse parse = widget.session.applyChordSymbolToCell(
+      sectionId: widget.sectionId,
+      barIndex: widget.barIndex,
+      beat: widget.beat,
+      symbol: _symbol.text,
+      size: _current?.size ?? ChordSize.normal,
+    );
+    final Chord? written = parse.chord;
+    if (written == null) {
+      setState(() => _symbolError = _symbolErrorText(parse));
+      HapticFeedback.vibrate();
+      return;
+    }
+    HapticFeedback.selectionClick();
+    setState(() {
+      _symbolError = null;
+      _symbol.clear();
+      // The grid stops marking the chord it wrote as a "draft": the edit is in the document now and
+      // the grid reads the cell back, which is what keeps a typed chord and a tapped one the same
+      // kind of fact on screen.
+      _draftRoot = null;
+    });
+    _symbolFocus.requestFocus();
+    widget.onChanged?.call();
+  }
+
+  // PURPOSE: Turn a refusal into the words the musician reads, in the interface's language.
+  // INPUTS: parse — a refusal from the parser, carrying the reason and the offending character.
+  // OUTPUTS: A sentence from the catalogue. Every reason has a sentence; there is no default, so a
+  //          new reason cannot be added without the switch below being told about it.
+  // KEYWORDS: refusal, message-catalogue, exhaustive-switch, error-reporting
+  String _symbolErrorText(ChordSymbolParse parse) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    if (parse is! ChordSymbolRefusal) {
+      return l10n.paletteSymbolErrorEmpty;
+    }
+    final String? at = parse.character;
+    return switch (parse.reason) {
+      ChordSymbolReason.empty => l10n.paletteSymbolErrorEmpty,
+      ChordSymbolReason.notANoteLetter => l10n.paletteSymbolErrorNotANoteLetter(
+        at ?? '',
+      ),
+      ChordSymbolReason.unclosedBracket =>
+        l10n.paletteSymbolErrorUnclosedBracket,
+      ChordSymbolReason.badBass => l10n.paletteSymbolErrorBadBass,
+      ChordSymbolReason.badAccidental => l10n.paletteSymbolErrorBadAccidental,
+      ChordSymbolReason.cellNotWritable =>
+        l10n.paletteSymbolErrorCellNotWritable,
+    };
   }
 
   // PURPOSE: Report the chord currently held by the edited cell, read back from the session rather
@@ -285,6 +395,8 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
           children: <Widget>[
             _buildHeader(),
             const SizedBox(height: 8),
+            _buildSymbolField(),
+            const SizedBox(height: 10),
             _buildPreview(preview, current),
             const SizedBox(height: 10),
             _buildQualityRow(),
@@ -295,6 +407,104 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
           ],
         ),
       ),
+    );
+  }
+
+  // PURPOSE: Draw the typed-symbol field, which is the one-action way to write a chord and the
+  //          first control in the sheet.
+  // INPUTS: None; the text is the controller's and the error, if any, is [_symbolError].
+  // OUTPUTS: A row holding the field and its write button, with the refusal printed under it when
+  //          there is one. The field is autofocused so a musician who opened the sheet to write a
+  //          named chord can type without aiming at it, and it is re-focused after every write so a
+  //          bar of four chords is four symbols typed in a row.
+  //
+  //          WHY THE FIELD IS NOT THE ONLY WAY IN. It is one action for a chord whose symbol you
+  //          already know; the grid under it is the way to a chord you know by SOUND, and it is the
+  //          only path to a spelling the model's three-valued preference cannot carry. See the file
+  //          header.
+  // KEYWORDS: typed-chord, text-field, one-action, autofocus, refusal-line, both-paths
+  Widget _buildSymbolField() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String? error = _symbolError;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          l10n.paletteSymbolLabel,
+          style: const TextStyle(
+            color: sheetMutedColor,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: TextField(
+                key: const ValueKey<String>('chord-palette-symbol'),
+                controller: _symbol,
+                focusNode: _symbolFocus,
+                autofocus: true,
+                // Not notation: the field's own suggestion shows symbols a chart writes, and those
+                // are the same in every language (owner decision D27 / A53).
+                style: const TextStyle(
+                  color: sheetOnPanelColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: l10n.paletteSymbolHelper,
+                  hintStyle: const TextStyle(
+                    color: sheetMutedColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  filled: true,
+                  fillColor: sheetCellColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _applySymbol(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              key: const ValueKey<String>('chord-palette-symbol-apply'),
+              onPressed: _applySymbol,
+              style: TextButton.styleFrom(
+                foregroundColor: sheetAccentColor,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              child: Text(
+                l10n.paletteSymbolApply,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              error,
+              key: const ValueKey<String>('chord-palette-symbol-error'),
+              style: const TextStyle(color: Color(0xFFFFB74D), fontSize: 12),
+            ),
+          ),
+      ],
     );
   }
 

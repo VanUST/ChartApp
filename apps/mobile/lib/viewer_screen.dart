@@ -2657,20 +2657,51 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // PURPOSE: Turn a completed tap on a page into a selection, converting the surface point into the
   //          page's own coordinates first, so a fitted page is hit where it is DRAWN rather than
   //          where it was engraved.
+  //
+  //          THE STAFF IS TESTED FIRST, AND THAT IS THE WHOLE OF "TOUCH A BEAT OF THE STAFF TO WRITE
+  //          ITS NOTE". A bar's staff lies BELOW its chord-line rectangle, so the two surfaces never
+  //          overlap and the order between them cannot change what a chord-line tap means: a point
+  //          on the chord line is answered by [hitTestPage] exactly as it was, and a point on the
+  //          five lines is answered by [hitTestMelodyStaff]. A touch that lands on a staff column
+  //          opens the note palette for that beat immediately, which is the shortest path owner
+  //          decision D28 asks for: the beat is named by the column the musician touched — and the
+  //          beat captions under the staff say which number it is — rather than by a tap on the bar
+  //          and then a tap on a word in the selection line.
+  //
+  //          WHY IT DOES NOT WAIT FOR A SECOND TAP. The staff has no other meaning: nothing on it is
+  //          selectable for its own sake, so a single tap cannot be ambiguous, and a double tap
+  //          would add a gesture nothing on screen mentions. The chord line keeps its own single tap
+  //          for selection and its own two named actions.
   // INPUTS: page — the page the tap landed on. localPosition — the point in the page widget's own
   //         coordinate space, which is the surface the painter scaled into.
   // OUTPUTS: Nothing. Sets [_selection] to the hit, or to null when the tap missed every bar; a miss
   //          clears the selection rather than leaving a stale one, because a highlight that survives
-  //          the tap meant to dismiss it is a lie about what is selected. The surface point, the
-  //          converted page point and the answer are logged as key-value pairs, so the arithmetic
-  //          can be checked against what is on screen.
-  // KEYWORDS: tap-handling, coordinate-transform, page-point, hit-test, selection-state, structured-log
+  //          the tap meant to dismiss it is a lie about what is selected. A tap on a staff column
+  //          additionally opens the note palette, with the cell already selected so that a refused
+  //          edit still has somewhere to be reported. The surface point, the converted page point
+  //          and the answer are logged as key-value pairs, so the arithmetic can be checked against
+  //          what is on screen.
+  // KEYWORDS: tap-handling, coordinate-transform, page-point, hit-test, staff-first, note-entry,
+  //           selection-state, structured-log
   void _select(PageLayout page, Offset localPosition) {
     final LayoutOffset surface = LayoutOffset(
       localPosition.dx,
       localPosition.dy,
     );
     final LayoutOffset pagePoint = page.pagePointOf(surface);
+    final ChartHit? staffHit = hitTestMelodyStaff(page, pagePoint);
+    if (staffHit != null) {
+      setState(() => _selection = staffHit);
+      debugPrint(
+        'viewer.select staff page=${page.index} scale=${page.scale} '
+        'surface=(${surface.x.toStringAsFixed(1)},${surface.y.toStringAsFixed(1)}) '
+        'page_point=(${pagePoint.x.toStringAsFixed(1)},'
+        '${pagePoint.y.toStringAsFixed(1)}) '
+        'hit=${staffHit.sectionId}#${staffHit.barIndex} beat=${staffHit.beat}',
+      );
+      _editNoteSelection(context);
+      return;
+    }
     final ChartHit? hit = hitTestPage(page, pagePoint);
     setState(() => _selection = hit);
     debugPrint(

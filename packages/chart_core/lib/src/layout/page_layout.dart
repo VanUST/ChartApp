@@ -173,6 +173,57 @@ class PlacedTextCue {
   String toString() => 'PlacedTextCue($id, "$text") at $origin size $size';
 }
 
+/// One beat of a bar, named where the musician counts it: under the staff, in the beat's own
+/// column.
+///
+/// WHY THIS IS A LAYOUT VALUE AND NOT A PAINTER'S ARITHMETIC. The defect it exists against is that
+/// a musician could not tell WHICH BEAT he was choosing, so the mark has to land on the column the
+/// hit test will name — the same column the chord and the cell of that beat already occupy. Only
+/// the engine knows where a cell begins, so the engine publishes the mark's identity and box and
+/// the painter draws what it was handed; a painter that centred a number in a cell it re-derived
+/// would be the second arithmetic that drifts.
+///
+/// IT LIVES UNDER THE STAFF, in the space the staff's centring leaves above the next system. A
+/// marker carries the beat's ordinal as [label] when the engine decided the column is wide enough
+/// to print one, and an empty string when it is not — in which case the painter draws the tick
+/// alone. Both cases are drawn the same way: a short tick at the bottom of [bounds], so a crowded
+/// bar shows the beat GRID even when it cannot show the numbers.
+class PlacedBeatMarker {
+  /// Creates a marker naming [beat] with [label] in the given [bounds].
+  const PlacedBeatMarker({
+    required this.beat,
+    required this.label,
+    required this.bounds,
+  });
+
+  /// The cell index inside its bar, in the song model's zero-based numbering — the `beat` half of
+  /// an annotation anchor and of a [PlacedCell].
+  final int beat;
+
+  /// The beat numbered the way the musician counts it, or the empty string when the engine decided
+  /// the column is too narrow to print it. Never null: "no number here" is an ordinary state of a
+  /// crowded bar.
+  final String label;
+
+  /// The box the marker occupies, spanning its cell's column. Its bottom edge is where the tick is
+  /// drawn, so the marker reads against the column rather than against the bar.
+  final LayoutRect bounds;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedBeatMarker &&
+      other.beat == beat &&
+      other.label == label &&
+      other.bounds == bounds;
+
+  @override
+  int get hashCode => Object.hash(beat, label, bounds);
+
+  @override
+  String toString() =>
+      'PlacedBeatMarker($beat${label.isEmpty ? '' : ' "$label"'}) at $bounds';
+}
+
 /// A bar drawn at a position, together with its cells and the chords inside it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
@@ -185,6 +236,7 @@ class PlacedBar {
     this.staffText = const <PlacedStaffText>[],
     this.textCues = const <PlacedTextCue>[],
     this.melody = PlacedMelodyStaff.empty,
+    this.beatMarkers = const <PlacedBeatMarker>[],
   });
 
   /// The section the bar belongs to.
@@ -243,6 +295,16 @@ class PlacedBar {
   /// staff is over no bar until note entry gives it meaning.
   final PlacedMelodyStaff melody;
 
+  /// The beat markers under this bar's staff, one per cell, left to right.
+  ///
+  /// They name the beat a musician is choosing, in the column that beat owns, and they exist only
+  /// because the song declared a pitched staff: on a chords-only chart this is EMPTY and nothing
+  /// is drawn, which is what keeps such a chart's page exactly what it was. A marker carries the
+  /// beat's ordinal on the bar that OPENS a system — the beats of the bars after it are the same
+  /// numbers on the same columns, so printing them again would say nothing — and an empty label
+  /// elsewhere; the tick is drawn either way.
+  final List<PlacedBeatMarker> beatMarkers;
+
   @override
   bool operator ==(Object other) {
     if (other is! PlacedBar ||
@@ -253,7 +315,8 @@ class PlacedBar {
         other.chords.length != chords.length ||
         other.staffText.length != staffText.length ||
         other.textCues.length != textCues.length ||
-        other.melody != melody) {
+        other.melody != melody ||
+        other.beatMarkers.length != beatMarkers.length) {
       return false;
     }
     for (int index = 0; index < cells.length; index++) {
@@ -276,6 +339,11 @@ class PlacedBar {
         return false;
       }
     }
+    for (int index = 0; index < beatMarkers.length; index++) {
+      if (other.beatMarkers[index] != beatMarkers[index]) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -289,6 +357,7 @@ class PlacedBar {
     Object.hashAll(staffText),
     Object.hashAll(textCues),
     melody,
+    Object.hashAll(beatMarkers),
   );
 
   @override

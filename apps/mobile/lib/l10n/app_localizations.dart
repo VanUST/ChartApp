@@ -1991,6 +1991,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Too large: each figure is at most {max}.'**
   String formMeterErrorTooLarge(int max);
+
+  /// The chord palette's caption over the field a chord symbol is typed into, such as Dm7 or F#7#11.
+  ///
+  /// In en, this message translates to:
+  /// **'Type the chord'**
+  String get paletteSymbolLabel;
+
+  /// The hint inside the typed-chord field, showing symbols a jazz chart writes.
+  ///
+  /// In en, this message translates to:
+  /// **'Dm7 · G7 · Cmaj7 · F#7#11'**
+  String get paletteSymbolHelper;
+
+  /// The button that writes the typed chord symbol into the selected cell.
+  ///
+  /// In en, this message translates to:
+  /// **'Write'**
+  String get paletteSymbolApply;
+
+  /// The typed-chord field's refusal when nothing was typed.
+  ///
+  /// In en, this message translates to:
+  /// **'Type a chord symbol, for example Dm7.'**
+  String get paletteSymbolErrorEmpty;
+
+  /// The typed-chord field's refusal when the symbol does not begin with a note letter, naming the character that was typed.
+  ///
+  /// In en, this message translates to:
+  /// **'A chord starts with a note letter A to G. \"{character}\" is not one.'**
+  String paletteSymbolErrorNotANoteLetter(String character);
+
+  /// The typed-chord field's refusal when a parenthesis has no closing one.
+  ///
+  /// In en, this message translates to:
+  /// **'A bracket was opened and not closed.'**
+  String get paletteSymbolErrorUnclosedBracket;
+
+  /// The typed-chord field's refusal when the slash bass is missing or is not a note letter.
+  ///
+  /// In en, this message translates to:
+  /// **'After the slash write a note letter, for example Cmaj7/A.'**
+  String get paletteSymbolErrorBadBass;
+
+  /// The typed-chord field's refusal when the root's accidental is malformed, such as b# or ###.
+  ///
+  /// In en, this message translates to:
+  /// **'A root takes at most two sharps or two flats.'**
+  String get paletteSymbolErrorBadAccidental;
+
+  /// The typed-chord field's refusal when the symbol was read but the edited cell is outside its bar.
+  ///
+  /// In en, this message translates to:
+  /// **'This cell cannot hold a chord: the beat is outside the bar.'**
+  String get paletteSymbolErrorCellNotWritable;
+
+  /// The form sheet's caption over the staff controls.
+  ///
+  /// In en, this message translates to:
+  /// **'STAFF'**
+  String get formGroupStaff;
+
+  /// The form sheet's staff button when the chart declares a pitched melodic staff, so its bars are drawn with staff lines.
+  ///
+  /// In en, this message translates to:
+  /// **'Melody staff: on'**
+  String get formStaffMelodyOn;
+
+  /// The form sheet's staff button when the chart declares no staff, so its bars are drawn as chords only.
+  ///
+  /// In en, this message translates to:
+  /// **'Melody staff: off'**
+  String get formStaffMelodyOff;
+
+  /// The form sheet's note under the staff button when the staff is on.
+  ///
+  /// In en, this message translates to:
+  /// **'The staff is drawn on every bar of the chart, empty or not.'**
+  String get formStaffMelodyShown;
+
+  /// The form sheet's note under the staff button when the staff is off, stating that the notes are not deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn the staff on to write notes. What is already written is kept.'**
+  String get formStaffMelodyHidden;
+
+  /// The note palette's hint, telling the musician that a beat of the staff itself opens this surface.
+  ///
+  /// In en, this message translates to:
+  /// **'Touch a beat of the staff to write its note.'**
+  String get melodyTapStaffHint;
 }
 
 class _AppLocalizationsDelegate

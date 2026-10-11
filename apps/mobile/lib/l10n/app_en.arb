@@ -1132,5 +1132,53 @@
   "@formMeterErrorTooLarge": {
     "description": "The meter box's refusal for a figure above the accepted bound.",
     "placeholders": { "max": { "type": "int" } }
-  }
+  },
+
+  "paletteSymbolLabel": "Type the chord",
+  "@paletteSymbolLabel": { "description": "The chord palette's caption over the field a chord symbol is typed into, such as Dm7 or F#7#11." },
+
+  "paletteSymbolHelper": "Dm7 · G7 · Cmaj7 · F#7#11",
+  "@paletteSymbolHelper": { "description": "The hint inside the typed-chord field, showing symbols a jazz chart writes." },
+
+  "paletteSymbolApply": "Write",
+  "@paletteSymbolApply": { "description": "The button that writes the typed chord symbol into the selected cell." },
+
+  "paletteSymbolErrorEmpty": "Type a chord symbol, for example Dm7.",
+  "@paletteSymbolErrorEmpty": { "description": "The typed-chord field's refusal when nothing was typed." },
+
+  "paletteSymbolErrorNotANoteLetter": "A chord starts with a note letter A to G. \"{character}\" is not one.",
+  "@paletteSymbolErrorNotANoteLetter": {
+    "description": "The typed-chord field's refusal when the symbol does not begin with a note letter, naming the character that was typed.",
+    "placeholders": { "character": { "type": "String" } }
+  },
+
+  "paletteSymbolErrorUnclosedBracket": "A bracket was opened and not closed.",
+  "@paletteSymbolErrorUnclosedBracket": { "description": "The typed-chord field's refusal when a parenthesis has no closing one." },
+
+  "paletteSymbolErrorBadBass": "After the slash write a note letter, for example Cmaj7/A.",
+  "@paletteSymbolErrorBadBass": { "description": "The typed-chord field's refusal when the slash bass is missing or is not a note letter." },
+
+  "paletteSymbolErrorBadAccidental": "A root takes at most two sharps or two flats.",
+  "@paletteSymbolErrorBadAccidental": { "description": "The typed-chord field's refusal when the root's accidental is malformed, such as b# or ###." },
+
+  "paletteSymbolErrorCellNotWritable": "This cell cannot hold a chord: the beat is outside the bar.",
+  "@paletteSymbolErrorCellNotWritable": { "description": "The typed-chord field's refusal when the symbol was read but the edited cell is outside its bar." },
+
+  "formGroupStaff": "STAFF",
+  "@formGroupStaff": { "description": "The form sheet's caption over the staff controls." },
+
+  "formStaffMelodyOn": "Melody staff: on",
+  "@formStaffMelodyOn": { "description": "The form sheet's staff button when the chart declares a pitched melodic staff, so its bars are drawn with staff lines." },
+
+  "formStaffMelodyOff": "Melody staff: off",
+  "@formStaffMelodyOff": { "description": "The form sheet's staff button when the chart declares no staff, so its bars are drawn as chords only." },
+
+  "formStaffMelodyShown": "The staff is drawn on every bar of the chart, empty or not.",
+  "@formStaffMelodyShown": { "description": "The form sheet's note under the staff button when the staff is on." },
+
+  "formStaffMelodyHidden": "Turn the staff on to write notes. What is already written is kept.",
+  "@formStaffMelodyHidden": { "description": "The form sheet's note under the staff button when the staff is off, stating that the notes are not deleted." },
+
+  "melodyTapStaffHint": "Touch a beat of the staff to write its note.",
+  "@melodyTapStaffHint": { "description": "The note palette's hint, telling the musician that a beat of the staff itself opens this surface." }
 }

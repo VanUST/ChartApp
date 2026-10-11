@@ -1237,4 +1237,59 @@ class AppLocalizationsRu extends AppLocalizations {
   String formMeterErrorTooLarge(int max) {
     return 'Слишком большой размер: каждое число не больше $max.';
   }
+
+  @override
+  String get paletteSymbolLabel => 'Напишите аккорд';
+
+  @override
+  String get paletteSymbolHelper => 'Dm7 · G7 · Cmaj7 · F#7#11';
+
+  @override
+  String get paletteSymbolApply => 'Записать';
+
+  @override
+  String get paletteSymbolErrorEmpty =>
+      'Напишите обозначение аккорда, например Dm7.';
+
+  @override
+  String paletteSymbolErrorNotANoteLetter(String character) {
+    return 'Аккорд начинается с ноты от A до G. «$character» — не нота.';
+  }
+
+  @override
+  String get paletteSymbolErrorUnclosedBracket =>
+      'Скобка открыта и не закрыта.';
+
+  @override
+  String get paletteSymbolErrorBadBass =>
+      'После косой черты пишется нота, например Cmaj7/A.';
+
+  @override
+  String get paletteSymbolErrorBadAccidental =>
+      'У основы не больше двух диезов или двух бемолей.';
+
+  @override
+  String get paletteSymbolErrorCellNotWritable =>
+      'В эту ячейку аккорд не встанет: доля вне такта.';
+
+  @override
+  String get formGroupStaff => 'НОТНЫЙ СТАН';
+
+  @override
+  String get formStaffMelodyOn => 'Нотный стан: есть';
+
+  @override
+  String get formStaffMelodyOff => 'Нотный стан: нет';
+
+  @override
+  String get formStaffMelodyShown =>
+      'Стан нарисован на каждом такте ча́рта, даже пустом.';
+
+  @override
+  String get formStaffMelodyHidden =>
+      'Включите стан, чтобы записывать ноты. Уже написанное сохранится.';
+
+  @override
+  String get melodyTapStaffHint =>
+      'Коснитесь доли на стане, чтобы записать ноту.';
 }

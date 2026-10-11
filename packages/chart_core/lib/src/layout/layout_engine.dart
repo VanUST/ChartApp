@@ -31,7 +31,6 @@
 import '../key.dart';
 import '../oplog/oplog.dart';
 import '../song/bar.dart';
-import '../song/section.dart';
 import '../song/song.dart';
 import '../spelling_table.dart';
 import 'geometry.dart';
@@ -135,22 +134,23 @@ class LayoutEngine {
   //          SONG rather than of a bar: either every bar on the page carries a staff, so that the
   //          five lines run unbroken across each system, or none does.
   // INPUTS: song — the chart about to be engraved.
-  // OUTPUTS: [LayoutStyle.melodyBandHeight] when any bar of the song carries at least one melody
-  //          note, and ZERO otherwise. Zero is the load-bearing case: a chords-only chart — every
-  //          imported chart, and every chart that never opened the melody editor — then computes
-  //          exactly the page it computed before a melody staff existed, because the band is the
-  //          only term this change adds to a system's height.
-  // KEYWORDS: melody-band, song-level-decision, zero-when-absent, unchanged-chords-only
-  double _melodyBand(Song song) {
-    for (final Section section in song.sections) {
-      for (final Bar bar in section.bars) {
-        if (bar.melody.isNotEmpty) {
-          return style.melodyBandHeight;
-        }
-      }
-    }
-    return 0;
-  }
+  // OUTPUTS: [LayoutStyle.melodyBandHeight] when the song DECLARES a pitched staff
+  //          (`song.staffSet.pitched != null`), and ZERO otherwise. Zero is the load-bearing case:
+  //          a chords-only chart — every imported chart, and every chart that never declared a
+  //          staff — then computes exactly the page it computed before a melody staff existed,
+  //          because the band is the only term this change adds to a system's height.
+  //
+  //          WHY THE DECLARATION AND NOT THE NOTES. This used to return the band only when some bar
+  //          already carried a note, which made the staff appear AFTER the musician had written on
+  //          it — and therefore nowhere to write. Owner decision D29: the staff exists because the
+  //          chart DECLARED it, and `Song.staffSet` is that declaration. A chart whose pitched
+  //          staff is declared and holds no note is a blank staff, which is exactly what a musician
+  //          needs in order to put the first note on it. The page a chords-only chart computes is
+  //          untouched, and that is what keeps every imported chart byte-identical.
+  // KEYWORDS: melody-band, song-level-decision, declared-staff, blank-staff, unchanged-chords-only,
+  //           d29
+  double _melodyBand(Song song) =>
+      song.staffSet.pitched == null ? 0 : style.melodyBandHeight;
 
   /// The smallest fraction of the requested page size the FIT mode will shrink to.
   ///
@@ -756,6 +756,14 @@ class LayoutEngine {
     final double cueBand = _cueBandHeight(plan, drawScale);
     final double staveTop = top + labelHeight + cueBand;
     final double melodyTop = staveTop + style.barHeight;
+    // The staff's bottom line, from which the beat markers hang. It is the same expression
+    // `_placeMelody` uses for the staff's middle line — the band's centre plus half the staff
+    // height — so the caption sits under the lines the notes are drawn on and not under a
+    // re-derived edge. It is computed once per system and handed to every bar, because a bar's
+    // own staff cannot sit at a different height from its neighbours'.
+    final double melodyBottom = melodyBand <= 0
+        ? melodyTop
+        : melodyTop + melodyBand / 2 + style.melodyStaffHeight / 2;
     final List<PlacedBar> bars = <PlacedBar>[];
     double x = style.pageMargin;
     bool firstInSystem = true;
@@ -796,6 +804,20 @@ class LayoutEngine {
             melodyBand,
             opensSystem: firstInSystem,
           ),
+          // The beat captions hang under the staff and exist only with one, so a chords-only chart
+          // computes an empty list and its page is untouched. Only the bar that opens a system
+          // carries the ordinals: the beats of the bars after it are the same numbers on the same
+          // columns, and repeating them would put nine copies of `1234` on one line of music.
+          beatMarkers: melodyBand <= 0
+              ? const <PlacedBeatMarker>[]
+              : _placeBeatMarkers(
+                  bounds: bounds,
+                  width: measured.width,
+                  offsets: offsets,
+                  staffBottom: melodyBottom,
+                  label: firstInSystem,
+                  style: style,
+                ),
           // A cell-anchored cue needs the cell's own left edge, which only exists once the offsets
           // above are known, which is why the cues are placed here and not while the bars were
           // being measured.
@@ -981,6 +1003,62 @@ class LayoutEngine {
     }
     return placed;
   }
+}
+
+// PURPOSE: Name the beat a musician is choosing in the column that beat owns, so that "which cell
+//          is under my finger" is answered on the chart and not only in the selection line after
+//          the tap. Owner decision D28 records the symptom directly: «ориентироваться внутри такта
+//          трудно» — he could not tell which beat he was picking, and until that is fixed any
+//          input, fast or slow, lands in the wrong place.
+// INPUTS: bounds — the BAR's chord-stave rectangle, which the markers do not enter. width — the
+//         bar's drawn width. offsets — the left edge of each cell relative to the bar's left edge,
+//         from [_cellOffsets]. staffBottom — the y of the melody staff's bottom line, below which
+//         the markers sit. label — whether this bar carries the beat ORDINALS; only the bar that
+//         opens a system does, because the beats of the bars after it are the same numbers on the
+//         same columns and printing them again would say nothing.
+// OUTPUTS: One marker per cell, left to right, each spanning its own column and lying entirely
+//          below [staffBottom]. A column narrower than [LayoutStyle.beatMarkMinCellWidth] gets an
+//          empty label, so a crowded bar shows the beat grid without printing numbers that would
+//          touch. An empty offset list yields no markers, which the minimum cell width makes
+//          unreachable in practice.
+// KEYWORDS: beat-marker, beat-orientation, cell-column, single-arithmetic, caption-under-staff,
+//           d28
+List<PlacedBeatMarker> _placeBeatMarkers({
+  required LayoutRect bounds,
+  required double width,
+  required List<double> offsets,
+  required double staffBottom,
+  required bool label,
+  required LayoutStyle style,
+}) {
+  if (offsets.isEmpty) {
+    return const <PlacedBeatMarker>[];
+  }
+  final double top = staffBottom + style.beatMarkGap;
+  final List<PlacedBeatMarker> markers = <PlacedBeatMarker>[];
+  for (int beat = 0; beat < offsets.length; beat++) {
+    final double left = bounds.left + offsets[beat];
+    final double cellWidth = beat + 1 < offsets.length
+        ? offsets[beat + 1] - offsets[beat]
+        : bounds.right - style.barPadding - left;
+    final bool numbered =
+        label && cellWidth >= style.beatMarkMinCellWidth && cellWidth > 0;
+    markers.add(
+      PlacedBeatMarker(
+        beat: beat,
+        label: numbered ? '${beat + 1}' : '',
+        // The marker spans the whole column rather than the digits' own box, so the painter can
+        // centre a number of any width in it and the tick lands in the same place either way.
+        bounds: LayoutRect.fromLTWH(
+          left,
+          top,
+          cellWidth > 0 ? cellWidth : width,
+          style.beatMarkHeight,
+        ),
+      ),
+    );
+  }
+  return markers;
 }
 
 /// The result of asking the engine to put a whole song on one page.

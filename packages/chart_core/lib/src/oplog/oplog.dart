@@ -24,6 +24,7 @@ import 'dart:convert';
 
 import '../chord.dart';
 import '../editing/bar_range.dart';
+import '../editing/chord_symbol_parser.dart';
 import '../key.dart';
 import '../pitch.dart';
 import '../song/bar.dart';
@@ -61,5 +62,6 @@ part 'setlist.dart';
 part 'setlist_events.dart';
 part 'sign_events.dart';
 part 'song_events.dart';
+part 'staff_events.dart';
 part 'text_cue.dart';
 part 'textcue_events.dart';

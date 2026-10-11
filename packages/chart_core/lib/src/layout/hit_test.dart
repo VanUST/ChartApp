@@ -55,6 +55,82 @@ class ChartHit {
       'ChartHit($sectionId[$barIndex]${cell == null ? ', no cell' : ', cell $beat'})';
 }
 
+// PURPOSE: Answer the one question a touch asks of the melody staff: which bar, and which beat of
+//          it, is under this point. This is the second entrance to hit testing and it exists because
+//          the staff is a SECOND, INDEPENDENT surface over the same bars: the chord line decides
+//          where a chord is written, the staff decides where a note is, and a column of the staff
+//          means beat n even though the rectangle the chord-line hit test reads does not reach down
+//          to it. Owner decision D29 is the reason the staff is drawn at all before a note exists;
+//          this is the reason it is touchable once it is.
+// INPUTS: page — the layout to test against, in its engraved coordinates. pagePoint — a position in
+//         those SAME coordinates, converted from the surface by [PageLayout.pagePointOf] exactly as
+//         [hitTestPage] requires.
+// OUTPUTS: A [ChartHit] naming the bar and the beat whose staff column contains the point, or null
+//          when the point is over no staff at all. Null is the ordinary answer for a chords-only
+//          chart — no bar carries a staff, so no point is over one — and for a tap between two
+//          systems. A point inside the bar's band but in the leading padding between the barline and
+//          the first column is over the bar and over no beat, which is stated rather than rounded.
+//          The bar placed on the hit is the bar the staff belongs to, so the address a caller gets is
+//          the same one [hitTestPage] would give for a point on that bar's chord line, and a note and
+//          a chord can share one address without either side converting.
+//
+//          THE TARGET IS THE COLUMN, NOT THE FIVE LINES. A bar's notation band is the five lines
+//          where a note is drawn PLUS the row beneath them where the beats are named, and a musician
+//          who puts a finger on the number of beat 2 means beat 2 rather than the paper beside the
+//          staff. The target is therefore the marker's own column widened to the band's full height,
+//          which is two rectangles the engine already published and no third arithmetic.
+// KEYWORDS: hit-testing, melody-staff, beat-column, second-surface, address-agreement, pure-dart
+/// Returns the bar and beat whose staff column is under [pagePoint], or null.
+ChartHit? hitTestMelodyStaff(PageLayout page, LayoutOffset pagePoint) {
+  for (final PlacedSystem system in page.systems) {
+    if (pagePoint.y < system.bounds.top || pagePoint.y > system.bounds.bottom) {
+      continue;
+    }
+    for (final PlacedBar bar in system.bars) {
+      // A bar's notation column is a TALL band, not the five lines alone: the lines are where a note
+      // is drawn and the pages below them are where the beats are named, so a musician who touches
+      // the number of beat 2 is touching beat 2 and not the paper beside the staff. The band is
+      // bounded by the staff's top line and the bottom of the caption row, both published by the
+      // engine — the two rectangles the layout already decided, and no third arithmetic.
+      final PlacedBeatMarker? caption = bar.beatMarkers.isEmpty
+          ? null
+          : bar.beatMarkers.last;
+      if (bar.melody.isEmpty || caption == null) {
+        continue;
+      }
+      final LayoutRect column = LayoutRect.fromLTWH(
+        bar.melody.bounds.left,
+        bar.melody.bounds.top,
+        bar.melody.bounds.size.width,
+        caption.bounds.bottom - bar.melody.bounds.top,
+      );
+      if (!column.contains(pagePoint)) {
+        continue;
+      }
+      for (final PlacedBeatMarker marker in bar.beatMarkers) {
+        // The marker's own column is widened vertically to cover the five lines as well, so a tap on
+        // a notehead and a tap on the number under it name the same beat.
+        final LayoutRect target = LayoutRect.fromLTWH(
+          marker.bounds.left,
+          column.top,
+          marker.bounds.size.width,
+          column.size.height,
+        );
+        if (target.contains(pagePoint)) {
+          return ChartHit(
+            bar: bar,
+            cell: PlacedCell(beat: marker.beat, bounds: target),
+          );
+        }
+      }
+      // A point inside the band but between two columns — the leading bar padding — is over the bar
+      // and over no beat, which is the same answer the chord line gives for its own paddings.
+      return ChartHit(bar: bar);
+    }
+  }
+  return null;
+}
+
 // PURPOSE: Report which bar and cell of [page] lies under [pagePoint]. This is the single entrance
 //          to hit testing, so that the three ambiguous cases below have one answer each instead of
 //          one per call site.

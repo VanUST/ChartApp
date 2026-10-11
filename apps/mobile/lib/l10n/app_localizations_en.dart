@@ -1209,4 +1209,58 @@ class AppLocalizationsEn extends AppLocalizations {
   String formMeterErrorTooLarge(int max) {
     return 'Too large: each figure is at most $max.';
   }
+
+  @override
+  String get paletteSymbolLabel => 'Type the chord';
+
+  @override
+  String get paletteSymbolHelper => 'Dm7 · G7 · Cmaj7 · F#7#11';
+
+  @override
+  String get paletteSymbolApply => 'Write';
+
+  @override
+  String get paletteSymbolErrorEmpty => 'Type a chord symbol, for example Dm7.';
+
+  @override
+  String paletteSymbolErrorNotANoteLetter(String character) {
+    return 'A chord starts with a note letter A to G. \"$character\" is not one.';
+  }
+
+  @override
+  String get paletteSymbolErrorUnclosedBracket =>
+      'A bracket was opened and not closed.';
+
+  @override
+  String get paletteSymbolErrorBadBass =>
+      'After the slash write a note letter, for example Cmaj7/A.';
+
+  @override
+  String get paletteSymbolErrorBadAccidental =>
+      'A root takes at most two sharps or two flats.';
+
+  @override
+  String get paletteSymbolErrorCellNotWritable =>
+      'This cell cannot hold a chord: the beat is outside the bar.';
+
+  @override
+  String get formGroupStaff => 'STAFF';
+
+  @override
+  String get formStaffMelodyOn => 'Melody staff: on';
+
+  @override
+  String get formStaffMelodyOff => 'Melody staff: off';
+
+  @override
+  String get formStaffMelodyShown =>
+      'The staff is drawn on every bar of the chart, empty or not.';
+
+  @override
+  String get formStaffMelodyHidden =>
+      'Turn the staff on to write notes. What is already written is kept.';
+
+  @override
+  String get melodyTapStaffHint =>
+      'Touch a beat of the staff to write its note.';
 }

@@ -52,6 +52,7 @@ export 'src/container/chart_file.dart';
 export 'src/container/setlist_file.dart';
 export 'src/editing/bar_range.dart';
 export 'src/editing/chord_palette.dart';
+export 'src/editing/chord_symbol_parser.dart';
 export 'src/editing/ink_stroke_builder.dart';
 export 'src/editing/meter_input.dart';
 export 'src/identity/chart_identity.dart';

@@ -256,6 +256,12 @@ class ChartPainter extends CustomPainter {
     // chords: a chord symbol that runs a little low must stay the topmost thing on its own line.
     _paintMelody(canvas, placed);
 
+    // The beat captions hang below the staff, so they are drawn after it: a ledger line or a tie
+    // that reaches down to the staff's lower edge must not be covered by the number of the beat it
+    // belongs to. This also means a song with no staff draws nothing here — the engine publishes no
+    // marker for one — so a chords-only page is untouched.
+    _paintBeatMarkers(canvas, placed);
+
     // An interior barline is shared: the previous bar's closing line already draws it. So the
     // opening barline is drawn when it opens the system, or when it is a SIGN rather than a plain
     // single line — a repeat start in the middle of a system must not be dropped.
@@ -356,6 +362,56 @@ class ChartPainter extends CustomPainter {
     // buried under the note it joins.
     for (final MelodyGlyph glyph in staff.glyphs) {
       _paintMelodyGlyph(canvas, glyph);
+    }
+  }
+
+  // PURPOSE: Name the beats of a bar under its staff, so a musician can see which beat he is about
+  //          to choose instead of counting columns of blank paper — the defect owner decision D28
+  //          records: «ориентироваться внутри такта трудно».
+  // INPUTS: canvas — the target. placed — the bar's layout, carrying the markers the engine placed.
+  // OUTPUTS: Nothing. For every marker, a short tick at the bottom of its column and — when the
+  //          engine decided the column is wide enough — the beat's ordinal centred over it. A bar
+  //          whose song carries no staff publishes no markers, so this returns before touching the
+  //          canvas and a chords-only chart prints exactly what it printed before beat captions
+  //          existed.
+  //
+  //          WHY THE TICK IS DRAWN EVEN WITH NO NUMBER. The captions are printed on the bar that
+  //          opens a system, and the beats of the bars after it are named by those same numbers on
+  //          the same columns. Without a tick there would be nothing on those bars at all and the
+  //          caption would look like it belonged to the first bar rather than to the line; the tick
+  //          is what says "this column is still beat n" without repeating the digit nine times.
+  // KEYWORDS: beat-marker, beat-orientation, caption, tick, centred-ordinal, no-staff-no-marker
+  void _paintBeatMarkers(Canvas canvas, PlacedBar placed) {
+    final List<PlacedBeatMarker> markers = placed.beatMarkers;
+    if (markers.isEmpty) {
+      return;
+    }
+    final TextStyle style = metrics.staffTextStyle.copyWith(
+      color: melodyLineColor,
+    );
+    final Paint tick = Paint()
+      ..color = melodyLineColor
+      ..strokeWidth = 1;
+    for (final PlacedBeatMarker marker in markers) {
+      final LayoutRect box = marker.bounds;
+      // The tick is a third of the marker's box, centred in its column, and it is what the eye
+      // follows down the staff when the digits are only on the bar that opens the system.
+      final double centre = box.left + box.size.width / 2;
+      canvas.drawLine(
+        Offset(centre, box.bottom - box.size.height / 3),
+        Offset(centre, box.bottom),
+        tick,
+      );
+      if (marker.label.isEmpty) {
+        continue;
+      }
+      final Size size = _measureText(marker.label, style);
+      _paintText(
+        canvas,
+        marker.label,
+        Offset(centre - size.width / 2, box.bottom - size.height),
+        style,
+      );
     }
   }
 

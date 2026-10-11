@@ -53,6 +53,9 @@ class LayoutStyle {
     this.melodyStaffGap = 8,
     this.melodyStaffHeight = 36,
     this.melodyBandHeight = 270,
+    this.beatMarkHeight = 12,
+    this.beatMarkGap = 2,
+    this.beatMarkMinCellWidth = 16,
   });
 
   /// How text is measured.
@@ -145,4 +148,27 @@ class LayoutStyle {
   /// remainder of the band left below the staff for the ledger lines and the ties that hang
   /// under it.
   double get melodyTopSpace => melodyStaffHeight / 2 + 5 * melodyStaffSpace;
+
+  /// The vertical room a beat marker occupies below the melody staff's bottom line.
+  ///
+  /// IT IS NOT PART OF [melodyBandHeight] ON PURPOSE. The band was chosen so that every note
+  /// [melodyStepOf] can produce has a glyph inside it — five ledger lines either side of the five
+  /// lines — and taking room out of it for a caption would move the staff on every chart that
+  /// already has one. The marker is drawn in the space the staff's own centring leaves below it.
+  final double beatMarkHeight;
+
+  /// The vertical gap between the melody staff's bottom line and the top of a beat marker's box.
+  ///
+  /// Large enough that the marker reads as a caption under the staff rather than as a sixth line
+  /// of it, and small enough that it stays clear of the next system's heading.
+  final double beatMarkGap;
+
+  /// The narrowest cell that can carry a beat's ORDINAL NUMBER instead of one tick.
+  ///
+  /// A beat is named by its number in a bar (1, 2, 3, 4 …), and that number needs horizontal room
+  /// the tick does not. Below this width the engine publishes a tick per beat and no digits, so a
+  /// crowded bar shows the beat GRID without printing numbers that would touch each other. The
+  /// value is a product decision, not a measurement: a two-digit ordinal is about 12 logical
+  /// pixels at the caption's size, and this leaves four pixels of air beside it.
+  final double beatMarkMinCellWidth;
 }

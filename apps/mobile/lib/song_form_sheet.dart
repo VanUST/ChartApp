@@ -329,6 +329,34 @@ class _SongFormSheetState extends State<SongFormSheet> {
     );
   }
 
+  // PURPOSE: Turn the chart's melodic staff on or off, which is the one control owner decision D29
+  //          requires to be the musician's: a chart that declares a pitched staff is drawn with one
+  //          on every bar — empty or not — and a chart that does not is drawn as chords only.
+  // INPUTS: None; the target state is the opposite of what the chart declares now.
+  // OUTPUTS: Nothing directly. The edit goes through `EditSession.setMelodyStaff`, so it is one
+  //          `staff.set` event and one undo step, and the status line says what happened. Notes
+  //          already written are NOT deleted: `Bar.melody` is untouched, and turning the staff back
+  //          on draws every one of them again — which is why switching it off needs no confirmation.
+  // KEYWORDS: staff, melody-staff, declared-staff, toggle, undoable, d25, d29
+  void _toggleMelodyStaff() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final bool on = widget.session.song.staffSet.pitched == null;
+    final bool applied = widget.session.setMelodyStaff(on: on);
+    if (!applied) {
+      setState(() => _status = l10n.formRefusedDefault);
+      return;
+    }
+    setState(
+      () => _status = on ? l10n.formStaffMelodyOn : l10n.formStaffMelodyOff,
+    );
+    HapticFeedback.selectionClick();
+    widget.onChanged?.call();
+    debugPrint(
+      'viewer.form.staff melody=$on section=$_sectionId bar=$_barIndex '
+      'seq=${widget.session.seq} undo_depth=${widget.session.undoDepth}',
+    );
+  }
+
   // PURPOSE: Add a blank bar on the chosen side of the cursor, which is how a form of a chosen
   //          length is built.
   // INPUTS: before — true to put the new bar in front of the cursor's bar, false behind it.
@@ -745,6 +773,10 @@ class _SongFormSheetState extends State<SongFormSheet> {
     final bool canMoveUp = sectionIndex > 0;
     final bool canMoveDown =
         sectionIndex >= 0 && sectionIndex < sections.length - 1;
+    // Whether the chart declares a pitched staff. Read from the song on every build rather than kept
+    // as sheet state, so a toggle is reflected by the same rebuild that redraws the page behind the
+    // sheet — one source of truth, and an undo made while the sheet is open moves both together.
+    final bool melodyStaffOn = _song.staffSet.pitched != null;
     return SafeArea(
       child: SingleChildScrollView(
         child: Padding(
@@ -854,6 +886,34 @@ class _SongFormSheetState extends State<SongFormSheet> {
                     onTap: hasBar ? () => _toggleMark(mark) : null,
                   ),
               ]),
+              const SizedBox(height: 14),
+              // The staves this chart declares. It is here rather than in a chart-setup dialog
+              // because it is a property of the DOCUMENT and not of its creation: owner decision D29
+              // requires the staff to be present when the chart says so, and D25 requires the
+              // musician to hold the choice — including the choice to go back to chords only. The
+              // button carries the state, not only the action, which is the same rule the repeat and
+              // mark groups follow.
+              _buildGroup(l10n.formGroupStaff, <Widget>[
+                SheetButton(
+                  buttonKey: 'song-form-staff-melody',
+                  icon: Icons.straighten,
+                  label: melodyStaffOn
+                      ? l10n.formStaffMelodyOn
+                      : l10n.formStaffMelodyOff,
+                  active: melodyStaffOn,
+                  onTap: _toggleMelodyStaff,
+                ),
+              ]),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  melodyStaffOn
+                      ? l10n.formStaffMelodyShown
+                      : l10n.formStaffMelodyHidden,
+                  key: const ValueKey<String>('song-form-staff-note'),
+                  style: const TextStyle(color: sheetMutedColor, fontSize: 11),
+                ),
+              ),
               const SizedBox(height: 14),
               _buildGroup(l10n.formGroupSection, <Widget>[
                 SheetButton(

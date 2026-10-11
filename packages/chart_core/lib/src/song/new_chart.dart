@@ -58,6 +58,7 @@ import '../key.dart';
 import 'bar.dart';
 import 'section.dart';
 import 'song.dart';
+import 'staff.dart';
 import 'time_signature.dart';
 
 /// How many bars the first section of a chart written from scratch holds.
@@ -81,29 +82,45 @@ const SectionLabel newChartFirstSectionLabel = SectionLabel.letter('A');
 /// numbers new sections from the session's sequence counter, which starts at one.
 const String newChartFirstSectionId = 'sec-1';
 
+/// The staves a chart written from scratch declares, and the reason owner decision D29 exists.
+///
+/// A PITCHED MELODIC STAFF, ON, WITH NO NOTE IN IT. The staff used to be drawn only once a bar
+/// already carried a note, so a musician starting a tune saw no staff and had nowhere to write the
+/// first note — the circle D29 records: to see the staff you need a note, and to place a note you
+/// need the staff. `Song.staffSet` is the chart's own declaration of which staves it carries, so a
+/// new chart declares the one D16 calls first-class and the engraver draws it empty. Turn it off
+/// and the chart becomes chords-only on exactly the terms every imported chart already has, which
+/// is what `EditSession.setStaffSet` is for.
+const StaffSet newChartDefaultStaffSet = StaffSet(pitched: StaffSpec.pitched());
+
 // PURPOSE: Produce the chart a musician starts writing on: one section of empty bars in the meter
-//          and key they asked for, with nothing else decided for them.
+//          and key they asked for, with the melodic staff already ON and nothing else decided for
+//          them.
 // INPUTS: key — the key the chart is written in; defaults to C major, the model's reference key.
 //         timeSignature — the meter every bar of the first section carries; defaults to 4/4.
 //         bars — how many bars that section holds; defaults to [newChartBarCount] and is a whole
-//         number of at least one.
+//         number of at least one. staffSet — the staves the chart declares; defaults to
+//         [newChartDefaultStaffSet], which carries a pitched staff, and a caller that wants a
+//         chords-only chart passes [StaffSet.chordsOnly].
 // OUTPUTS: A [Song] with one section of [bars] empty bars, an empty title, composer, style and
-//          tempo, and the given key. The song's `id` is left EMPTY on purpose: the id belongs to a
-//          store that has not assigned one, and `EditSession` already defines what a document with
-//          no id is written under (see `EditSession.untitledDocumentId`), so inventing one here
-//          would be a second answer to a question that has one.
+//          tempo, the given key and the given staves. The song's `id` is left EMPTY on purpose: the
+//          id belongs to a store that has not assigned one, and `EditSession` already defines what a
+//          document with no id is written under (see `EditSession.untitledDocumentId`), so inventing
+//          one here would be a second answer to a question that has one.
 //
 //          Throws [ArgumentError] when [bars] is below one. It is not clamped: a section with no
 //          bars cannot be seen, tapped or selected, so it is a state the editor cannot leave, and
 //          `EditSession.deleteBar` refuses to create one for the same reason. A caller asking for
 //          zero has a bug, and a silently repaired chart would hide it behind a page that looks
 //          empty for a different reason.
-// KEYWORDS: new-chart, blank-bars, meter, key, one-section, empty-metadata, fail-loud, d21
+// KEYWORDS: new-chart, blank-bars, meter, key, one-section, empty-metadata, fail-loud, d21,
+//           staff-declared, d29
 /// Returns a chart of [bars] empty bars in [timeSignature], written in [key].
 Song newChartSong({
   Key key = Key.cMajor,
   TimeSignature timeSignature = TimeSignature.fourFour,
   int bars = newChartBarCount,
+  StaffSet staffSet = newChartDefaultStaffSet,
 }) {
   if (bars < 1) {
     throw ArgumentError.value(
@@ -118,6 +135,7 @@ Song newChartSong({
     // through `song.update` exactly as an imported one is renamed.
     title: '',
     key: key,
+    staffSet: staffSet,
     sections: <Section>[
       Section(
         id: newChartFirstSectionId,

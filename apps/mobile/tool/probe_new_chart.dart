@@ -60,7 +60,27 @@ Future<void> main() async {
   _same('no document id yet', '', blank.id);
   _same('no tempo yet', 0, blank.tempo);
   _same('no style yet', '', blank.style);
-  _same('chords only', StaffSet.chordsOnly, blank.staffSet);
+  // D29: the melodic staff is DECLARED by a chart written from scratch, so its bars are drawn with
+  // staff lines before a single note exists. The old claim here was `chords only`, which was the
+  // defect: a musician starting a tune saw no staff and had nowhere to write the first note.
+  _same(
+    'the melodic staff is declared',
+    newChartDefaultStaffSet,
+    blank.staffSet,
+  );
+  _same(
+    'and the chart says so through a pitched staff',
+    true,
+    blank.staffSet.hasTransposableContent,
+  );
+  _same('with no note written in any bar yet', true, _noNotesAnywhere(blank));
+  // The switch is real: a caller that wants a chords-only chart asks for one, and gets exactly the
+  // set every imported chart carries.
+  _same(
+    'chords only is still reachable, on request',
+    StaffSet.chordsOnly,
+    newChartSong(staffSet: StaffSet.chordsOnly).staffSet,
+  );
 
   final Song waltz = newChartSong(
     key: const Key(tonic: WrittenNote(NoteLetter.b, -1), mode: Mode.major),
@@ -270,7 +290,28 @@ Future<void> main() async {
       tempo: 120,
     ),
   );
-  // Handwriting, through the same operation the ink layer appends.
+  // A STRUCTURED NOTE ON THE SAME CHART AS THE HANDWRITING, which is the acceptance D28 and D29 ask
+  // for together: the document must carry both at once, and a save and a reopen must bring both
+  // back. The note goes on beat 2 of bar 1 of A with a DURATION AND A PITCH the reader can check,
+  // so a round trip that dropped the melody, moved its beat or flattened its value cannot pass by
+  // comparing one note.
+  _same(
+    'a note written on beat 2 of bar 1 of A, alongside the handwriting',
+    true,
+    session.insertNote(
+      sectionId: sectionA,
+      barIndex: 0,
+      beat: 1,
+      pitch: const PitchedNote(note: WrittenNote(NoteLetter.f, 1), octave: 4),
+      value: const NoteValue.plain(NoteBase.eighth),
+      tiedToNext: true,
+    ),
+  );
+  _same(
+    'and the same chart still carries a pitched staff, so the staff lines it is drawn on exist',
+    true,
+    session.song.staffSet.pitched != null,
+  );
   session.apply(
     InkStrokeAddEvent(
       docId: session.docId,
@@ -383,6 +424,25 @@ Future<void> main() async {
     edited.strokes.single.anchor,
     reopened.document.strokes.single.anchor,
   );
+  // THE STRUCTURED HALF OF THE SAME DOCUMENT. The note is read back by its ADDRESS, its written
+  // pitch and its value, so a reopen that lost the melody or merged it into a chord cannot pass.
+  _same(
+    'the structured note came back, whole value',
+    true,
+    reopened.document.song.barsInReadingOrder.first.melody.length == 1 &&
+        reopened.document.song.barsInReadingOrder.first.melody.single ==
+            edited.song.barsInReadingOrder.first.melody.single,
+  );
+  _same(
+    'the note came back at beat 1, as F#4 tied, and the staff is declared',
+    'beat=1 step=0 pitch=F#4 value=eighth tie=true staff=pitched',
+    'beat=${reopened.document.song.barsInReadingOrder.first.melody.single.beat} '
+        'step=${reopened.document.song.barsInReadingOrder.first.melody.single.step} '
+        'pitch=${reopened.document.song.barsInReadingOrder.first.melody.single.pitch} '
+        'value=${reopened.document.song.barsInReadingOrder.first.melody.single.value} '
+        'tie=${reopened.document.song.barsInReadingOrder.first.melody.single.tiedToNext} '
+        'staff=${reopened.document.song.staffSet.pitched == null ? 'none' : 'pitched'}',
+  );
   _same('the title came back', 'Новый чарт', reopened.document.song.title);
   _same('the composer came back', 'Иван', reopened.document.song.composer);
   _same('the style came back', 'Medium Swing', reopened.document.song.style);
@@ -422,6 +482,17 @@ bool _sameBarList(List<Bar> left, List<Bar> right) {
   }
   for (int index = 0; index < left.length; index++) {
     if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Whether [song] carries no melodic note at all, which is the state a chart written from scratch
+/// starts in even though its staff is already declared.
+bool _noNotesAnywhere(Song song) {
+  for (final Bar bar in song.barsInReadingOrder) {
+    if (bar.melody.isNotEmpty) {
       return false;
     }
   }

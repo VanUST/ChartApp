@@ -140,11 +140,22 @@ class NotePaletteSheet extends StatefulWidget {
 /// The sheet's state: the sticky duration and alteration, the octave being shown, and which note of
 /// the beat is being edited.
 class _NotePaletteSheetState extends State<NotePaletteSheet> {
+  /// The duration this musician used last, remembered ACROSS the sheets a bar is written with.
+  ///
+  /// Owner decision D28 names choosing a duration per note as the cost. A duration that is sticky
+  /// only while one sheet is open makes the musician re-choose it at the next beat; one that is
+  /// sticky across openings is chosen once for a RUN of notes, which is how a line is actually
+  /// written. It lives on the State's class rather than on the widget because the widget is built
+  /// fresh for every opening — that is the point — and it survives a save and a reopen only as far
+  /// as the running application goes, which is the right lifetime for a habit and not for data.
+  static NoteBase _lastBase = NoteBase.quarter;
+
   /// The duration every insertion currently uses.
   ///
-  /// A quarter note, because it is the value a melody is most often written in and the value the
-  /// bar's own cell division already assumes.
-  NoteBase _base = NoteBase.quarter;
+  /// A quarter, because it is the value a melody is most often written in and the value the bar's
+  /// own cell division already assumes; after the first choice the musician's own last value is used
+  /// instead.
+  NoteBase _base = _lastBase;
 
   /// The alteration every pitch tap applies, in semitones. Zero is the key's own spelling.
   int _alter = 0;
@@ -280,6 +291,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   void _chooseBase(NoteBase base) {
     final BeatNote? selected = _selected;
     if (selected == null) {
+      _lastBase = base;
       setState(() => _base = base);
       return;
     }
@@ -295,6 +307,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       return;
     }
     HapticFeedback.selectionClick();
+    _lastBase = base;
     setState(() => _base = base);
     widget.onChanged?.call();
   }
@@ -497,7 +510,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
               _buildActions(l10n),
               const SizedBox(height: 4),
               Text(
-                l10n.melodyTapBeatHint,
+                l10n.melodyTapStaffHint,
                 style: const TextStyle(color: sheetMutedColor, fontSize: 11),
               ),
             ],
@@ -579,6 +592,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
                 _refused = false;
                 _editingStep = note.step;
                 _base = note.value.base;
+                _lastBase = note.value.base;
                 _octave = note.pitch.octave;
                 _alter = note.pitch.note.alter;
               }),
@@ -646,8 +660,11 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
 
   // PURPOSE: Draw the sticky duration row, one chip per value the palette offers.
   // INPUTS: l10n — the catalogue.
-  // OUTPUTS: A wrapping row of chips whose chosen member is filled with the accent.
-  // KEYWORDS: duration-row, chips, sticky-state, accent, localized
+  // OUTPUTS: A wrapping row of chips whose chosen member is filled with the accent. Each chip is
+  //          labelled with the fraction of a bar the value is worth and the notation's own name for
+  //          it (`1/4 · Quarter`), which is what lets a duration be read at a glance instead of
+  //          translated from a word before it can be chosen — see `noteBaseChipLabel`.
+  // KEYWORDS: duration-row, chips, sticky-state, accent, localized, fraction-and-name
   Widget _buildDurationRow(AppLocalizations l10n) {
     const List<NoteBase> offered = <NoteBase>[
       NoteBase.whole,
@@ -668,7 +685,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
             for (final NoteBase base in offered)
               _PaletteChip(
                 widgetKey: 'note-palette-base-${base.name}',
-                label: noteBaseNotation(base),
+                label: noteBaseChipLabel(base),
                 selected: base == _base,
                 onTap: () => _chooseBase(base),
               ),

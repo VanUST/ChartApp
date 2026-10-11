@@ -324,6 +324,48 @@ class EditSession {
     return true;
   }
 
+  // PURPOSE: Write a chord into a cell from the SYMBOL a musician typed — `Dm7`, `G7`, `Cmaj7`,
+  //          `F#7#11` — which is one action where the palette's root-then-quality sequence is
+  //          three. Owner decision D28 names the musician's own habit: he calls a chord by writing
+  //          it, so the surface that lets him type it is the one that matches how he thinks.
+  // INPUTS: sectionId, barIndex and beat — the cell, in the model's own address. symbol — the text
+  //         the musician typed, which is read in the chart's WRITTEN key because that is the key the
+  //         document spells its chords in.
+  // OUTPUTS: A [ChordSymbolParse] — the chord that was written, or the reason the text could not be
+  //          read. On a read the chord goes into the document through [applyChordToCell], which
+  //          means the event is an insert or an update on exactly the terms a palette tap already
+  //          uses, and an existing chord keeps its engraved size. On a refusal NOTHING is written:
+  //          a typed symbol that could not be read must not leave a half-chord behind, which is the
+  //          rule the reducer and the codec follow everywhere else.
+  // KEYWORDS: chord-symbol, typed-entry, one-action, chart-key, refusal-writes-nothing, undoable,
+  //           d28
+  /// Reads [symbol] in the chart's written key and puts the chord it names into the cell.
+  ChordSymbolParse applyChordSymbolToCell({
+    required String sectionId,
+    required int barIndex,
+    required int beat,
+    required String symbol,
+    ChordSize size = ChordSize.normal,
+  }) {
+    final ChordSymbolParse parse = readTypedChord(symbol);
+    final Chord? chord = parse.chord;
+    if (chord == null) {
+      return parse;
+    }
+    final bool applied = applyChordToCell(
+      sectionId: sectionId,
+      barIndex: barIndex,
+      beat: beat,
+      chord: chord,
+      size: size,
+    );
+    // A cell the bar cannot hold is a refusal like an unreadable symbol, and it is reported as one
+    // rather than as a success with nothing appended.
+    return applied
+        ? parse
+        : const ChordSymbolRefusal(ChordSymbolReason.cellNotWritable);
+  }
+
   // PURPOSE: Remove the chord a cell holds, which is the palette's other action and the one the
   //          catalogue's `chord.delete` exists for.
   // INPUTS: sectionId, barIndex and beat as in [applyChordToCell].
@@ -1623,6 +1665,39 @@ class EditSession {
       return false;
     }
     apply(SongUpdateEvent(docId: _docId, seq: _seq, from: from, to: to));
+    return true;
+  }
+
+  // PURPOSE: Turn the melodic staff on or off — the musician's own switch over the one thing owner
+  //          decision D29 says must be his to choose, and the whole of what D25 asks for here.
+  // INPUTS: on — whether the chart declares a pitched staff. clef — the clef the staff is engraved
+  //         in when it is turned on, defaulting to treble; it is ignored when [on] is false.
+  // OUTPUTS: True when a `staff.set` event was appended, false when the chart already declares what
+  //          was asked for, which is the no-op rule every other edit here follows ([updateSong],
+  //          [setBarMark], [setVolta]): an event whose two sides are equal is a log row that changed
+  //          nothing and an offer to undo an edit that did not happen.
+  //
+  //          THE PERCUSSION SLOT IS LEFT ALONE, deliberately: this switch is the melodic staff's, and
+  //          turning the melody off must not take a drum part with it. It is restored exactly as it
+  //          was, so undoing a toggle cannot invent or lose a staff.
+  //
+  //          WHY SWITCHING IT OFF IS NOT A DESTRUCTIVE OPERATION ON THE MUSIC. `Bar.melody` is
+  //          untouched: the notes stay in the document, the engraver stops reserving their band, and
+  //          turning the staff back on draws every one of them again. That is what makes this a
+  //          view of the chart rather than a deletion from it, and it is why there is no
+  //          confirmation step.
+  // KEYWORDS: staff, staves, melody-staff, toggle, declared-staff, no-op-refusal, undoable, d25, d29
+  /// Declares or withdraws the chart's pitched melodic staff.
+  bool setMelodyStaff({required bool on, String clef = 'treble'}) {
+    final StaffSet from = _document.song.staffSet;
+    final StaffSet to = StaffSet(
+      pitched: on ? StaffSpec.pitched(clef: clef) : null,
+      percussion: from.percussion,
+    );
+    if (to == from) {
+      return false;
+    }
+    apply(StaffSetEvent(docId: _docId, seq: _seq, from: from, to: to));
     return true;
   }
 
