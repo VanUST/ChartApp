@@ -1,26 +1,37 @@
 // PURPOSE: Offer the programme — the setlist a musician plays from — as one sheet over the chart:
-//          name it, put a chart into it, take one out, move one, and change how one is played (its
-//          transposition and its note). Every button applies through [SetlistSession], so the
-//          programme is an op-log document with the same undo and redo a chart has, and the scene
-//          playback of an entry is the sheet's "play" action.
+//          name it, put a chart into it, take one out, move one, change how one is played (its
+//          transposition and its note), and keep it: save it to a `.setlist` file and open one back.
+//          Every button applies through [SetlistSession], so the programme is an op-log document
+//          with the same undo and redo a chart has, and the scene playback of an entry is the
+//          sheet's "play" action.
 //          It is the setlist half of the edit loop: `setlist_session.dart` decides which event each
 //          operation is, and this file decides where the buttons go and what a tap does.
 // INPUTS: The session being edited, the loaded songs (to offer one when adding), a resolver from an
-//         entry's `documentId` to the title a musician reads, a callback that plays one entry, and a
-//         callback the sheet calls after every applied edit.
+//         entry to the title a musician reads — null when the entry names no loaded chart — a
+//         callback that plays one entry, a callback the sheet calls after every applied edit, the
+//         text the file dialog starts with, and a callback that hands the viewer the session an
+//         opened `.setlist` file produced.
 // OUTPUTS: A modal bottom sheet whose result is nothing: every button applies through
 //          [SetlistSession] as it is pressed, so by the time the sheet closes the programme already
 //          holds the edit. Undo and redo are shown in the sheet itself, because the programme has
 //          its own log and its own history: undoing a setlist edit must not be confused with
 //          undoing a chord, and a musician cannot see which one they would get from one app-bar
-//          button.
+//          button. Opening a `.setlist` file REPLACES the session this sheet is editing, so the
+//          sheet — not the screen behind it — holds the session it draws, and the screen is handed
+//          the same value.
 // KEYWORDS: setlist, programme, sheet, rename, insert, delete, move, transposition, notes, undo,
-//           redo, op-log, scene-playback
+//           redo, op-log, scene-playback, save-setlist, open-setlist, missing-chart
 //
 // WHY THE TITLE COMES FROM A RESOLVER AND NOT FROM THE LOADED SONG. A chart can be renamed in the
 // editor, and the viewer already answers "the name to show" from the session that holds the rename.
 // A sheet that read `IRealSong.title` directly would keep showing the imported name after the chart
 // was renamed — the same two-names-for-one-song defect the viewer's own title path exists to prevent.
+//
+// WHY THE RESOLVER ANSWERS NULL RATHER THAN A PLACEHOLDER. Which chart an entry names is decided by
+// the viewer, from the loaded library and the entry's identity; a sheet that invented its own
+// wording for "not found" would be a second opinion about a question only the library can answer.
+// Null means "this entry names nothing this library holds", the sheet renders that in the one place
+// a musician reads it, and it counts the nulls to say how many there are.
 //
 // WHY THE ENTRY EDIT IS A DIALOG AND NOT A STEPPER IN THE ROW. Two facts belong to an entry — the
 // interval it is played at and the note the performer reads — and a row that changed the interval on
@@ -31,7 +42,8 @@
 // WHY A CHART MAY APPEAR TWICE. `SetlistItem` has no identity of its own — two entries can play the
 // same chart — and `insertItem` does not refuse a duplicate. A programme that plays an encore twice
 // is a real programme, and a sheet that silently dropped the second entry would be the app deciding
-// that the band does not do that.
+// that the band does not do that. An entry ADDED here carries the chart's content identity, so the
+// duplicate and the original resolve to the same music without either being special-cased.
 import 'dart:async';
 
 import 'package:chart_core/chart_core.dart';
@@ -40,16 +52,20 @@ import 'package:chart_core/chart_core.dart';
 import 'package:flutter/material.dart' hide Key;
 
 import 'ireal_library.dart';
+import 'setlist_document.dart';
+import 'setlist_file_bar.dart';
 import 'sheet_button.dart';
 import 'sheet_surface.dart';
 
 // PURPOSE: Open the programme sheet for [session] and resolve when the musician is finished.
 // INPUTS: context — where to open the sheet. session — the setlist document being edited. songs —
 //         the loaded library, used to offer a chart when one is added. titleFor — the resolver that
-//         names an entry's chart, so a rename made in the editor is reflected here. onPlay — called
+//         names an entry's chart, or null when the entry names no loaded chart. onPlay — called
 //         with the entry index when the musician presses play; the sheet closes before the call so
 //         the chart the entry names is visible. onChanged — called after every applied edit so the
-//         caller can rebuild.
+//         caller can rebuild. initialFilePath — the text the save/open dialog's field starts with.
+//         onOpenedFile — called with the session an opened `.setlist` file produced, so the caller
+//         adopts the same value this sheet now draws.
 // OUTPUTS: A future that completes when the sheet is dismissed, whether anything was edited or not.
 // KEYWORDS: show, bottom-sheet, setlist-edit, scene-play, title-resolver, callback, guard
 /// Opens the programme sheet over the chart.
@@ -57,9 +73,11 @@ Future<void> showSetlistSheet(
   BuildContext context, {
   required SetlistSession session,
   required List<IRealSong> songs,
-  required String Function(String documentId) titleFor,
+  required String? Function(SetlistItem item) titleFor,
   required ValueChanged<int> onPlay,
   VoidCallback? onChanged,
+  String initialFilePath = '',
+  ValueChanged<SetlistSession>? onOpenedFile,
 }) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: sheetPanelColor,
@@ -70,6 +88,8 @@ Future<void> showSetlistSheet(
     titleFor: titleFor,
     onPlay: onPlay,
     onChanged: onChanged,
+    initialFilePath: initialFilePath,
+    onOpenedFile: onOpenedFile,
   ),
 );
 
@@ -83,19 +103,27 @@ class SetlistSheet extends StatefulWidget {
     required this.titleFor,
     required this.onPlay,
     this.onChanged,
+    this.initialFilePath = '',
+    this.onOpenedFile,
   });
 
-  /// The setlist document being edited.
+  /// The setlist document the sheet opens on.
+  ///
+  /// The sheet keeps its own reference to the session because opening a `.setlist` file replaces it;
+  /// [session] is read once, in `initState`, and this field is never read again.
   final SetlistSession session;
 
   /// The loaded songs, in payload order, offered when a chart is added.
   final List<IRealSong> songs;
 
-  /// Names the chart an entry's [SetlistItem.documentId] refers to.
+  /// The title to show for an entry's chart, or null when the entry names no chart this library
+  /// holds.
   ///
   /// A function rather than a map because the viewer answers it from the sessions it holds, which is
-  /// where a rename lives; a map built here would be a copy that goes stale on the next rename.
-  final String Function(String documentId) titleFor;
+  /// where a rename lives; a map built here would be a copy that goes stale on the next rename. It
+  /// is also the ONE place the missing case is decided, so the row's wording and the count above the
+  /// list cannot disagree.
+  final String? Function(SetlistItem item) titleFor;
 
   /// Called with the entry index when the musician plays one.
   final ValueChanged<int> onPlay;
@@ -103,20 +131,29 @@ class SetlistSheet extends StatefulWidget {
   /// Called after every applied edit.
   final VoidCallback? onChanged;
 
+  /// The text the save/open dialog's field starts with.
+  final String initialFilePath;
+
+  /// Called with the session an opened `.setlist` file produced.
+  final ValueChanged<SetlistSession>? onOpenedFile;
+
   @override
   State<SetlistSheet> createState() => _SetlistSheetState();
 }
 
-/// The sheet's state: the title field's controller.
+/// The sheet's state: the title field's controller and the session it draws.
 class _SetlistSheetState extends State<SetlistSheet> {
   late final TextEditingController _titleController;
+
+  /// The session this sheet draws, which is the one it was opened with until a `.setlist` file
+  /// replaces it.
+  late SetlistSession _session;
 
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(
-      text: widget.session.setlist.title,
-    );
+    _session = widget.session;
+    _titleController = TextEditingController(text: _session.setlist.title);
   }
 
   @override
@@ -140,12 +177,55 @@ class _SetlistSheetState extends State<SetlistSheet> {
 
   // PURPOSE: Name the chart an entry plays, so a row shows the title a musician knows rather than
   //          the importer's positional id.
-  // INPUTS: documentId — the entry's chart id.
-  // OUTPUTS: The chart's display title, or `(missing chart)` when no loaded song carries that id —
-  //          which is a real state after a library that did not contain the entry is loaded, and is
-  //          stated rather than shown as an empty string.
-  // KEYWORDS: title-resolution, document-id, missing-chart, honest-fallback
-  String _titleFor(String documentId) => widget.titleFor(documentId);
+  // INPUTS: item — the entry.
+  // OUTPUTS: The title the resolver gave, or `(missing chart)` when it answered null. The missing
+  //          wording lives here because it is UI text; WHICH entries are missing is the resolver's
+  //          answer and is not second-guessed.
+  // KEYWORDS: title-resolution, missing-chart, honest-fallback, one-wording
+  String _titleFor(SetlistItem item) =>
+      widget.titleFor(item) ?? '(missing chart)';
+
+  // PURPOSE: Count the entries that name a chart this library does not hold, so the sheet can say
+  //          how many there are above the list instead of making the musician count rows.
+  // INPUTS: None; the session on screen and the resolver.
+  // OUTPUTS: The number of entries the resolver answered null for. Zero for an ordinary programme
+  //          built from the loaded library.
+  // KEYWORDS: missing-chart, count, honest-report, live-with-edits
+  int get _missingCount => _session.items
+      .where((SetlistItem item) => widget.titleFor(item) == null)
+      .length;
+
+  // PURPOSE: Adopt the programme an opened `.setlist` file decoded to, since this sheet is what is
+  //          drawing it.
+  // INPUTS: opened — the file's document id, its snapshot and its operation tail, as
+  //         `setlist_file_bar.dart` read them.
+  // OUTPUTS: The status sentence the dialog shows: the programme's name, its entry count and, when
+  //          it is not zero, how many entries name no chart this library holds. The sheet's session
+  //          is replaced — through `setlistSessionFor`, so the tail is folded and the sequence
+  //          continues past it — and the caller is handed the same value so the page behind the
+  //          sheet cannot keep drawing the previous programme.
+  // KEYWORDS: open-setlist, adopt-session, status-sentence, missing-chart, live-count
+  String _adoptOpened(OpenedSetlist opened) {
+    final SetlistSession next = setlistSessionFor(
+      docId: opened.docId,
+      snapshot: opened.snapshot,
+      events: opened.events,
+    );
+    setState(() {
+      _session = next;
+      _titleController.text = next.setlist.title;
+    });
+    widget.onOpenedFile?.call(next);
+    final int missing = next.items
+        .where((SetlistItem item) => widget.titleFor(item) == null)
+        .length;
+    final String name = next.setlist.title.isEmpty
+        ? 'Untitled programme'
+        : next.setlist.title;
+    return 'Opened "$name" · ${next.items.length} entr'
+        '${next.items.length == 1 ? 'y' : 'ies'}'
+        '${missing == 0 ? '' : ' · $missing NOT found in this library'}.';
+  }
 
   // PURPOSE: Word how one entry is played, so a row states the transposition and the note together
   //          and a zero interval is named rather than left blank.
@@ -161,7 +241,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final Setlist setlist = widget.session.setlist;
+    final Setlist setlist = _session.setlist;
     return SafeArea(
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.8,
@@ -186,8 +266,8 @@ class _SetlistSheetState extends State<SetlistSheet> {
                     buttonKey: 'setlist-undo',
                     icon: Icons.undo,
                     label: 'Undo',
-                    onTap: widget.session.canUndo
-                        ? () => _after(widget.session.undo())
+                    onTap: _session.canUndo
+                        ? () => _after(_session.undo())
                         : null,
                   ),
                   const SizedBox(width: 8),
@@ -195,9 +275,22 @@ class _SetlistSheetState extends State<SetlistSheet> {
                     buttonKey: 'setlist-redo',
                     icon: Icons.redo,
                     label: 'Redo',
-                    onTap: widget.session.canRedo
-                        ? () => _after(widget.session.redo())
+                    onTap: _session.canRedo
+                        ? () => _after(_session.redo())
                         : null,
+                  ),
+                  const SizedBox(width: 8),
+                  // --- THE PROGRAMME'S FILE (a `.setlist` container) ---------------------------------
+                  // Save and open the programme itself, through the same platform seam the chart's
+                  // own file control uses. It lives here rather than in the app bar because the
+                  // programme is what it acts on: the app bar's chart-file control saves the CHART
+                  // on screen, and two controls named "save" in one window would make a musician
+                  // guess which document they were keeping. Opening replaces this sheet's session,
+                  // which is why `_adoptOpened` and `_session` exist.
+                  SetlistFileAction(
+                    session: _session,
+                    initialPath: widget.initialFilePath,
+                    onOpened: _adoptOpened,
                   ),
                 ],
               ),
@@ -216,11 +309,26 @@ class _SetlistSheetState extends State<SetlistSheet> {
                     borderSide: BorderSide(color: sheetAccentColor),
                   ),
                 ),
-                onSubmitted: (String value) =>
-                    _after(widget.session.rename(value)),
+                onSubmitted: (String value) => _after(_session.rename(value)),
                 onEditingComplete: () =>
-                    _after(widget.session.rename(_titleController.text)),
+                    _after(_session.rename(_titleController.text)),
               ),
+              if (_missingCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    '$_missingCount entr${_missingCount == 1 ? 'y' : 'ies'} '
+                    'name${_missingCount == 1 ? 's' : ''} a chart this library '
+                    'does not hold. The programme keeps '
+                    '${_missingCount == 1 ? 'it' : 'them'}; the chart is not '
+                    'here to play.',
+                    key: const ValueKey<String>('setlist-missing'),
+                    style: const TextStyle(
+                      color: Color(0xFFFF8A80),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 8),
               Expanded(
                 child: setlist.items.isEmpty
@@ -284,7 +392,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    _titleFor(item.documentId),
+                    _titleFor(item),
                     key: ValueKey<String>('setlist-entry-title-$index'),
                     style: const TextStyle(
                       color: sheetOnPanelColor,
@@ -324,16 +432,16 @@ class _SetlistSheetState extends State<SetlistSheet> {
               tooltip: 'Move earlier',
               onPressed: index == 0
                   ? null
-                  : () => _after(widget.session.moveItem(index, index - 1)),
+                  : () => _after(_session.moveItem(index, index - 1)),
             ),
             IconButton(
               key: ValueKey<String>('setlist-down-$index'),
               icon: const Icon(Icons.arrow_downward),
               color: sheetOnPanelColor,
               tooltip: 'Move later',
-              onPressed: index == widget.session.items.length - 1
+              onPressed: index == _session.items.length - 1
                   ? null
-                  : () => _after(widget.session.moveItem(index, index + 1)),
+                  : () => _after(_session.moveItem(index, index + 1)),
             ),
             IconButton(
               key: ValueKey<String>('setlist-edit-$index'),
@@ -347,7 +455,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
               icon: const Icon(Icons.delete_outline),
               color: const Color(0xFFFF8A80),
               tooltip: 'Remove from the programme',
-              onPressed: () => _after(widget.session.deleteItem(index)),
+              onPressed: () => _after(_session.deleteItem(index)),
             ),
           ],
         ),
@@ -376,7 +484,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
             AlertDialog(
               backgroundColor: sheetPanelColor,
               title: Text(
-                _titleFor(item.documentId),
+                _titleFor(item),
                 style: const TextStyle(color: sheetOnPanelColor),
               ),
               content: Column(
@@ -443,9 +551,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
     if (confirmed != true) {
       return;
     }
-    _after(
-      widget.session.updateItem(index, transposeSem: chosen, notes: written),
-    );
+    _after(_session.updateItem(index, transposeSem: chosen, notes: written));
   }
 
   // PURPOSE: Put a chart from the library into the programme, chosen from the loaded songs.
@@ -471,11 +577,23 @@ class _SetlistSheetState extends State<SetlistSheet> {
             itemCount: widget.songs.length,
             itemBuilder: (BuildContext context, int index) {
               final IRealSong song = widget.songs[index];
+              // The picker names each chart through the SAME resolver a row uses, by asking it
+              // about the entry this tap would make. The loaded title is only the fallback for a
+              // resolver that cannot see the library, so a chart renamed in the editor is listed
+              // under the name the editor gave it rather than under the imported one.
+              final String shown =
+                  widget.titleFor(
+                    SetlistItem(
+                      documentId: song.song.id,
+                      chartIdentity: song.identity,
+                    ),
+                  ) ??
+                  song.title;
               return ListTile(
                 key: ValueKey<String>('setlist-add-$index'),
                 dense: true,
                 title: Text(
-                  widget.titleFor(song.song.id),
+                  shown,
                   style: const TextStyle(color: sheetOnPanelColor),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -501,7 +619,14 @@ class _SetlistSheetState extends State<SetlistSheet> {
       return;
     }
     _after(
-      widget.session.insertItem(SetlistItem(documentId: picked.song.id)) !=
+      _session.insertItem(
+            SetlistItem(
+              documentId: picked.song.id,
+              // The identity of the music, so the entry this picker makes resolves against another
+              // import exactly like the entries the playlist import built.
+              chartIdentity: picked.identity,
+            ),
+          ) !=
           null,
     );
   }

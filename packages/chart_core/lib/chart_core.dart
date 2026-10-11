@@ -9,8 +9,11 @@
 // resolves enharmonic spelling, the chord model, transposition, the song structure that addresses
 // a bar, the iReal import path from an `irealb://` payload through de-obfuscation and notation to
 // a Song, the layout engine and the page hit test, the document event catalogue that undo,
-// autosave and a future sync all replay, the `.chart` container that serialises one document —
-// its snapshot and its operation tail — to bytes and back, and the two editing values that join
+// autosave and a future sync all replay, the two containers that serialise a document — `.chart`
+// for a chart and `.setlist` for a programme, each its snapshot plus its operation tail, both over
+// the one envelope in `src/container/container_frame.dart` — and the identity a programme names a
+// chart by, derived from the chart's own music in `src/identity/chart_identity.dart`. Also the two
+// editing values that join
 // those: the chord palette a cell offers, and the session that applies an edit through the log.
 // The ink domain joins them at the same level: the canonical stroke form is already in the
 // catalogue above, and `src/ink/` adds the pure decisions a live capture needs — whether a
@@ -32,17 +35,24 @@
 // follows that rule by taking bytes and returning bytes: resolving a path, opening a file and
 // invoking a browser's file chooser are the app's job, through its own conditional-export seam.
 //
-// Still absent by design: the `.setlist` container. A setlist is a different kind of document — it
-// names songs rather than containing one — and the codec here deliberately refuses a setlist
-// operation inside a chart file rather than growing a second document type it does not model yet.
+// Still absent by design: nothing that reaches a device. The two containers store bytes and return
+// bytes; resolving a path, opening a file and invoking a browser's file chooser are the app's job,
+// through its own conditional-export seam.
+//
+// The `.setlist` container is no longer absent. A programme is stored as a snapshot plus a
+// `setlist.*` operation tail in the SAME envelope `.chart` uses — `container_frame.dart` — and what
+// an entry names is decided by `src/identity/chart_identity.dart`: a chart's own music, not the
+// position it sat at in an import and not its title.
 
 /// ChartApp's pure-Dart chart domain.
 library;
 
 export 'src/chord.dart';
 export 'src/container/chart_file.dart';
+export 'src/container/setlist_file.dart';
 export 'src/editing/chord_palette.dart';
 export 'src/editing/ink_stroke_builder.dart';
+export 'src/identity/chart_identity.dart';
 export 'src/ink/ink_hit.dart';
 export 'src/ink/page_anchor.dart';
 export 'src/ink/palm_rule.dart';

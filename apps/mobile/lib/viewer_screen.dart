@@ -148,6 +148,7 @@ import 'package:flutter/material.dart' hide Key;
 
 import 'chart_file_bar.dart';
 import 'chord_palette_sheet.dart';
+import 'document_file_name.dart';
 import 'ink_capture_surface.dart';
 import 'ink_layer.dart';
 import 'ink_pointer_probe.dart';
@@ -157,6 +158,7 @@ import 'ireal_source.dart';
 import 'key_grid.dart';
 import 'scene_bar.dart';
 import 'setlist_import.dart';
+import 'setlist_resolution.dart';
 import 'setlist_sheet.dart';
 import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
@@ -927,14 +929,31 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         : transposeSong(song, semitones, toKey: _keyFor(song.key, semitones));
   }
 
+  // PURPOSE: Find the loaded chart one programme entry names, which is the ONE place the join
+  //          between a programme and a library is decided — so the play action, the scene meaning,
+  //          the row's title and the missing-chart report cannot disagree about which chart an
+  //          entry is.
+  // INPUTS: item — the entry, whose `chartIdentity` is the durable name and whose `documentId` is
+  //         the id the chart's own log is keyed by.
+  // OUTPUTS: The loaded song the entry names, or null when this library holds none. The RULE is
+  //          `resolveSetlistItem` in `setlist_resolution.dart`: identity first and authoritative
+  //          when the entry carries one, document id only for an entry that carries none. It lives
+  //          outside this widget so a `dart run` probe can exercise the same code; what this method
+  //          adds is the "no library loaded yet" guard.
+  // KEYWORDS: resolution, chart-identity, document-id-fallback, missing-chart, single-join
+  IRealSong? _songForItem(SetlistItem item) {
+    final IRealLibrary? library = _library;
+    return library == null ? null : resolveSetlistItem(library, item);
+  }
+
   // PURPOSE: Return the programme entry being played for one song, or null when the song is being
   //          read on its own. This is the one place that decides whether the SCENE meaning of D14 is
   //          in force, so the display, the song list and the scene bar cannot disagree about it.
   // INPUTS: entry — the loaded song whose pane is being drawn.
-  // OUTPUTS: The entry at [_sceneIndex] when it names [entry]'s chart; null otherwise. The document
-  //          id must match, because an index alone would let a library replacement point the scene
-  //          at whatever chart now sits at that position.
-  // KEYWORDS: scene-entry, document-id-match, single-decision, d14
+  // OUTPUTS: The entry at [_sceneIndex] when it names [entry]'s chart, resolved through
+  //          [_songForItem]; null otherwise. The resolution and not a raw id comparison, because a
+  //          library replacement renumbers document ids and only the identity survives it.
+  // KEYWORDS: scene-entry, document-identity-match, single-decision, d14
   SetlistItem? _playingItemFor(IRealSong entry) {
     final SetlistSession? setlist = _setlist;
     final int? index = _sceneIndex;
@@ -942,7 +961,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       return null;
     }
     final SetlistItem? item = setlist.itemAt(index);
-    return item != null && item.documentId == entry.song.id ? item : null;
+    if (item == null) {
+      return null;
+    }
+    return _songForItem(item)?.index == entry.index ? item : null;
   }
 
   // PURPOSE: Report how far the chart on screen is shown from its written key, taking the scene
@@ -1010,8 +1032,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          session document and `shownKey` from the scene resolution over that document, so the
   //          two are the same value only when the entry is not transposed. `log` is the setlist
   //          event types in order, which is what makes an undo visible as an appended inverse rather
-  //          than as a removed row.
-  // KEYWORDS: verification-handoff, programme-state, written-vs-shown, scene-index, setlist-log
+  //          than as a removed row. `entryCharts` reports, per entry, the document id and the
+  //          identity it stores and the loaded song index it RESOLVED to (or `found: false`), and
+  //          `missingCharts` counts those — the pair that makes "a programme saved from one export
+  //          still finds its charts after another import" a measurement rather than a claim.
+  // KEYWORDS: verification-handoff, programme-state, written-vs-shown, scene-index, setlist-log,
+  //           entry-resolution, missing-chart
   Map<String, Object?>? _setlistState() {
     final SetlistSession? setlist = _setlist;
     final IRealLibrary? library = _library;
@@ -1025,6 +1051,27 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final IRealSong entry = library.songs[songIndex];
     final SetlistItem? playing = _playingItemFor(entry);
     final Song written = _sessionFor(entry).song;
+    // WHAT EACH ENTRY RESOLVES TO, reported beside the entries themselves rather than inside them:
+    // a headless driver cannot reach `_songForItem`, and "the programme names music this library
+    // does not hold" is a claim only this report can settle. The `items` list keeps its original
+    // shape — the entry as it is STORED — so what a driver reads as the programme and what it reads
+    // as the resolution are two facts rather than one restated.
+    final List<Object?> entryCharts = <Object?>[];
+    int missing = 0;
+    for (int index = 0; index < setlist.items.length; index++) {
+      final SetlistItem item = setlist.items[index];
+      final IRealSong? found = _songForItem(item);
+      if (found == null) {
+        missing++;
+      }
+      entryCharts.add(<String, Object?>{
+        'index': index,
+        'documentId': item.documentId,
+        'chartIdentity': item.chartIdentity,
+        'songIndex': found?.index,
+        'found': found != null,
+      });
+    }
     return <String, Object?>{
       'id': setlist.setlist.id,
       'title': setlist.setlist.title,
@@ -1043,6 +1090,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             'notes': item.notes,
           },
       ],
+      'entryCharts': entryCharts,
+      'missingCharts': missing,
       'playingDocumentId': playing?.documentId,
       'writtenSongId': written.id,
       'writtenKey': written.key.toString(),
@@ -1062,9 +1111,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // OUTPUTS: Nothing. The chart the entry names becomes the selected song, the entry becomes the
   //          playing one, the hit selection is dropped (a section id from another song names
   //          different music) and the page mode is set to PAGES, which is D13's scene default. An
-  //          entry whose chart is not in the loaded library changes nothing and says so: an index
+  //          entry whose chart is not in the loaded library changes nothing and says so — an index
   //          into the programme is not an index into the library, and pretending otherwise would
-  //          select whatever chart happens to sit at that position.
+  //          select whatever chart happens to sit at that position. WHICH chart an entry names is
+  //          decided by [_songForItem] and nowhere else.
   // KEYWORDS: play-entry, scene-mode, selection-reset, page-mode-default, library-lookup
   void _playSetlistEntry(int index) {
     final IRealLibrary? library = _library;
@@ -1076,25 +1126,24 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     if (item == null) {
       return;
     }
-    final int songIndex = library.songs.indexWhere(
-      (IRealSong entry) => entry.song.id == item.documentId,
-    );
-    if (songIndex < 0) {
+    final IRealSong? found = _songForItem(item);
+    if (found == null) {
       debugPrint(
         'viewer.setlist.play.skipped index=$index document="${item.documentId}" '
-        'reason=chart-not-loaded',
+        'identity="${item.chartIdentity}" reason=chart-not-loaded',
       );
       return;
     }
     setState(() {
       _sceneIndex = index;
-      _selectedSong = songIndex;
+      _selectedSong = found.index;
       _selection = null;
       _chosenPageMode = PageMode.pages;
     });
     debugPrint(
       'viewer.setlist.play index=$index document="${item.documentId}" '
-      'song=$songIndex transpose=${item.transposeSem} '
+      'identity="${item.chartIdentity}" song=${found.index} '
+      'transpose=${item.transposeSem} '
       'entries=${setlist.items.length}',
     );
   }
@@ -1121,9 +1170,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       context,
       session: setlist,
       songs: library.songs,
-      titleFor: _titleForDocumentId,
+      titleFor: _titleForItem,
       onPlay: _playSetlistEntry,
       onChanged: () => setState(() {}),
+      initialFilePath: setlistPathBeside(widget.initialPath),
+      onOpenedFile: _adoptOpenedSetlist,
     );
   }
 
@@ -1145,7 +1196,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       return;
     }
     final SetlistItem? item = setlist.itemAt(index);
-    if (item == null || item.documentId != entry.song.id) {
+    if (item == null || _songForItem(item)?.index != entry.index) {
       return;
     }
     final Song written = _sessionFor(entry).song;
@@ -1184,24 +1235,22 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return title.isEmpty ? 'Untitled' : title;
   }
 
-  // PURPOSE: Name the chart a programme entry refers to, by the id the entry stores, so the
-  //          programme sheet shows the name the editor would show — including a rename — rather
-  //          than the imported one.
-  // INPUTS: documentId — the entry's `SetlistItem.documentId`.
-  // OUTPUTS: The loaded (or edited) title, or `(missing chart)` when no loaded song carries that id.
-  //          The missing case is stated rather than blank: an entry naming a chart that is not in
-  //          the library is a real state, and an empty row would look like a chart with no name.
-  // KEYWORDS: title-resolution, document-id, rename-aware, missing-chart, programme-sheet
-  String _titleForDocumentId(String documentId) {
-    final IRealLibrary? library = _library;
-    if (library != null) {
-      for (final IRealSong entry in library.songs) {
-        if (entry.song.id == documentId) {
-          return _titleFor(entry);
-        }
-      }
-    }
-    return '(missing chart)';
+  // PURPOSE: Name the chart a programme entry refers to, so the programme sheet shows the name the
+  //          editor would show — including a rename — and can say plainly when the entry names a
+  //          chart this library does not hold.
+  // INPUTS: item — the entry, which is resolved through [_songForItem] rather than by either of its
+  //         ids directly, because which id is authoritative depends on whether the entry carries an
+  //         identity.
+  // OUTPUTS: The loaded (or edited) title, or null when the entry resolves to no loaded song. NULL
+  //          IS THE MISSING CASE and not an empty name: the sheet renders its own words for it, and
+  //          the entry itself is untouched — it is still in the running order, can still be edited
+  //          and deleted, and is saved again exactly as it stands. A silently dropped row would lose
+  //          a tune the musician put in the programme, and a blank one would look like a chart with
+  //          no name.
+  // KEYWORDS: title-resolution, chart-identity, rename-aware, missing-chart, programme-sheet
+  String? _titleForItem(SetlistItem item) {
+    final IRealSong? found = _songForItem(item);
+    return found == null ? null : _titleFor(found);
   }
 
   @override
@@ -1365,11 +1414,18 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         // other document-level actions because it is a document, not a property of the bar under the
         // cursor; the sheet it opens holds the running order. Its undo and redo live INSIDE the sheet
         // rather than here, because the programme has its own log and its own history, and a second
-        // pair of arrows in this bar would make a musician guess which document they reverse. This
-        // button, `_openSetlist`, `_playSetlistEntry`, `_chooseSceneKey`, the `_playingItemFor` /
-        // `_shownSong` / `_shownSemitones` helpers and the scene branch of the scene bar in
-        // `_buildSongPane` are the whole of this feature's footprint in this file; the sheet itself is
-        // `setlist_sheet.dart` and the import bridge is `setlist_import.dart`.
+        // pair of arrows in this bar would make a musician guess which document they reverse.
+        //
+        // THE WHOLE PROGRAMME FOOTPRINT IN THIS FILE, named so a later edit can find it: this button,
+        // `_songForItem` (the one resolution join, delegated to `setlist_resolution.dart`),
+        // `_playingItemFor` / `_shownSong` / `_shownSemitones` / `_shownKeyFor`, `_playSetlistEntry`,
+        // `_openSetlist` (which hands the sheet its resolver and its file callbacks),
+        // `_chooseSceneKey`, `_titleForItem`, `_adoptOpenedSetlist`, the `entryCharts`/`missingCharts`
+        // report in `_setlistState`, the `chartIdentity` of a chart opened from a file in
+        // `_adoptOpenedSong`, and the scene branch of the scene bar in `_buildSongPane`. Everything
+        // else is in `setlist_sheet.dart` (the sheet), `setlist_file_bar.dart` (its file dialog),
+        // `setlist_document.dart` (session to file and back), `setlist_import.dart` (the bridge) and
+        // `setlist_resolution.dart` (which chart an entry names).
         IconButton(
           key: const ValueKey<String>('viewer-setlist'),
           icon: const Icon(Icons.queue_music),
@@ -1606,7 +1662,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // different lists that happen to have identical contents today.
     final IRealLibrary library = IRealLibrary(
       playlistName: '',
-      songs: <IRealSong>[IRealSong(index: 0, song: opened.document.song)],
+      songs: <IRealSong>[
+        IRealSong(
+          index: 0,
+          song: opened.document.song,
+          // The identity of what the file HOLDS, so a programme entry made from this chart resolves
+          // by content like every other entry and does not fall back to the id the file happened to
+          // store.
+          chartIdentity: chartIdentityOf(opened.document.song),
+        ),
+      ],
     );
     setState(() {
       _library = library;
@@ -1649,6 +1714,37 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       }
     }
     return highest;
+  }
+
+  // PURPOSE: Adopt the programme a `.setlist` file decoded to, so the running order on the sheet is
+  //          the one the file holds and the sheet's further edits continue its log.
+  // INPUTS: session — the session the sheet built from the decoded file through
+  //         `setlistSessionFor`, which has already folded the file's tail into its snapshot.
+  // OUTPUTS: Nothing. The programme on screen becomes that session and the scene index is cleared,
+  //          because an index into the replaced programme names a different entry now.
+  //
+  //          THE SESSION IS BUILT BY THE SHEET AND HANDED OVER AS ONE VALUE, rather than this screen
+  //          rebuilding it from the pieces: the sheet is where the `.setlist` dialog lives, and two
+  //          constructions of one session would be two chances to disagree about the sequence number
+  //          the continued log starts from. What this screen adds is the state change and the trace.
+  //
+  //          AN ENTRY THAT FINDS NOTHING IS KEPT, and its missing state is reported by
+  //          [_setlistState]'s `entryCharts`/`missingCharts` and by the sheet's own sentence. The
+  //          entry is never dropped and never rerouted to whatever chart sits at the position its
+  //          document id names: a programme that silently dropped a chart would be worse than one
+  //          that says which one it cannot find, because the musician cannot re-add what they were
+  //          never told was gone.
+  // KEYWORDS: open-setlist, adopt-session, scene-reset, missing-chart, keep-entry, trace
+  void _adoptOpenedSetlist(SetlistSession session) {
+    setState(() {
+      _setlist = session;
+      _sceneIndex = null;
+    });
+    debugPrint(
+      'viewer.setlist.open.adopted id="${session.docId}" '
+      'entries=${session.items.length} '
+      'operations=${session.log.length}',
+    );
   }
 
   // PURPOSE: Give the reader the control that starts a load, in the form the platform can honour.

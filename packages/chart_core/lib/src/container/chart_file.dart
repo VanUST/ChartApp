@@ -10,6 +10,12 @@
 //          Import this file as `package:chart_core/src/container/chart_file.dart`.
 // KEYWORDS: chart-file, container, codec, snapshot, op-log, pdf, d19, pure-dart
 //
+// WHERE THE ENVELOPE COMES FROM. The magic, the fixed prefix, the little-endian `uint32` fields,
+// the CRC-32 and the checks that classify a wrong file live in `container_frame.dart`, which the
+// `.setlist` container reads and writes through as well: `.chart` and `.setlist` are two headers
+// inside one frame, not two formats. What this library adds is the header KEYS, the document and
+// operation mapping, and the D19 attachment rule.
+//
 // WHAT A `.chart` FILE IS, AND WHY IT IS BUILT AROUND THE OP-LOG.
 //
 // A `.chart` file is the serialised form of one document: the song, its anchored marks and the
@@ -37,6 +43,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../oplog/oplog.dart';
+import 'container_frame.dart';
+
+export 'container_frame.dart';
 
 part 'chart_file_codec.dart';
 part 'chart_file_format.dart';

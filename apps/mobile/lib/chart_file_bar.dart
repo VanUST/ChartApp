@@ -47,6 +47,7 @@ import 'package:flutter/material.dart';
 
 import 'chart_document.dart';
 import 'chart_source.dart';
+import 'document_file_name.dart';
 import 'ireal_library.dart';
 
 /// Moves a container's bytes to the place the reader named.
@@ -72,21 +73,12 @@ typedef OpenedChart = ({DocumentState document, List<ChartEvent> events});
 //         a test's synthetic reference.
 // OUTPUTS: The same path with its extension replaced by `.chart`, or with `.chart` appended when it
 //          had none. An empty input gives an empty output, because there is nothing to sit beside.
-//          A dot in a directory name is not treated as an extension: the search starts after the
-//          last separator.
-// KEYWORDS: path, default, extension, beside, empty-input
+//          The rule itself lives in [extensionPathBeside], shared with the `.setlist` dialog, so the
+//          two cannot come to derive a file name in two different ways.
+// KEYWORDS: path, default, extension, beside, empty-input, shared-rule
 /// Returns [sourcePath] with its extension replaced by `.chart`.
-String chartPathBeside(String sourcePath) {
-  if (sourcePath.isEmpty) {
-    return '';
-  }
-  final int separator = sourcePath.lastIndexOf(RegExp(r'[\\/]'));
-  final int dot = sourcePath.lastIndexOf('.');
-  if (dot > separator) {
-    return '${sourcePath.substring(0, dot)}$chartFileExtension';
-  }
-  return '$sourcePath$chartFileExtension';
-}
+String chartPathBeside(String sourcePath) =>
+    extensionPathBeside(sourcePath, chartFileExtension);
 
 // PURPOSE: Derive the `.chart` file name to offer when there is no source path to sit beside, which
 //          is the browser's ordinary case: the iReal export was chosen through a chooser and left no
@@ -95,21 +87,12 @@ String chartPathBeside(String sourcePath) {
 // INPUTS: title — the song's own title, which may be empty, may contain characters a filesystem
 //         refuses, and may already end in `.chart`.
 // OUTPUTS: The title with every character illegal in a file name replaced by `_` and `.chart`
-//          appended, or `untitled.chart` when nothing usable is left. The extension is appended
-//          rather than sniffed: a musician who titled a tune "Ballad.chart" still gets a
-//          `Ballad.chart.chart`, because guessing that the title was meant as a name would rename
-//          their song's file after their song.
-// KEYWORDS: file-name, download, suggested-name, sanitize, empty-title, fallback
+//          appended, or `untitled.chart` when nothing usable is left. The sanitizing rule itself
+//          lives in [documentFileNameFor], shared with the `.setlist` dialog.
+// KEYWORDS: file-name, download, suggested-name, sanitize, empty-title, shared-rule
 /// Returns a usable `.chart` file name for a song called [title].
-String chartFileNameFor(String title) {
-  final String cleaned = title
-      .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1F]'), '_')
-      .trim();
-  if (cleaned.isEmpty) {
-    return 'untitled$chartFileExtension';
-  }
-  return '$cleaned$chartFileExtension';
-}
+String chartFileNameFor(String title) =>
+    documentFileNameFor(title, chartFileExtension);
 
 // PURPOSE: Open the `.chart` save/open dialog for a document, so the ONE dialog is reachable from
 //          both places that offer it.

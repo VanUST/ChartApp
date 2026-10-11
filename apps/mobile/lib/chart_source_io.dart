@@ -1,14 +1,16 @@
-// PURPOSE: Give a platform with a filesystem the two things [chart_source] promises: write a
-//          container the caller encoded to the path the reader named, and read the bytes of a
-//          container back. It is the desktop/mobile half of the conditional export, so it is the
-//          only place in the app that moves `.chart` bytes through `dart:io`.
-// INPUTS: A path the reader typed or edited, and the bytes `ChartFileCodec` produced.
+// PURPOSE: Give a platform with a filesystem the things [chart_source] promises: write a container
+//          the caller encoded to the path the reader named, and read the bytes of a container back.
+//          It is the desktop/mobile half of the conditional export, so it is the only place in the
+//          app that moves container bytes through `dart:io` — a `.chart` file and a `.setlist` file
+//          alike, through one write and one read.
+// INPUTS: A path the reader typed or edited, and the bytes a container codec produced.
 // OUTPUTS: [chartSourceIsFilePath] is true, [chartSourceSaveMode] always answers
-//          [ChartSaveMode.namedPath], [saveChartFile] completes once the bytes are on disk, and
-//          [loadChartFile] answers with the file's bytes. A missing file throws a
+//          [ChartSaveMode.namedPath], the two save functions complete once the bytes are on disk,
+//          and the two load functions answer with the file's bytes. A missing file throws a
 //          [FileSystemException] and an unwritable path throws whatever `dart:io` throws; both are
 //          ordinary outcomes for a typed path and are meant to be shown, not swallowed.
-// KEYWORDS: chart-file, save, open, dart-io, conditional-import, io-implementation, save-mode
+// KEYWORDS: chart-file, setlist-file, save, open, dart-io, conditional-import, io-implementation,
+//           save-mode
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -40,10 +42,8 @@ ChartSaveMode chartSourceSaveMode() => ChartSaveMode.namedPath;
 //          screen and a wrapped one would only hide it.
 // KEYWORDS: file, write, flush, chart-file, error-reporting
 /// Writes [bytes] to the file at [path], replacing whatever was there.
-Future<void> saveChartFile(String path, Uint8List bytes) async {
-  final File file = File(path);
-  await file.writeAsBytes(bytes, flush: true);
-}
+Future<void> saveChartFile(String path, Uint8List bytes) =>
+    _writeBytes(path, bytes);
 
 // PURPOSE: Read the container the reader named, so the app can decode it.
 // INPUTS: path — the file to read, as the reader typed it.
@@ -51,7 +51,33 @@ Future<void> saveChartFile(String path, Uint8List bytes) async {
 //          there, matching the iReal loader's behaviour so both seams fail the same way.
 // KEYWORDS: file, read, bytes, chart-file, missing-file
 /// Reads the container stored at [path].
-Future<Uint8List> loadChartFile(String path) async {
+Future<Uint8List> loadChartFile(String path) => _readBytes(path);
+
+// PURPOSE: Write a programme to the file the reader named, through the same code the chart write
+//          uses, so a `.setlist` file and a `.chart` file cannot behave differently on a disk.
+// INPUTS: path — where to write. bytes — the whole setlist container.
+// OUTPUTS: A future that completes when the bytes are flushed to disk, or throws whatever
+//          `dart:io` throws, exactly as [saveChartFile] does.
+// KEYWORDS: file, write, flush, setlist-file, error-reporting, one-implementation
+/// Writes [bytes] to the file at [path], replacing whatever was there.
+Future<void> saveSetlistFile(String path, Uint8List bytes) =>
+    _writeBytes(path, bytes);
+
+// PURPOSE: Read a programme the reader named, so the app can decode it.
+// INPUTS: path — the file to read.
+// OUTPUTS: The file's bytes, or a [FileSystemException] naming the path when nothing is there.
+// KEYWORDS: file, read, bytes, setlist-file, missing-file, one-implementation
+/// Reads the container stored at [path].
+Future<Uint8List> loadSetlistFile(String path) => _readBytes(path);
+
+/// Writes [bytes] to the file at [path], replacing whatever was there.
+Future<void> _writeBytes(String path, Uint8List bytes) async {
+  final File file = File(path);
+  await file.writeAsBytes(bytes, flush: true);
+}
+
+/// Reads the file at [path], reporting a path that holds nothing.
+Future<Uint8List> _readBytes(String path) async {
   final File file = File(path);
   if (!file.existsSync()) {
     throw FileSystemException('No file exists at this path.', path);

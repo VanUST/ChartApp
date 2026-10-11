@@ -1,20 +1,22 @@
-// PURPOSE: Give a browser the two things [chart_source] promises — save a `.chart` container and
-//          read one back — where no filesystem and no path exist, and answer honestly which of the
-//          two browser save mechanisms is actually in force. Opening goes through the browser's own
-//          chooser; saving re-writes in place through the File System Access API where the browser
-//          has it, and otherwise hands the reader a download, saying which one it did.
+// PURPOSE: Give a browser the things [chart_source] promises — save a container and read one back,
+//          for a `.chart` file and for a `.setlist` file alike — where no filesystem and no path
+//          exist, and answer honestly which of the two browser save mechanisms is actually in force.
+//          Opening goes through the browser's own chooser; saving re-writes in place through the
+//          File System Access API where the browser has it, and otherwise hands the reader a
+//          download, saying which one it did.
 // INPUTS: name — the file name to offer, which is the only thing a browser can be told about a
-//         destination before the reader picks one; bytes — the whole encoded container. For
-//         [loadChartFile], the argument is carried for the seam's shape and ignored, exactly as the
-//         iReal picker ignores its reference, because a browser page cannot name a file at all.
+//         destination before the reader picks one; bytes — the whole encoded container. For the two
+//         load functions, the argument is carried for the seam's shape and ignored, exactly as the
+//         iReal picker ignores its reference, because a browser page cannot name a file at all. The
+//         two formats differ in exactly one visible place: the extension the chooser filters on.
 // OUTPUTS: [chartSourceIsFilePath] is false, [chartSourceSaveMode] reports the mechanism this
-//          browser actually has, [saveChartFile] completes once the bytes have left the page, and
-//          [loadChartFile] answers with the chosen file's bytes. A dismissed chooser throws a
-//          [ChartFileCancelledException]; a browser that refuses the chosen file throws whatever
-//          the DOM throws. Neither is a silent no-op: a save that went nowhere must not look like a
-//          save that worked.
-// KEYWORDS: chart-file, web, browser, js-interop, file-system-access, download, capability-check,
-//           d20, file-picker, conditional-export
+//          browser actually has, the two save functions complete once the bytes have left the page,
+//          and the two load functions answer with the chosen file's bytes. A dismissed chooser
+//          throws a [ChartFileCancelledException]; a browser that refuses the chosen file throws
+//          whatever the DOM throws. Neither is a silent no-op: a save that went nowhere must not
+//          look like a save that worked.
+// KEYWORDS: chart-file, setlist-file, web, browser, js-interop, file-system-access, download,
+//           capability-check, d20, file-picker, conditional-export
 //
 // WHY THERE ARE TWO SAVE MECHANISMS AND NOT ONE.
 //
@@ -47,6 +49,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
+import 'package:chart_core/chart_core.dart';
 import 'package:flutter/foundation.dart';
 
 import 'chart_source_contract.dart';
@@ -98,12 +101,36 @@ ChartSaveMode chartSourceSaveMode() => _window.has(_savePickerMember)
 //          awaited, because the browser reports nothing back about a download it accepted.
 // KEYWORDS: save, file-system-access, create-writable, download, blob, handle-reuse, user-gesture
 /// Saves [bytes] under [name], re-writing in place where that is possible.
-Future<void> saveChartFile(String name, Uint8List bytes) async {
+Future<void> saveChartFile(String name, Uint8List bytes) =>
+    _saveNamed(name, bytes, kind: 'chart');
+
+// PURPOSE: Save a programme through the very same mechanism, so a `.setlist` file in a browser is
+//          handed over exactly like a `.chart` file and the sentences the dialog shows stay true
+//          for both.
+// INPUTS: name — the file name to offer. bytes — the whole encoded setlist container.
+// OUTPUTS: The same future and the same failures as [saveChartFile], differing only in the log line
+//          that records which of the two was written.
+// KEYWORDS: save, setlist-file, file-system-access, download, handle-reuse, one-mechanism
+/// Saves [bytes] under [name], re-writing in place where that is possible.
+Future<void> saveSetlistFile(String name, Uint8List bytes) =>
+    _saveNamed(name, bytes, kind: 'setlist');
+
+// PURPOSE: Add one `kind` parameter to [saveChartFile]'s body rather than writing a second one
+//          beside it, because the mechanism is a property of the BROWSER and not of the document.
+// INPUTS: name, bytes as above. kind — the word the log line reports, so the two formats can be
+//         told apart in a trace without a second implementation to keep in step.
+// OUTPUTS: As [saveChartFile].
+// KEYWORDS: save, one-mechanism, structured-log, kind
+Future<void> _saveNamed(
+  String name,
+  Uint8List bytes, {
+  required String kind,
+}) async {
   final String target = name.trim();
   final _FileSystemFileHandle? remembered = _handlesByName[target];
   if (remembered != null) {
     try {
-      await _writeThrough(remembered, bytes, mode: 'in-place');
+      await _writeThrough(remembered, bytes, mode: 'in-place', kind: kind);
     } catch (_) {
       // A remembered handle is the page's only way back to that file, and one whose permission was
       // revoked — or whose file was moved or deleted — fails for ever. Dropping it means the next
@@ -127,7 +154,7 @@ Future<void> saveChartFile(String name, Uint8List bytes) async {
       handle = await picked.toDart;
     } catch (error) {
       if (_isAbort(error)) {
-        debugPrint('chart.save.web.cancelled name_chars=${target.length}');
+        debugPrint('$kind.save.web.cancelled name_chars=${target.length}');
         throw const ChartFileCancelledException('No file was chosen.');
       }
       rethrow;
@@ -136,29 +163,49 @@ Future<void> saveChartFile(String name, Uint8List bytes) async {
     // save will arrive with the name the dialog holds, which is the suggested one.
     _handlesByName[target] = handle;
     _handlesByName[handle.name] = handle;
-    await _writeThrough(handle, bytes, mode: 'picked');
+    await _writeThrough(handle, bytes, mode: 'picked', kind: kind);
     return;
   }
-  _download(target, bytes);
+  _download(target, bytes, kind: kind);
 }
 
-// PURPOSE: Read the `.chart` file the reader picks in the browser's chooser and hand back its bytes,
-//          which is the only file read the chart seam performs on this platform.
+// PURPOSE: Read the container the reader picks in the browser's chooser and hand back its bytes,
+//          which is the only file read this seam performs on this platform.
 // INPUTS: path — ignored; a page cannot resolve a path, and the seam keeps the argument so that the
 //         viewer has ONE save/open shape rather than one per platform.
 // OUTPUTS: The chosen file's bytes. Throws a [ChartFileCancelledException] when the reader dismisses
 //          the chooser or no file is present, and whatever the DOM throws when the file cannot be
-//          read. The bytes are copied out of the JavaScript heap before they are returned, so no
-//          caller can hold a view into memory the browser is free to move.
+//          read.
 // KEYWORDS: open, file-picker, click, user-gesture, array-buffer, js-interop, typed-failure
 /// Opens the browser's file chooser and reads the chosen `.chart` file.
-Future<Uint8List> loadChartFile(String path) async {
+Future<Uint8List> loadChartFile(String path) =>
+    _pickBytes('.chart', kind: 'chart');
+
+// PURPOSE: Read the `.setlist` file the reader picks, through the same chooser the chart read uses.
+// INPUTS: path — ignored, as above.
+// OUTPUTS: The chosen file's bytes, or the same typed failures [loadChartFile] reports. The only
+//          difference is the extension the chooser filters on.
+// KEYWORDS: open, setlist-file, file-picker, typed-failure, one-mechanism
+/// Opens the browser's file chooser and reads the chosen `.setlist` file.
+Future<Uint8List> loadSetlistFile(String path) =>
+    _pickBytes(setlistFileExtension, kind: 'setlist');
+
+// PURPOSE: Open a file chooser filtered to one extension and read the chosen file, so the two
+//          formats differ in one argument rather than in two implementations of the DOM dance.
+// INPUTS: accept — the extension the chooser filters on, with its dot. kind — the word the log line
+//         reports.
+// OUTPUTS: The chosen file's bytes. Throws a [ChartFileCancelledException] when the reader dismisses
+//          the chooser or no file is present, and whatever the DOM throws when the file cannot be
+//          read. The bytes are copied out of the JavaScript heap before they are returned, so no
+//          caller can hold a view into memory the browser is free to move.
+// KEYWORDS: file-picker, click, user-gesture, array-buffer, accept-filter, one-mechanism
+Future<Uint8List> _pickBytes(String accept, {required String kind}) async {
   final _HtmlElement element = _document.createElement('input');
   final _HtmlInputElement input = _HtmlInputElement._(element);
   input
     ..setAttribute('style', 'display:none')
     ..type = 'file'
-    ..accept = '.chart';
+    ..accept = accept;
   // Attached before clicking because a detached input is refused by some browsers, and removed in
   // the `finally` below so the page is left exactly as it was found.
   final _HtmlElement? body = _document.body;
@@ -184,7 +231,7 @@ Future<Uint8List> loadChartFile(String path) async {
     input.click();
     await settled.future;
     if (cancelled) {
-      debugPrint('chart.open.web.cancelled');
+      debugPrint('$kind.open.web.cancelled');
       throw const ChartFileCancelledException('No file was chosen.');
     }
     final _FileList? files = input.files;
@@ -197,7 +244,7 @@ Future<Uint8List> loadChartFile(String path) async {
     final JSArrayBuffer buffer = await file.arrayBuffer().toDart;
     final Uint8List bytes = Uint8List.fromList(Uint8List.view(buffer.toDart));
     debugPrint(
-      'chart.open.web.ok bytes=${bytes.length} name_chars=${file.name.length}',
+      '$kind.open.web.ok bytes=${bytes.length} name_chars=${file.name.length}',
     );
     return bytes;
   } finally {
@@ -209,7 +256,8 @@ Future<Uint8List> loadChartFile(String path) async {
 //          save: a stream is opened over the handle, given the whole container, and closed.
 // INPUTS: handle — a handle the browser granted this page, either just picked or remembered from an
 //         earlier save. bytes — the whole container, written as one typed array. mode — the word the
-//         log line reports, so a lucky path and a re-write can be told apart afterwards.
+//         log line reports, so a lucky path and a re-write can be told apart afterwards. kind — the
+//         word that says whether a chart or a programme was written.
 // OUTPUTS: A future that completes once the stream is closed. A write that throws still closes the
 //          stream, because an unclosed writable keeps the file locked; the failure is then rethrown
 //          so the dialog can show it.
@@ -219,6 +267,7 @@ Future<void> _writeThrough(
   _FileSystemFileHandle handle,
   Uint8List bytes, {
   required String mode,
+  required String kind,
 }) async {
   final _FileSystemWritableFileStream writable = await handle
       .createWritable()
@@ -229,20 +278,21 @@ Future<void> _writeThrough(
     await writable.close().toDart;
   }
   debugPrint(
-    'chart.save.web mode=$mode bytes=${bytes.length} '
+    '$kind.save.web mode=$mode bytes=${bytes.length} '
     'name_chars=${handle.name.length}',
   );
 }
 
 // PURPOSE: Hand the container to the reader as a download, which is the only save a browser without
 //          the File System Access API can perform.
-// INPUTS: name — the file name the browser will propose. bytes — the whole container.
+// INPUTS: name — the file name the browser will propose. bytes — the whole container. kind — the
+//         word that says whether a chart or a programme was written.
 // OUTPUTS: Nothing; the download is fire-and-forget because the browser reports nothing about one.
 //          The object URL is revoked after a delay rather than immediately, because revoking it in
 //          the same turn as the click has been observed to cancel the download.
 // KEYWORDS: download, blob, object-url, anchor-click, revoke-deferred, safari-fallback
 /// Downloads [bytes] as a file called [name].
-void _download(String name, Uint8List bytes) {
+void _download(String name, Uint8List bytes, {required String kind}) {
   final JSObject blob = _blob(bytes);
   final JSObject urlApi = globalContext['URL'] as JSObject;
   final JSString objectUrl = urlApi.callMethod<JSString>(
@@ -265,7 +315,7 @@ void _download(String name, Uint8List bytes) {
     });
   }
   debugPrint(
-    'chart.save.web mode=download bytes=${bytes.length} '
+    '$kind.save.web mode=download bytes=${bytes.length} '
     'name_chars=${name.length}',
   );
 }

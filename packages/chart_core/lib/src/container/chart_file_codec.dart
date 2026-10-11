@@ -1,7 +1,10 @@
-// PURPOSE: Write a [ChartFile] as a `.chart` container and read one back, turning every way a file
-//          can be wrong into one typed failure instead of a raw parse exception or, worse, an empty
+// PURPOSE: Read a `.chart` file's HEADER and write one, turning every way the document part can be
+//          wrong into one typed failure instead of a raw parse exception or, worse, an empty
 //          document that looks like a real one. It also applies D19's inline-or-sidecar rule to a
-//          PDF, because that rule is about what goes into this container.
+//          PDF, because that rule is about what goes into this container. The ENVELOPE around the
+//          header — magic, version, lengths, CRC-32 and every way those can disagree — is not
+//          implemented here: it is `container_frame.dart`, shared with the `.setlist` container, so
+//          the two formats cannot come to classify the same damage differently.
 // INPUTS: A [ChartFile] on the way out; the container's bytes on the way in.
 // OUTPUTS: [ChartFileEncodeResult] carrying the bytes and any warning D19 forced, and
 //          [ChartFileDecodeResult] carrying the file and any warning a newer build forced.
@@ -11,8 +14,8 @@
 //          file. Nothing throws a bare `FormatException` or `RangeError`: the header JSON, the
 //          operation payloads, the UTF-8 decoding and the byte ranges are all caught and
 //          re-reported.
-// KEYWORDS: codec, container, encode, decode, crc32, truncation, corruption, forward-compatibility,
-//           d19, pdf, no-silent-default, typed-failure
+// KEYWORDS: codec, container, header, encode, decode, truncation, corruption,
+//           forward-compatibility, d19, pdf, no-silent-default, typed-failure, shared-frame
 part of 'chart_file.dart';
 
 /// The header keys, named once so the writer and the reader cannot drift apart.
@@ -132,24 +135,16 @@ abstract final class ChartFileCodec {
       utf8.encode(jsonEncode(header)),
     );
     final Uint8List payloadBytes = payload.takeBytes();
-    if (headerBytes.length > _maxU32 || payloadBytes.length > _maxU32) {
-      throw const ChartFileWriteException(
-        'the container is too large for its own frame: the header and the '
-        'payload region each hold at most 4294967295 bytes',
-      );
-    }
-
-    final BytesBuilder out = BytesBuilder(copy: false);
-    out.add(chartFileMagic);
-    _writeU32(out, chartContainerVersion);
-    _writeU32(out, headerBytes.length);
-    _writeU32(out, payloadBytes.length);
-    _writeU32(out, _crc32(headerBytes));
-    _writeU32(out, _crc32(payloadBytes));
-    out
-      ..add(headerBytes)
-      ..add(payloadBytes);
-    return ChartFileEncodeResult(bytes: out.takeBytes(), warnings: warnings);
+    // The frame is written by the shared implementation, so a `.chart` and a `.setlist` file are
+    // the same bytes up to the end of the header. The size check lives there too.
+    return ChartFileEncodeResult(
+      bytes: encodeContainerFrame(
+        version: chartContainerVersion,
+        headerBytes: headerBytes,
+        payloadBytes: payloadBytes,
+      ),
+      warnings: warnings,
+    );
   }
 
   /// Reads [bytes] as a container.
@@ -159,78 +154,19 @@ abstract final class ChartFileCodec {
   /// does not understand is the one thing that is skipped rather than refused, and it is reported
   /// in the result's warnings together with what the document is without it.
   static ChartFileDecodeResult decode(Uint8List bytes) {
-    if (bytes.length < chartFilePrefixLength) {
-      throw ChartFileTruncatedException(
-        'a .chart container is at least $chartFilePrefixLength bytes; this '
-        'file is ${bytes.length}',
-        found: bytes.length,
-        expected: chartFilePrefixLength,
-      );
-    }
-    for (int index = 0; index < chartFileMagic.length; index++) {
-      if (bytes[index] != chartFileMagic[index]) {
-        throw const ChartFileSignatureException(
-          'these bytes do not begin with the .chart magic, so this is not a '
-          '.chart container',
-        );
-      }
-    }
-    final int version = _readU32(bytes, 8);
-    if (version != chartContainerVersion) {
-      throw ChartFileVersionException(
-        'this is a version $version .chart container; this build reads version '
-        '$chartContainerVersion and refuses the rest rather than reading a '
-        'frame it does not know',
-        found: version,
-        supported: chartContainerVersion,
-      );
-    }
-    final int headerLength = _readU32(bytes, 12);
-    final int payloadLength = _readU32(bytes, 16);
-    final int headerCrc = _readU32(bytes, 20);
-    final int payloadCrc = _readU32(bytes, 24);
-    final int declared = chartFilePrefixLength + headerLength + payloadLength;
-    if (bytes.length < declared) {
-      throw ChartFileTruncatedException(
-        'the container declares $declared bytes but this file ends at '
-        '${bytes.length}',
-        found: bytes.length,
-        expected: declared,
-      );
-    }
-    if (bytes.length > declared) {
-      throw ChartFileCorruptException(
-        'the container declares $declared bytes but this file holds '
-        '${bytes.length}; the ${bytes.length - declared} trailing byte(s) '
-        'belong to nothing',
-      );
-    }
-    final Uint8List headerBytes = Uint8List.sublistView(
+    // THE FRAME IS READ BY THE SHARED IMPLEMENTATION. Every way the envelope can be wrong — short
+    // of its prefix, wrong magic, an envelope version this build does not read, shorter or longer
+    // than its own lengths declare, a header or payload whose CRC-32 disagrees — is classified
+    // there, once, with the typed failure the frame family declares. This function reads only what
+    // is INSIDE the frame, so a `.chart` and a `.setlist` file cannot disagree about what
+    // "truncated" or "corrupt" means.
+    final ContainerFrame frame = decodeContainerFrame(
       bytes,
-      chartFilePrefixLength,
-      chartFilePrefixLength + headerLength,
+      version: chartContainerVersion,
+      extension: chartFileExtension,
     );
-    final Uint8List payloadBytes = Uint8List.sublistView(
-      bytes,
-      chartFilePrefixLength + headerLength,
-      declared,
-    );
-    final int actualHeaderCrc = _crc32(headerBytes);
-    if (actualHeaderCrc != headerCrc) {
-      throw ChartFileCorruptException(
-        'the header does not match its CRC-32: recorded $headerCrc, computed '
-        '$actualHeaderCrc. The bytes have changed since the file was written.',
-      );
-    }
-    if (payloadLength > 0) {
-      final int actualPayloadCrc = _crc32(payloadBytes);
-      if (actualPayloadCrc != payloadCrc) {
-        throw ChartFileCorruptException(
-          'the embedded bytes do not match their CRC-32: recorded $payloadCrc, '
-          'computed $actualPayloadCrc.',
-        );
-      }
-    }
+    final Uint8List headerBytes = frame.header;
+    final Uint8List payloadBytes = frame.payload;
     final Map<String, Object?> header;
     try {
       final Object? decoded = jsonDecode(utf8.decode(headerBytes));
@@ -501,40 +437,4 @@ abstract final class ChartFileCodec {
       }
     }
   }
-}
-
-/// The largest value the frame's 32-bit length fields can hold.
-const int _maxU32 = 0xFFFFFFFF;
-
-/// Writes [value] as four little-endian bytes.
-void _writeU32(BytesBuilder out, int value) {
-  out
-    ..addByte(value & 0xFF)
-    ..addByte((value >> 8) & 0xFF)
-    ..addByte((value >> 16) & 0xFF)
-    ..addByte((value >> 24) & 0xFF);
-}
-
-/// Reads four little-endian bytes at [offset].
-int _readU32(Uint8List bytes, int offset) =>
-    bytes[offset] |
-    (bytes[offset + 1] << 8) |
-    (bytes[offset + 2] << 16) |
-    (bytes[offset + 3] << 24);
-
-/// The CRC-32 (IEEE 802.3) of [bytes]: reflected polynomial `0xEDB88320`, initial value all ones,
-/// final value inverted.
-///
-/// A checksum is what makes a single flipped byte in the header a REPORTED corruption rather than a
-/// slightly different chart: header JSON with one character changed still parses, so nothing else
-/// in this codec would notice it.
-int _crc32(List<int> bytes) {
-  int crc = 0xFFFFFFFF;
-  for (final int byte in bytes) {
-    crc ^= byte & 0xFF;
-    for (int bit = 0; bit < 8; bit++) {
-      crc = (crc & 1) != 0 ? (crc >>> 1) ^ 0xEDB88320 : crc >>> 1;
-    }
-  }
-  return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
 }

@@ -34,8 +34,9 @@
 // A container stores a snapshot plus the operations AFTER that snapshot. This session's log starts
 // at the value it was given, so it is exactly that tail — which is why [baseSetlist] and [log] can
 // be handed to such a container untouched, the same pair `EditSession.baseDocument` and
-// `EditSession.log` form for a chart. The `.setlist` container itself is not built yet; the shape is
-// kept so that adding it later needs no change here.
+// `EditSession.log` form for a chart. The `.setlist` container exists: it is `SetlistFile` in
+// `src/container/setlist_file.dart`, over the same envelope `.chart` uses, and `docId`, [baseSetlist]
+// and [log] are the three values it is built from without any change here.
 part of '../oplog/oplog.dart';
 
 /// One undoable setlist edit: the event to apply on redo, and the event to apply on undo.

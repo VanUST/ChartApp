@@ -28,10 +28,17 @@ import 'package:chart_core/chart_core.dart';
 /// One song read out of an iReal payload.
 class IRealSong {
   /// Creates an entry for the song at [index] in the payload, with its import [issues].
+  ///
+  /// [chartIdentity] is the identity of the song's MUSIC, computed once here rather than on every
+  /// read, because a programme entry stores it and the viewer resolves entries against it on every
+  /// rebuild. Leaving it out is legal — a caller that builds an [IRealSong] by hand, as several
+  /// widget tests do — and the [identity] getter then derives it on demand, so a hand-built library
+  /// behaves exactly like an imported one.
   const IRealSong({
     required this.index,
     required this.song,
     this.issues = const <IRealParseIssue>[],
+    this.chartIdentity = '',
   });
 
   /// The song's zero-based position in the payload, used as its identity in the song list.
@@ -43,6 +50,22 @@ class IRealSong {
   /// Everything the import could not represent, including a requested transposition it did not
   /// apply. Empty when the song was read completely.
   final List<IRealParseIssue> issues;
+
+  /// The identity of the song's music, or the empty string when it was not computed at import.
+  ///
+  /// It is a fact about the chart's content and not about [index] or [song]'s title, which is what
+  /// lets a programme that was saved find this chart after the export is imported again or the tune
+  /// is renamed. See [identity] for the value to read.
+  final String chartIdentity;
+
+  /// The identity to resolve a programme entry against.
+  ///
+  /// [chartIdentity] when it was computed, which is every song an import produced; otherwise it is
+  /// derived from [song] now. Deriving it on the spot costs one pass over the chart's canonical
+  /// content and is what keeps a hand-built library — a test's, a probe's — resolvable by the same
+  /// rule as an imported one instead of silently falling back to the positional document id.
+  String get identity =>
+      chartIdentity.isEmpty ? chartIdentityOf(song) : chartIdentity;
 
   /// The title to show, which is `Untitled` when the payload carries an empty title field.
   String get title => songDisplayTitle(song);
@@ -108,7 +131,16 @@ IRealLibrary parseIRealLibrary(String decoded) {
       documentId: 'ireal-$index',
     );
     songs.add(
-      IRealSong(index: index, song: result.song, issues: result.issues),
+      IRealSong(
+        index: index,
+        song: result.song,
+        issues: result.issues,
+        // THE IDENTITY IS COMPUTED HERE, ONCE, FROM THE PARSED MUSIC. It is what a programme entry
+        // stores instead of this position, so it must be a fact about the song and not about the
+        // loop counter: the `ireal-$index` document id above stays what it always was — the id the
+        // chart's own operation log is keyed by — and the identity is the durable name beside it.
+        chartIdentity: chartIdentityOf(result.song),
+      ),
     );
   }
   return IRealLibrary(playlistName: playlistName, songs: songs);

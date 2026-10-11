@@ -1,30 +1,22 @@
-// PURPOSE: State the fixed facts of the `.chart` envelope — the bytes a container starts with, the
-//          version a reader must know, the D19 inline limit — and declare the failures a reader can
-//          report and the warnings it can carry instead. Every wrong file has exactly one typed
-//          reason here, so a caller never has to interpret a raw parse exception to decide whether
-//          a file was truncated, corrupt, or merely written by a newer build.
+// PURPOSE: State the fixed facts of the `.chart` header — the format string a reader must find, the
+//          version of the envelope it sits in, the D19 inline limit — and name the `.chart` spelling
+//          of the shared container failure family. The failures themselves are declared once in
+//          `container_frame.dart`, beside the frame that raises them, because the `.setlist`
+//          container fails in exactly the same ways; the names here are aliases of that one family,
+//          so `on ChartFileException` and `on ContainerException` catch the same failures and a
+//          `.chart` file and a `.setlist` file cannot come to report the same damage two ways.
 // INPUTS: The size a PDF occupies, or the numbers a failed read observed.
-// OUTPUTS: Constants, a sealed exception hierarchy, and a warning value with a machine-readable
-//          code. Nothing here touches bytes; the frame is read in `chart_file_codec.dart`.
-// KEYWORDS: magic, version, checksum, truncation, corruption, forward-compatibility, d19, warnings
+// OUTPUTS: Constants and aliases. Nothing here touches bytes; the frame is read in
+//          `container_frame.dart` and the header is read in `chart_file_codec.dart`.
+// KEYWORDS: magic, version, checksum, truncation, corruption, forward-compatibility, d19, warnings,
+//           shared-container-family
 part of 'chart_file.dart';
 
 /// The eight bytes every `.chart` container begins with.
 ///
-/// The first byte is `0x89`, which is not valid UTF-8, so a container can never be mistaken for
-/// the JSON or text file it would otherwise look like. The trailing CRLF catches a file that a
-/// tool has rewritten in text mode, which is a real way binary payloads are damaged by editors and
-/// version-control settings.
-const List<int> chartFileMagic = <int>[
-  0x89,
-  0x43, // C
-  0x48, // H
-  0x41, // A
-  0x52, // R
-  0x54, // T
-  0x0d,
-  0x0a,
-];
+/// The same eight bytes every ChartApp container begins with: see [containerMagic], which this is an
+/// alias of so that a reader and a writer cannot disagree about one of the two.
+const List<int> chartFileMagic = containerMagic;
 
 /// The `format` string written inside the header JSON, alongside [chartContainerVersion].
 const String chartFileFormatTag = 'chartapp.chart';
@@ -43,13 +35,17 @@ const String chartFileExtension = '.chart';
 ///
 /// A reader refuses an envelope version it does not know with [ChartFileVersionException]. Inside
 /// a known envelope it reads the operations it understands and reports the rest as warnings.
+///
+/// The `.setlist` container carries its OWN version number rather than sharing this one: the frame
+/// is shared and the version is a property of the header inside it, so a change that makes a
+/// `.setlist` key required must not make an old build refuse every `.chart` file as well.
 const int chartContainerVersion = 1;
 
 /// The size of the fixed frame that precedes the header JSON.
 ///
-/// Eight magic bytes, then five little-endian `uint32` fields: envelope version, header length,
-/// payload length, header CRC-32 and payload CRC-32.
-const int chartFilePrefixLength = 28;
+/// An alias of [containerPrefixLength]: the frame is one implementation, and a caller that reads
+/// this name and a caller that reads that one are reading the same number.
+const int chartFilePrefixLength = containerPrefixLength;
 
 /// The media type recorded for every attachment this format writes.
 const String pdfMediaType = 'application/pdf';
@@ -63,85 +59,29 @@ const String pdfMediaType = 'application/pdf';
 /// 50,000,000-byte reading can compare against [pdfInlineLimitBytes] itself.
 const int pdfInlineLimitBytes = 50 * 1024 * 1024;
 
-/// The base class of every failure the container reports.
+/// The base class of every failure the `.chart` container reports.
 ///
-/// It is sealed, so a caller that switches over it is told by the compiler when a new failure is
-/// added, and every message is written to be shown to a person rather than logged as a number.
-sealed class ChartFileException implements Exception {
-  /// Creates a failure described by [message].
-  const ChartFileException(this.message);
+/// An alias of [ContainerException], which is declared once in `container_frame.dart` and shared
+/// with the `.setlist` container. It is an alias rather than a second class so that the `catch`
+/// clause a caller writes does not have to know which of the two formats produced the failure: the
+/// envelope fails the same way for both, and the two must not be able to drift apart.
+typedef ChartFileException = ContainerException;
 
-  /// What was wrong, in terms a caller can act on.
-  final String message;
-
-  @override
-  String toString() => '$runtimeType: $message';
-}
-
-/// The bytes are not a `.chart` container: the magic does not match.
-class ChartFileSignatureException extends ChartFileException {
-  /// Creates a failure naming what was found instead of the magic.
-  const ChartFileSignatureException(super.message);
-}
+/// The bytes are not a container: the magic does not match.
+typedef ChartFileSignatureException = ContainerSignatureException;
 
 /// The file ends before the length its own frame declares.
-///
-/// This is the failure a half-written or half-copied file produces. It is separate from corruption
-/// because the two call for different answers: a truncated file may be recoverable from a backup,
-/// while corrupt bytes in the middle of a complete file are a different problem.
-class ChartFileTruncatedException extends ChartFileException {
-  /// Creates a failure describing how many bytes were found and how many were needed.
-  const ChartFileTruncatedException(
-    super.message, {
-    required this.found,
-    required this.expected,
-  });
-
-  /// How many bytes the file actually held.
-  final int found;
-
-  /// How many bytes the frame declared, or the smallest legal container when the frame itself was
-  /// never readable.
-  final int expected;
-}
+typedef ChartFileTruncatedException = ContainerTruncatedException;
 
 /// The file has the right shape but its content cannot be read as a container.
-///
-/// A checksum that does not match, header JSON that does not parse, a field of the wrong type, an
-/// operation whose payload is malformed and an attachment whose byte range falls outside the file
-/// all land here. None of them is ever absorbed: a corrupt file must not decode to a plausible
-/// document.
-class ChartFileCorruptException extends ChartFileException {
-  /// Creates a failure described by [message].
-  const ChartFileCorruptException(super.message);
-}
+typedef ChartFileCorruptException = ContainerCorruptException;
 
 /// The envelope's version is not one this build reads.
-class ChartFileVersionException extends ChartFileException {
-  /// Creates a failure naming the version found and the one this build writes.
-  const ChartFileVersionException(
-    super.message, {
-    required this.found,
-    required this.supported,
-  });
-
-  /// The version the file declares.
-  final int found;
-
-  /// The version this build writes and reads.
-  final int supported;
-}
+typedef ChartFileVersionException = ContainerVersionException;
 
 /// The container cannot be WRITTEN as asked, because the value handed to the encoder does not
 /// describe a legal chart file.
-///
-/// This is a programming error at the call site — an empty document id, an operation belonging to
-/// another document, a PDF with no name — and it is typed rather than an [ArgumentError] so that
-/// the app can catch one family of failure around both saving and opening.
-class ChartFileWriteException extends ChartFileException {
-  /// Creates a failure described by [message].
-  const ChartFileWriteException(super.message);
-}
+typedef ChartFileWriteException = ContainerWriteException;
 
 /// What a [ChartFileWarning] is about, so a caller can branch on the warning without matching
 /// text.
