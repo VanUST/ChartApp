@@ -51,6 +51,10 @@ class ChordQuality {
   static const ChordQuality suspendedFourth = ChordQuality('sus4');
 
   /// The canonical suffix as it appears on a chart.
+  ///
+  /// **EMPTY IS MEANINGFUL: a major triad is written with no suffix**, so this string is what the
+  /// chart PRINTS and is not what a button should be LABELLED with. The two were the same value once
+  /// and the result was a blank button — see [chordQualityLabel].
   final String token;
 
   @override
@@ -63,6 +67,26 @@ class ChordQuality {
   @override
   String toString() => token.isEmpty ? 'major triad' : token;
 }
+
+// PURPOSE: Give a chip that SELECTS a chord quality something a musician can read, which the token
+//          cannot always be.
+// INPUTS: quality — the quality a chip will apply when tapped.
+// OUTPUTS: A non-empty label. `maj` for a major triad and the token for everything else. Never empty,
+//          because a chip's label is the only thing that says what the chip does.
+// KEYWORDS: chord-quality, chip-label, blank-button, notation-not-interface
+/// The label a chip shows for [quality], which is NOT always its token.
+///
+/// **THE TOKEN AND THE LABEL ARE DIFFERENT FIELDS, AND CONFLATING THEM PRODUCED A BLANK BUTTON.** A
+/// major triad's token is the EMPTY STRING, and that is right: a chart writes a major triad as the
+/// root alone, so `B` is the correct symbol and `Bmaj` is not. But the chip that SELECTS a major
+/// triad was labelled with that same empty string, so the first button in the palette's quality row
+/// had nothing written on it — a musician tapped a blank chip, the app wrote a major triad, and the
+/// chart showed `B`. The data was correct and the INTERFACE lied about what it would write.
+///
+/// NOT TRANSLATED, on the rule A53 states and D27 records: a chord's spelling is notation, and `m7`
+/// reads the same in every language.
+String chordQualityLabel(ChordQuality quality) =>
+    quality.token.isEmpty ? 'maj' : quality.token;
 
 /// The bass note of a chord: its sounding pitch plus an optional spelling override.
 class ChordRoot {

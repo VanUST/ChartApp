@@ -472,13 +472,19 @@ class _QualityChip extends StatelessWidget {
     color: selected ? sheetAccentColor : sheetCellColor,
     borderRadius: BorderRadius.circular(8),
     child: InkWell(
-      key: ValueKey<String>('chord-palette-quality-${quality.token}'),
+      // KEYED BY THE LABEL, NOT THE TOKEN. The major triad's token is the EMPTY STRING — that is
+      // correct, because a major triad is written with no suffix — so keying by the token gave this
+      // chip the degenerate key `chord-palette-quality-` and, worse, an EMPTY LABEL: a button the
+      // musician could not read at all. See `chordQualityLabel`.
+      key: ValueKey<String>(
+        'chord-palette-quality-${chordQualityLabel(quality)}',
+      ),
       borderRadius: BorderRadius.circular(8),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Text(
-          quality.token,
+          chordQualityLabel(quality),
           style: TextStyle(
             color: selected ? sheetPanelColor : sheetOnPanelColor,
             fontSize: 16,
