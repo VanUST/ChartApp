@@ -1,0 +1,156 @@
+{
+  "@@locale": "ru",
+
+  "appTitle": "ChartApp — читалка iReal",
+
+  "openHtmlFile": "Открыть файл .html",
+
+  "iRealHtmlFileLabel": "Файл iReal .html",
+
+  "load": "Загрузить",
+
+  "promptFilePath": "Загрузите файл iReal .html, чтобы увидеть его песни.\nПо умолчанию: {path}",
+
+  "promptWeb": "Откройте файл iReal .html, экспортированный из iReal Pro.\nОн читается в браузере и никуда не отправляется.",
+
+  "payloadNoSongs": "В файле не оказалось песен.",
+
+  "untitled": "Без названия",
+
+  "noFileLoaded": "Файл не загружен.",
+
+  "songCount": "{count, plural, one{{count} песня} few{{count} песни} many{{count} песен} other{{count} песни}}",
+
+  "statusSongsPlaylist": "{count, plural, one{{count} песня} few{{count} песни} many{{count} песен} other{{count} песни}} · программа «{name}»",
+
+  "drawerSongsPlaylist": "{count, plural, one{{count} песня} few{{count} песни} many{{count} песен} other{{count} песни}} · «{name}»",
+
+  "barCount": "{count, plural, one{{count} такт} few{{count} такта} many{{count} тактов} other{{count} такта}}",
+
+  "issueCount": "{count, plural, one{{count} замечание} few{{count} замечания} many{{count} замечаний} other{{count} замечания}}",
+
+  "songInfoTooltip": "О песне: название, автор, стиль и темп",
+
+  "songInfoSheetTitle": "О песне",
+
+  "issuesTitle": "Замечания импорта — {title}",
+
+  "issueLine": "@{offset}: {message}",
+
+  "close": "Закрыть",
+
+  "done": "Готово",
+
+  "cancel": "Отмена",
+
+  "tooltipInkOn": "Рисование: перо рисует, палец по-прежнему выбирает",
+
+  "tooltipInkOffEraserOn": "Перо выключено: ластик включён",
+
+  "tooltipInkOff": "Выбор: и перо, и палец выбирают",
+
+  "tooltipEraserOn": "Стирание: коснитесь штриха — он исчезнет целиком",
+
+  "tooltipEraserOff": "Ластик выключен",
+
+  "tooltipUndo": "Отменить последнюю правку чарта",
+
+  "tooltipRedo": "Вернуть отменённую правку чарта",
+
+  "tooltipForm": "Такты и разделы (форма)",
+
+  "tooltipCues": "Слова на чарте (To Coda, Solo, 4×)",
+
+  "tooltipSetlist": "Программа: порядок, транспонирование и запуск чартов",
+
+  "tooltipSettings": "Настройки",
+
+  "tooltipOverflowMenu": "Чарт, форма и программа",
+
+  "menuForm": "Такты и разделы",
+
+  "menuCues": "Слова на чарте",
+
+  "menuSetlist": "Программа",
+
+  "menuChartFile": "Сохранить или открыть файл .chart",
+
+  "menuSettings": "Настройки",
+
+  "selectionPrompt": "Коснитесь такта, чтобы выбрать его.",
+
+  "selectionBar": "выбран: такт {bar} (весь такт)",
+
+  "selectionBarCell": "выбран: такт {bar}, доля {cell}",
+
+  "selectionHintChord": "— коснитесь, чтобы сменить аккорд",
+
+  "selectionHintForm": "— коснитесь для тактов и разделов",
+
+  "noBars": "В этой песне нет тактов.",
+
+  "fitFallbackAuto": "Песня не помещается на одну страницу при пороге читаемости {percent}%. Показана страницами.",
+
+  "fitFallbackExplicit": "Вы попросили одну страницу, но при пороге читаемости {percent}% нужно больше. Показана страницами.",
+
+  "sceneCaptionPos": "ПОЗ",
+
+  "sceneCaptionBpm": "ТЕМП",
+
+  "sceneCaptionStyle": "СТИЛЬ",
+
+  "sceneCaptionKeyCompact": "ТОН.",
+
+  "sceneCaptionKeyFull": "ТОН. · коснитесь, чтобы транспонировать",
+
+  "sceneCaptionRepeats": "ПОВТОРЫ",
+
+  "sceneCaptionPage": "СТРАНИЦА",
+
+  "sceneModeFit": "ЦЕЛИКОМ",
+
+  "sceneModePages": "СТРАНИЦЫ",
+
+  "sceneDeferredTooltip": "Стиль и повторы",
+
+  "sceneDeferredStyleRow": "СТИЛЬ · {style}",
+
+  "sceneDeferredRepeatsRow": "ПОВТОРЫ · {repeats}",
+
+  "repeatNone": "нет",
+
+  "repeatPassages": "{count}×",
+
+  "repeatVoltas": "{count, plural, one{{count} вольта} few{{count} вольты} many{{count} вольт} other{{count} вольты}}",
+
+  "repeatPrevious": "{count} %",
+
+  "keyBadgeLabel": "{key} · {interval}",
+
+  "semitonesShort": "{signed} пт",
+
+  "keyGridTitle": "Транспонирование — написано в {writtenKey}",
+
+  "keyGridWritten": "как написано",
+
+  "keyGridNotSpellable": "нет написания",
+
+  "keyNameMajor": "{tonic} мажор",
+  "keyNameMinor": "{tonic} минор",
+
+  "settingsTitle": "Настройки",
+
+  "settingsLanguageHeading": "Язык",
+
+  "settingsFollowSystem": "Как на устройстве",
+
+  "settingsEnglish": "English",
+
+  "settingsRussian": "Русский",
+
+  "settingsStorageNote": "Выбор запоминается на этом устройстве. Это настройка, а не часть ваших чартов.",
+
+  "settingsStorageNoteWeb": "Выбор запоминается в хранилище этого браузера. Safari очищает такое хранилище после семи дней без использования, и тогда язык снова берётся с устройства. Ваши чарты — это файлы, их это не касается.",
+
+  "languageChanged": "Язык: {language}"
+}

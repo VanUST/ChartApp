@@ -16,6 +16,9 @@ import 'package:chart_core/chart_core.dart';
 // the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
 import 'package:flutter/material.dart' hide Key;
 
+import 'l10n/app_localizations.dart';
+import 'scene_bar.dart';
+
 /// The dark panel colour the grid is drawn on.
 const Color _panelColor = Color(0xFF0F1B2A);
 
@@ -50,12 +53,13 @@ Future<TranspositionTarget?> showKeyGrid(
 }) {
   const TranspositionGrid grid = TranspositionGrid();
   final List<TranspositionTarget> targets = grid.targets(writtenKey);
+  final AppLocalizations l10n = AppLocalizations.of(context);
   return showDialog<TranspositionTarget>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
       backgroundColor: _panelColor,
       title: Text(
-        'Transpose — written in $writtenKey',
+        l10n.keyGridTitle(localizedKeyName(l10n, writtenKey)),
         style: const TextStyle(color: _onPanelColor, fontSize: 20),
       ),
       content: SizedBox(
@@ -74,6 +78,7 @@ Future<TranspositionTarget?> showKeyGrid(
                 selected:
                     target.key.tonicPitchClass ==
                     normalizePitchClass(currentPitchClass),
+                l10n: l10n,
               ),
           ],
         ),
@@ -81,7 +86,7 @@ Future<TranspositionTarget?> showKeyGrid(
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(l10n.cancel),
         ),
       ],
     ),
@@ -91,13 +96,20 @@ Future<TranspositionTarget?> showKeyGrid(
 /// One key in the grid.
 class _KeyCell extends StatelessWidget {
   /// Creates a cell for [target], marked [selected] when it is the key already shown.
-  const _KeyCell({required this.target, required this.selected});
+  const _KeyCell({
+    required this.target,
+    required this.selected,
+    required this.l10n,
+  });
 
   /// The key this cell offers.
   final TranspositionTarget target;
 
   /// Whether this cell is the key the chart is currently shown in.
   final bool selected;
+
+  /// The catalogue, used for the interval caption and the unavailable note.
+  final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -138,9 +150,12 @@ class _KeyCell extends StatelessWidget {
                 ),
               ),
               if (!available)
-                const Text(
-                  'not spellable',
-                  style: TextStyle(color: _unavailableColor, fontSize: 10),
+                Text(
+                  l10n.keyGridNotSpellable,
+                  style: const TextStyle(
+                    color: _unavailableColor,
+                    fontSize: 10,
+                  ),
                 ),
             ],
           ),
@@ -152,12 +167,15 @@ class _KeyCell extends StatelessWidget {
   // PURPOSE: Write an interval the way a musician says it, so a grid cell answers "how far is
   //          this?" and not only "which key?".
   // INPUTS: semitones — the signed interval from the written key.
-  // OUTPUTS: `written` at zero, otherwise a signed number with the unit, such as `+2 st`.
-  // KEYWORDS: interval, label, semitones, formatting
+  // OUTPUTS: The catalogue's word for the written key itself at zero, otherwise a signed number
+  //          with the unit the scene bar's key badge uses as well, such as `+2 st`. The unit comes
+  //          from `scene_bar.dart` rather than from a second literal here, because the badge and
+  //          the grid name the same distance and must not abbreviate it differently.
+  // KEYWORDS: interval, label, semitones, formatting, one-definition
   String _intervalLabel(int semitones) {
     if (semitones == 0) {
-      return 'written';
+      return l10n.keyGridWritten;
     }
-    return '${semitones > 0 ? '+' : ''}$semitones st';
+    return localizedSemitoneInterval(l10n, semitones);
   }
 }

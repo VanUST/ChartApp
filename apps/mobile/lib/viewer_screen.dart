@@ -156,10 +156,13 @@ import 'ink_pointer_probe_contract.dart';
 import 'ireal_library.dart';
 import 'ireal_source.dart';
 import 'key_grid.dart';
+import 'l10n/app_localizations.dart';
 import 'scene_bar.dart';
 import 'setlist_import.dart';
 import 'setlist_resolution.dart';
 import 'setlist_sheet.dart';
+import 'settings_contract.dart';
+import 'settings_sheet.dart';
 import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
 import 'text_cue_sheet.dart';
@@ -184,6 +187,8 @@ class IRealViewerScreen extends StatefulWidget {
     this.initialPath = defaultIRealPath,
     this.autoLoad = iRealSourceIsFilePath,
     this.sourceIsFilePath = iRealSourceIsFilePath,
+    this.language = LanguageChoice.system,
+    this.onLanguageChanged,
   });
 
   /// How a reference becomes a library.
@@ -208,6 +213,21 @@ class IRealViewerScreen extends StatefulWidget {
   /// True selects the path field and the Load button; false selects a button that opens the
   /// platform's own file chooser and tells the reader the file is read where it already is.
   final bool sourceIsFilePath;
+
+  /// The language choice in force, so the settings sheet can show which row is ticked.
+  ///
+  /// PASSED IN RATHER THAN READ FROM THE STORE, because this widget does not own the choice: it is
+  /// decided above the [MaterialApp], which is the only place a locale can be changed for the whole
+  /// tree. What this widget owns is the control that reports a new choice back up.
+  final LanguageChoice language;
+
+  /// Called with the language the musician picked in the settings sheet, or null when nothing is
+  /// listening.
+  ///
+  /// NULL IS THE NORMAL CASE IN A WIDGET TEST, where the screen is pumped inside a bare
+  /// [MaterialApp] with no application root above it. The sheet still opens and still shows the
+  /// language it was given; the tap simply has nowhere to go, which is what "no owner" means.
+  final ValueChanged<LanguageChoice>? onLanguageChanged;
 
   @override
   State<IRealViewerScreen> createState() => _IRealViewerScreenState();
@@ -885,14 +905,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
     if (!mounted || picked == null || !picked.available) {
       debugPrint(
-        'viewer.transpose.cancelled song="${_titleFor(entry)}" '
+        'viewer.transpose.cancelled song="${_rawTitleFor(entry)}" '
         'picked=${picked == null ? 'none' : picked.key}',
       );
       return;
     }
     setState(() => _semitonesBySong[entry.index] = picked.semitones);
     debugPrint(
-      'viewer.transpose.ok song="${_titleFor(entry)}" written=${entry.song.key} '
+      'viewer.transpose.ok song="${_rawTitleFor(entry)}" written=${entry.song.key} '
       'shown=${picked.key} semitones=${picked.semitones}',
     );
   }
@@ -1225,12 +1245,35 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          been opened — a rename has to reach every place the name is read, or one screen says
   //          the new name and the list beside it says the old one.
   // INPUTS: entry — the song as loaded, whose index names a session if one exists.
-  // OUTPUTS: The session's title when that song has a session, the loaded title otherwise, and
-  //          `Untitled` for an empty one — the same fallback `IRealSong.title` applies, so the two
-  //          agree before anything is edited. The session is looked up in the map and NOT created:
-  //          listing a library must not open a document for every song in it just to read a name.
+  // OUTPUTS: The session's title when that song has a session, the loaded title otherwise, and the
+  //          catalogue's own word for "no title" for an empty one — the same fallback
+  //          `IRealSong.title` applies, so the two agree before anything is edited. [l10n] is
+  //          passed rather than read from a context because this runs while a row is being built
+  //          and the caller already has the catalogue. The session is looked up in the map and NOT
+  //          created: listing a library must not open a document for every song in it just to read
+  //          a name.
   // KEYWORDS: title, edited-metadata, session-source, untitled-fallback, no-eager-session
-  String _titleFor(IRealSong entry) {
+  String _titleFor(IRealSong entry, AppLocalizations l10n) {
+    final String title = _sessions[entry.index]?.song.title ?? entry.song.title;
+    return title.isEmpty ? l10n.untitled : title;
+  }
+
+  // PURPOSE: Resolve the same name for a DIAGNOSTIC LOG LINE rather than for a musician, which is
+  //          why it is a second function and not a second argument.
+  // INPUTS: entry — the song whose name to resolve.
+  // OUTPUTS: The session's title, the loaded title, or the literal `Untitled` when the song has no
+  //          name — in ENGLISH, always, whatever the interface is set to.
+  // KEYWORDS: log-line, english-only, diagnostics, title, untitled-fallback
+  //
+  // WHY THIS EXISTS AND WHY IT IS ENGLISH. A LOG LINE IS NOT INTERFACE TEXT. Lines such as
+  // `viewer.song.select`, `viewer.select`, `viewer.page.fit.fallback`, `setlist.item.move` and
+  // `ink.contact.down` are read by tools and by the driving harness, and several are asserted by
+  // tests byte for byte; translating one would break a tool for no reader's benefit, because no
+  // musician sees it. So `_titleFor` above may return `Без названия` and this one may not, and the
+  // two are kept apart by their names rather than by a comment asking the next person to remember.
+  // The same rule holds for EVERY `debugPrint` in this application: leave those lines English. If
+  // you are here to "finish the job" by translating them, this comment is the answer — do not.
+  String _rawTitleFor(IRealSong entry) {
     final String title = _sessions[entry.index]?.song.title ?? entry.song.title;
     return title.isEmpty ? 'Untitled' : title;
   }
@@ -1250,7 +1293,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // KEYWORDS: title-resolution, chart-identity, rename-aware, missing-chart, programme-sheet
   String? _titleForItem(SetlistItem item) {
     final IRealSong? found = _songForItem(item);
-    return found == null ? null : _titleFor(found);
+    // The ENGLISH accessor on purpose: `titleFor` is handed to the programme sheet, which is not
+    // translated yet (see the unfinished-interface list in `docs/sdd.md`), and a name that fell back
+    // to `Без названия` inside an otherwise English sheet would be worse than a consistent one.
+    return found == null ? null : _rawTitleFor(found);
   }
 
   @override
@@ -1278,6 +1324,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // KEYWORDS: scaffold, shell, app-bar, drawer, bottom-dock, overflow-menu, phone, tablet, d11,
   //           one-decision-many-reads
   Widget _buildScreen(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String? error = _error;
     final EditSession? session = _currentSession;
     final IRealLibrary? library = _library;
@@ -1286,12 +1333,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       appBar: AppBar(
         // The title names the application, not the file, and on a phone it names it in one word:
         // eight actions beside a two-word title is what left the bar reading `Cha…`, and a title
-        // that cannot be read is worse than a shorter one that can.
-        title: Text(phone ? 'ChartApp' : 'ChartApp — iReal reader'),
+        // that cannot be read is worse than a shorter one that can. The phone form is the brand
+        // name alone, which is the same string in every language and so is not in the catalogue.
+        title: Text(phone ? 'ChartApp' : l10n.appTitle),
         actions: phone
             ? <Widget>[_buildOverflowMenu(context, session)]
             : <Widget>[
-                ..._documentTools(session),
+                ..._documentTools(context, session),
                 ..._sheetActions(context, session),
               ],
       ),
@@ -1323,186 +1371,229 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          Every control is disabled rather than hidden when there is no chart, so the pair keeps
   //          its place in the bar and a musician's hand learns where it is.
   // KEYWORDS: tools, pen, eraser, undo, redo, one-definition-two-surfaces, disabled-not-hidden
-  List<Widget> _documentTools(EditSession? session) => <Widget>[
-    // The ink switch stands first because it changes what a pen DOES, and a musician about to
-    // write needs it under their thumb before anything else in this bar. Its icon and tooltip
-    // state the mode in words, because a toggle whose only signal is a colour is not discoverable.
-    IconButton(
-      key: const ValueKey<String>('viewer-ink-toggle'),
-      icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
-      tooltip: _inkOn
-          ? 'Drawing: the pen draws, a finger still selects'
-          : (_eraserOn
-                ? 'Pen off: the eraser is on'
-                : 'Selecting: the pen and a finger both select'),
-      onPressed: session == null ? null : () => _toggleInk(session),
-    ),
-    // --- ERASER ---------------------------------------------------------------------------------
-    // The eraser stands next to the pen because the two are the two things a contact on the
-    // chart can do to the ink, and there is exactly one of them at a time: pressing it turns
-    // the pen off, and pressing the pen turns it off. Its tooltip states the gesture in words —
-    // a tap on a stroke removes that whole stroke — because a musician cannot be expected to
-    // discover a mode from an icon. This button, `_toggleEraser` below `_toggleInk`, the
-    // `_eraserOn` getter beside `_inkOn`, the `eraser` keys in `_inkProbeState`, and the eraser
-    // branch of `_onPageTapUp` are the whole of this feature's footprint in this file.
-    IconButton(
-      key: const ValueKey<String>('viewer-eraser-toggle'),
-      icon: const Icon(Icons.auto_fix_normal),
-      tooltip: _eraserOn
-          ? 'Erasing: tap a stroke and its whole length goes'
-          : 'Eraser off',
-      onPressed: session == null ? null : () => _toggleEraser(session),
-    ),
-    IconButton(
-      key: const ValueKey<String>('viewer-undo'),
-      icon: const Icon(Icons.undo),
-      tooltip: 'Undo the last chart edit',
-      onPressed: session != null && session.canUndo
-          ? () => _undo(session)
-          : null,
-    ),
-    IconButton(
-      key: const ValueKey<String>('viewer-redo'),
-      icon: const Icon(Icons.redo),
-      tooltip: 'Redo the last undone chart edit',
-      onPressed: session != null && session.canRedo
-          ? () => _redo(session)
-          : null,
-    ),
-  ];
+  List<Widget> _documentTools(BuildContext context, EditSession? session) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return <Widget>[
+      // The ink switch stands first because it changes what a pen DOES, and a musician about to
+      // write needs it under their thumb before anything else in this bar. Its icon and tooltip
+      // state the mode in words, because a toggle whose only signal is a colour is not discoverable.
+      IconButton(
+        key: const ValueKey<String>('viewer-ink-toggle'),
+        icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
+        tooltip: _inkOn
+            ? l10n.tooltipInkOn
+            : (_eraserOn ? l10n.tooltipInkOffEraserOn : l10n.tooltipInkOff),
+        onPressed: session == null ? null : () => _toggleInk(session),
+      ),
+      // --- ERASER ---------------------------------------------------------------------------------
+      // The eraser stands next to the pen because the two are the two things a contact on the
+      // chart can do to the ink, and there is exactly one of them at a time: pressing it turns
+      // the pen off, and pressing the pen turns it off. Its tooltip states the gesture in words —
+      // a tap on a stroke removes that whole stroke — because a musician cannot be expected to
+      // discover a mode from an icon. This button, `_toggleEraser` below `_toggleInk`, the
+      // `_eraserOn` getter beside `_inkOn`, the `eraser` keys in `_inkProbeState`, and the eraser
+      // branch of `_onPageTapUp` are the whole of this feature's footprint in this file.
+      IconButton(
+        key: const ValueKey<String>('viewer-eraser-toggle'),
+        icon: const Icon(Icons.auto_fix_normal),
+        tooltip: _eraserOn ? l10n.tooltipEraserOn : l10n.tooltipEraserOff,
+        onPressed: session == null ? null : () => _toggleEraser(session),
+      ),
+      IconButton(
+        key: const ValueKey<String>('viewer-undo'),
+        icon: const Icon(Icons.undo),
+        tooltip: l10n.tooltipUndo,
+        onPressed: session != null && session.canUndo
+            ? () => _undo(session)
+            : null,
+      ),
+      IconButton(
+        key: const ValueKey<String>('viewer-redo'),
+        icon: const Icon(Icons.redo),
+        tooltip: l10n.tooltipRedo,
+        onPressed: session != null && session.canRedo
+            ? () => _redo(session)
+            : null,
+      ),
+    ];
+  }
 
   // PURPOSE: The four actions that OPEN a surface — the form sheet, the words sheet, the programme
   //          and the chart file — built for the app bar of a tablet.
   // INPUTS: context — the build context. session — the session of the song on screen, or null.
-  // OUTPUTS: The four controls in the order they have always stood in this bar. They are separated
-  //          from [_documentTools] because a phone puts them somewhere else: they are in the
-  //          overflow menu of the phone app bar, where [PopupMenuButton] calls the very same methods
-  //          by name, so an action never has two implementations.
-  // KEYWORDS: sheet-actions, form, text-cue, programme, chart-file, app-bar, phone-overflow
-  List<Widget> _sheetActions(BuildContext context, EditSession? session) =>
-      <Widget>[
-        // --- BARS AND SECTIONS (form editing, owner decision D17) -----------------------------------
-        // An action rather than a row in the body: a body row costs the chart height, and D13's FIT
-        // refuses to shrink a chart past the legible floor (the `.chart` control's move into this
-        // bar, in `chart_file_bar.dart`, is that mistake measured). It is disabled until a bar is
-        // selected, because every operation in its sheet acts on the selected bar's section and
-        // index. This button, the `_openSongForm` method below `_redo`, and the bar-level branch of
-        // `_buildSelectionLine` are the whole of this feature's footprint in this file.
-        IconButton(
-          key: const ValueKey<String>('viewer-form'),
-          icon: const Icon(Icons.segment),
-          tooltip: 'Bars and sections (the form)',
-          onPressed: session == null || _selection == null
-              ? null
-              : () => _openSongForm(context, session),
-        ),
-        // --- WORDS ON THE CHART (text cues, `textcue.*`) --------------------------------------------
-        // Placed beside the form action because both act on the bar the page's hit test named, and
-        // disabled under the same condition: a cue is anchored to an address, so there is nothing to
-        // write on until a bar is selected. Its icon is a speech mark rather than a pencil, because the
-        // pencil is what the ink switch already means.
-        IconButton(
-          key: const ValueKey<String>('viewer-text-cue'),
-          icon: const Icon(Icons.format_quote),
-          tooltip: 'Words on the chart (To Coda, Solo, 4×)',
-          onPressed: session == null || _selection == null
-              ? null
-              : () => _openTextCueSheet(context, session),
-        ),
-        // --- THE PROGRAMME (setlist, owner decision D14's scene meaning) -----------------------------
-        // The programme is the setlist document the imported playlist becomes. It lives beside the
-        // other document-level actions because it is a document, not a property of the bar under the
-        // cursor; the sheet it opens holds the running order. Its undo and redo live INSIDE the sheet
-        // rather than here, because the programme has its own log and its own history, and a second
-        // pair of arrows in this bar would make a musician guess which document they reverse.
-        //
-        // THE WHOLE PROGRAMME FOOTPRINT IN THIS FILE, named so a later edit can find it: this button,
-        // `_songForItem` (the one resolution join, delegated to `setlist_resolution.dart`),
-        // `_playingItemFor` / `_shownSong` / `_shownSemitones` / `_shownKeyFor`, `_playSetlistEntry`,
-        // `_openSetlist` (which hands the sheet its resolver and its file callbacks),
-        // `_chooseSceneKey`, `_titleForItem`, `_adoptOpenedSetlist`, the `entryCharts`/`missingCharts`
-        // report in `_setlistState`, the `chartIdentity` of a chart opened from a file in
-        // `_adoptOpenedSong`, and the scene branch of the scene bar in `_buildSongPane`. Everything
-        // else is in `setlist_sheet.dart` (the sheet), `setlist_file_bar.dart` (its file dialog),
-        // `setlist_document.dart` (session to file and back), `setlist_import.dart` (the bridge) and
-        // `setlist_resolution.dart` (which chart an entry names).
-        IconButton(
-          key: const ValueKey<String>('viewer-setlist'),
-          icon: const Icon(Icons.queue_music),
-          tooltip: 'Programme (setlist): order, transpose and play the charts',
-          onPressed: _library == null
-              ? null
-              : () => unawaited(_openSetlist(context)),
-        ),
-        // The chart document itself can be named and moved, on every platform: where a path exists the
-        // field holds it, and in a browser it holds the name offered to the browser's chooser and
-        // download. It lives in the app bar because a control in the body takes height away from the
-        // chart, and D13's FIT mode refuses to shrink a chart past a legible floor — the bar turned a
-        // song that fitted on one page into one that did not.
-        ChartFileAction(
-          document: _documentOfSelection,
-          events: session?.log ?? const <ChartEvent>[],
-          initialPath: chartPathBeside(widget.initialPath),
-          onOpened: _adoptOpenedSong,
-        ),
-      ];
+  // OUTPUTS: The controls in the order they have always stood in this bar, plus the settings
+  //          action the language switch needs. They are separated from [_documentTools] because a
+  //          phone puts them somewhere else: they are in the overflow menu of the phone app bar,
+  //          where [PopupMenuButton] calls the very same methods by name, so an action never has two
+  //          implementations.
+  // KEYWORDS: sheet-actions, form, text-cue, programme, chart-file, settings, app-bar,
+  //           phone-overflow
+  List<Widget> _sheetActions(BuildContext context, EditSession? session) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return <Widget>[
+      // --- BARS AND SECTIONS (form editing, owner decision D17) -----------------------------------
+      // An action rather than a row in the body: a body row costs the chart height, and D13's FIT
+      // refuses to shrink a chart past the legible floor (the `.chart` control's move into this
+      // bar, in `chart_file_bar.dart`, is that mistake measured). It is disabled until a bar is
+      // selected, because every operation in its sheet acts on the selected bar's section and
+      // index. This button, the `_openSongForm` method below `_redo`, and the bar-level branch of
+      // `_buildSelectionLine` are the whole of this feature's footprint in this file.
+      IconButton(
+        key: const ValueKey<String>('viewer-form'),
+        icon: const Icon(Icons.segment),
+        tooltip: l10n.tooltipForm,
+        onPressed: session == null || _selection == null
+            ? null
+            : () => _openSongForm(context, session),
+      ),
+      // --- WORDS ON THE CHART (text cues, `textcue.*`) --------------------------------------------
+      // Placed beside the form action because both act on the bar the page's hit test named, and
+      // disabled under the same condition: a cue is anchored to an address, so there is nothing to
+      // write on until a bar is selected. Its icon is a speech mark rather than a pencil, because the
+      // pencil is what the ink switch already means.
+      IconButton(
+        key: const ValueKey<String>('viewer-text-cue'),
+        icon: const Icon(Icons.format_quote),
+        tooltip: l10n.tooltipCues,
+        onPressed: session == null || _selection == null
+            ? null
+            : () => _openTextCueSheet(context, session),
+      ),
+      // --- THE PROGRAMME (setlist, owner decision D14's scene meaning) -----------------------------
+      // The programme is the setlist document the imported playlist becomes. It lives beside the
+      // other document-level actions because it is a document, not a property of the bar under the
+      // cursor; the sheet it opens holds the running order. Its undo and redo live INSIDE the sheet
+      // rather than here, because the programme has its own log and its own history, and a second
+      // pair of arrows in this bar would make a musician guess which document they reverse.
+      //
+      // THE WHOLE PROGRAMME FOOTPRINT IN THIS FILE, named so a later edit can find it: this button,
+      // `_songForItem` (the one resolution join, delegated to `setlist_resolution.dart`),
+      // `_playingItemFor` / `_shownSong` / `_shownSemitones` / `_shownKeyFor`, `_playSetlistEntry`,
+      // `_openSetlist` (which hands the sheet its resolver and its file callbacks),
+      // `_chooseSceneKey`, `_titleForItem`, `_adoptOpenedSetlist`, the `entryCharts`/`missingCharts`
+      // report in `_setlistState`, the `chartIdentity` of a chart opened from a file in
+      // `_adoptOpenedSong`, and the scene branch of the scene bar in `_buildSongPane`. Everything
+      // else is in `setlist_sheet.dart` (the sheet), `setlist_file_bar.dart` (its file dialog),
+      // `setlist_document.dart` (session to file and back), `setlist_import.dart` (the bridge) and
+      // `setlist_resolution.dart` (which chart an entry names).
+      IconButton(
+        key: const ValueKey<String>('viewer-setlist'),
+        icon: const Icon(Icons.queue_music),
+        tooltip: l10n.tooltipSetlist,
+        onPressed: _library == null
+            ? null
+            : () => unawaited(_openSetlist(context)),
+      ),
+      // The chart document itself can be named and moved, on every platform: where a path exists the
+      // field holds it, and in a browser it holds the name offered to the browser's chooser and
+      // download. It lives in the app bar because a control in the body takes height away from the
+      // chart, and D13's FIT mode refuses to shrink a chart past a legible floor — the bar turned a
+      // song that fitted on one page into one that did not.
+      ChartFileAction(
+        document: _documentOfSelection,
+        events: session?.log ?? const <ChartEvent>[],
+        initialPath: chartPathBeside(widget.initialPath),
+        onOpened: _adoptOpenedSong,
+      ),
+      // --- SETTINGS, AND WHY IT IS HERE ------------------------------------------------
+      // The language switch is the one SETTING this application has, and a setting belongs
+      // where every other surface-opening action already is rather than behind a gesture. It
+      // is a new action and it is placed LAST on purpose: the eight controls before it are the
+      // ones a musician reaches for while working, and the app bar lays them out left to right,
+      // so the newest and least-used control takes the far end rather than displacing the pen.
+      // The cost is one more 48-pixel target in a bar whose WIDTH A49 measured as scarce; the
+      // measurement of what that did to the title is in `docs/sdd.md` beside the entry for this
+      // change, at 824 and at 600 logical pixels.
+      IconButton(
+        key: const ValueKey<String>('viewer-settings'),
+        icon: const Icon(Icons.settings),
+        tooltip: l10n.tooltipSettings,
+        onPressed: () => unawaited(_openSettings(context)),
+      ),
+    ];
+  }
 
-  // PURPOSE: Give a phone the four surface-opening actions in one app bar control, so that the title
+  // PURPOSE: Give a phone the surface-opening actions in one app bar control, so that the title
   //          beside them can be read.
   // INPUTS: context — where the sheets are opened from, and the [PopupMenuButton]'s anchor.
   //         session — the session of the song on screen, or null when nothing is loaded.
-  // OUTPUTS: One overflow menu holding bars-and-sections, words, the programme and the chart file.
-  //          The first two are DISABLED rather than absent until a bar is selected, matching the app
-  //          bar's own rule and for the same reason: a musician looking for the form should find it
-  //          and be told why it is not available yet rather than hunt a control that is not there.
-  //          Each row calls the same method its app-bar button calls, so the phone and the tablet
-  //          cannot come to mean different things by the same words.
-  // KEYWORDS: overflow-menu, phone-app-bar, disabled-rows, one-implementation, d11
-  Widget _buildOverflowMenu(BuildContext context, EditSession? session) =>
-      PopupMenuButton<String>(
-        key: const ValueKey<String>('viewer-phone-menu'),
-        tooltip: 'Chart, form and programme',
-        onSelected: (String picked) {
-          if (picked == 'form' && session != null) {
-            _openSongForm(context, session);
-          } else if (picked == 'cues' && session != null) {
-            _openTextCueSheet(context, session);
-          } else if (picked == 'setlist') {
-            unawaited(_openSetlist(context));
-          } else if (picked == 'file') {
-            unawaited(
-              showChartFileDialog(
-                context,
-                document: _documentOfSelection,
-                events: session?.log ?? const <ChartEvent>[],
-                initialPath: chartPathBeside(widget.initialPath),
-                onOpened: _adoptOpenedSong,
-              ),
-            );
-          }
-        },
-        itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(
-            value: 'form',
-            enabled: session != null && _selection != null,
-            child: const Text('Bars and sections'),
-          ),
-          PopupMenuItem<String>(
-            value: 'cues',
-            enabled: session != null && _selection != null,
-            child: const Text('Words on the chart'),
-          ),
-          PopupMenuItem<String>(
-            value: 'setlist',
-            enabled: _library != null,
-            child: const Text('Programme (setlist)'),
-          ),
-          const PopupMenuItem<String>(
-            value: 'file',
-            child: Text('Save or open a .chart file'),
-          ),
-        ],
-      );
+  // OUTPUTS: One overflow menu holding bars-and-sections, words, the programme, the chart file and
+  //          settings. The first two are DISABLED rather than absent until a bar is selected,
+  //          matching the app bar's own rule and for the same reason: a musician looking for the
+  //          form should find it and be told why it is not available yet rather than hunt a control
+  //          that is not there. Each row calls the same method its app-bar button calls, so the
+  //          phone and the tablet cannot come to mean different things by the same words.
+  // KEYWORDS: overflow-menu, phone-app-bar, disabled-rows, one-implementation, settings, d11
+  Widget _buildOverflowMenu(BuildContext context, EditSession? session) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return PopupMenuButton<String>(
+      key: const ValueKey<String>('viewer-phone-menu'),
+      tooltip: l10n.tooltipOverflowMenu,
+      onSelected: (String picked) {
+        if (picked == 'form' && session != null) {
+          _openSongForm(context, session);
+        } else if (picked == 'cues' && session != null) {
+          _openTextCueSheet(context, session);
+        } else if (picked == 'setlist') {
+          unawaited(_openSetlist(context));
+        } else if (picked == 'file') {
+          unawaited(
+            showChartFileDialog(
+              context,
+              document: _documentOfSelection,
+              events: session?.log ?? const <ChartEvent>[],
+              initialPath: chartPathBeside(widget.initialPath),
+              onOpened: _adoptOpenedSong,
+            ),
+          );
+        } else if (picked == 'settings') {
+          unawaited(_openSettings(context));
+        }
+      },
+      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'form',
+          enabled: session != null && _selection != null,
+          child: Text(l10n.menuForm),
+        ),
+        PopupMenuItem<String>(
+          value: 'cues',
+          enabled: session != null && _selection != null,
+          child: Text(l10n.menuCues),
+        ),
+        PopupMenuItem<String>(
+          value: 'setlist',
+          enabled: _library != null,
+          child: Text(l10n.menuSetlist),
+        ),
+        PopupMenuItem<String>(value: 'file', child: Text(l10n.menuChartFile)),
+        // The settings row stands last, for the same reason its app-bar twin does: the rows above
+        // it are the ones a musician opens a chart to reach.
+        PopupMenuItem<String>(
+          value: 'settings',
+          child: Text(l10n.menuSettings),
+        ),
+      ],
+    );
+  }
+
+  // PURPOSE: Raise the settings sheet and adopt the language it reports.
+  // INPUTS: context — where the sheet is raised from.
+  // OUTPUTS: A future that completes when the sheet closes. A tap on a language row is handed to
+  //          [IRealViewerScreen.onLanguageChanged], which is the application root, because the
+  //          locale belongs to the [MaterialApp] above this screen and nowhere else. With no owner
+  //          listening — a widget test pumping this screen on its own — the sheet still opens and
+  //          still shows which language is in force; the tap simply has nowhere to go.
+  // KEYWORDS: settings, language, sheet, callback-to-root, widget-test-seam
+  Future<void> _openSettings(BuildContext context) => showSettingsSheet(
+    context,
+    language: widget.language,
+    // NOT `widget.onLanguageChanged ?? (_) {}` — the null is carried through, so a test can tell
+    // "there is no owner" from "the owner did nothing" without a second flag.
+    onChanged: (LanguageChoice choice) =>
+        widget.onLanguageChanged?.call(choice),
+    browserStorage: !widget.sourceIsFilePath,
+  );
 
   // PURPOSE: Put the tools under the thumb on a phone, which is D11's own landing for a phone.
   // INPUTS: context — the build context, for the surface colour. session — the session of the song
@@ -1526,7 +1617,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             height: 56,
             child: Row(
               children: <Widget>[
-                for (final Widget tool in _documentTools(session))
+                for (final Widget tool in _documentTools(context, session))
                   Expanded(child: Center(child: tool)),
               ],
             ),
@@ -1541,28 +1632,33 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          and the status bar under it, so without it the reader has no idea whether they are
   //          looking at a 22-song playlist or a single chart.
   // KEYWORDS: drawer, song-list-home, header, close-on-pick, phone, d11
-  Widget _buildSongDrawer(BuildContext context, IRealLibrary library) => Drawer(
-    key: const ValueKey<String>('viewer-song-drawer'),
-    child: SafeArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Text(
-              '${library.songs.length} song(s)'
-              '${library.isPlaylist ? ' · "${library.playlistName}"' : ''}',
-              style: Theme.of(context).textTheme.titleSmall,
+  Widget _buildSongDrawer(BuildContext context, IRealLibrary library) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String header = library.isPlaylist
+        ? l10n.drawerSongsPlaylist(library.songs.length, library.playlistName)
+        : l10n.songCount(library.songs.length);
+    return Drawer(
+      key: const ValueKey<String>('viewer-song-drawer'),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Text(
+                header,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: _buildSongList(context, library, closeAfterPick: true),
-          ),
-        ],
+            const Divider(height: 1),
+            Expanded(
+              child: _buildSongList(context, library, closeAfterPick: true),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   // PURPOSE: Turn pen drawing on or off for the song on screen, which is the whole of the mode
   //          switch a musician needs: with it on a pen lays ink and a finger still selects, with it
@@ -1587,7 +1683,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     setState(() {});
     _publishInkState();
     debugPrint(
-      'viewer.ink.toggle song="${_titleFor(entry)}" on=$next '
+      'viewer.ink.toggle song="${_rawTitleFor(entry)}" on=$next '
       'strokes=${layer.strokeCount} session_matches=${identical(session, _sessionFor(entry))}',
     );
   }
@@ -1616,7 +1712,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     setState(() {});
     _publishInkState();
     debugPrint(
-      'viewer.eraser.toggle song="${_titleFor(entry)}" on=$next '
+      'viewer.eraser.toggle song="${_rawTitleFor(entry)}" on=$next '
       'mode=${layer.mode.token} strokes=${layer.strokeCount} '
       'session_matches=${identical(session, _sessionFor(entry))}',
     );
@@ -1756,6 +1852,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          state.
   // KEYWORDS: source-bar, path-field, load-button, file-picker, busy-guard, platform-affordance
   Widget _buildPathBar(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     if (!widget.sourceIsFilePath) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
@@ -1764,7 +1861,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           child: FilledButton.icon(
             onPressed: _loading ? null : () => unawaited(_load()),
             icon: const Icon(Icons.folder_open),
-            label: const Text('Open .html file'),
+            label: Text(l10n.openHtmlFile),
           ),
         ),
       );
@@ -1776,9 +1873,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           Expanded(
             child: TextField(
               controller: _pathController,
-              decoration: const InputDecoration(
-                labelText: 'iReal .html file',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l10n.iRealHtmlFileLabel,
+                border: const OutlineInputBorder(),
                 isDense: true,
               ),
               onSubmitted: (String _) => unawaited(_load()),
@@ -1788,7 +1885,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           FilledButton.icon(
             onPressed: _loading ? null : () => unawaited(_load()),
             icon: const Icon(Icons.folder_open),
-            label: const Text('Load'),
+            label: Text(l10n.load),
           ),
         ],
       ),
@@ -1825,15 +1922,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final IRealLibrary? library = _library;
     if (library == null) {
       // The prompt names the platform's own way in, because the alternative — telling a browser
       // reader to type a Windows path — is the one instruction they cannot follow.
       final String prompt = widget.sourceIsFilePath
-          ? 'Load an iReal .html file to see its songs.\n'
-                'Default: $defaultIRealPath'
-          : 'Open an iReal .html file exported from iReal Pro.\n'
-                'It is read in the browser and is not uploaded.';
+          ? l10n.promptFilePath(defaultIRealPath)
+          : l10n.promptWeb;
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -1842,7 +1938,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       );
     }
     if (library.songs.isEmpty) {
-      return const Center(child: Text('The payload carried no songs.'));
+      return Center(child: Text(l10n.payloadNoSongs));
     }
     final int songIndex =
         _selectedSong >= 0 && _selectedSong < library.songs.length
@@ -1891,6 +1987,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     IRealLibrary library, {
     bool closeAfterPick = false,
   }) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     return ListView.builder(
       key: const PageStorageKey<String>('viewer-song-list'),
       controller: _songListScroll,
@@ -1898,18 +1995,19 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       itemBuilder: (BuildContext context, int index) {
         final IRealSong entry = library.songs[index];
         final int semitones = _shownSemitones(entry);
+        final String writtenName = localizedKeyName(l10n, entry.song.key);
         final String keyLabel = semitones == 0
-            ? '${entry.song.key}'
-            : '${entry.song.key} → ${_shownKeyFor(entry)}';
+            ? writtenName
+            : '$writtenName → ${localizedKeyName(l10n, _shownKeyFor(entry))}';
         final Song summarySong = _sessions[entry.index]?.song ?? entry.song;
         final String subtitle =
-            '${summarySong.writtenBarCount} bar(s) · $keyLabel'
-            '${entry.issues.isEmpty ? '' : ' · ${entry.issues.length} issue(s)'}';
+            '${l10n.barCount(summarySong.writtenBarCount)} · $keyLabel'
+            '${entry.issues.isEmpty ? '' : ' · ${l10n.issueCount(entry.issues.length)}'}';
         return ListTile(
           dense: true,
           selected: index == _selectedSong,
           title: Text(
-            _titleFor(entry),
+            _titleFor(entry, l10n),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -1933,7 +2031,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               Scaffold.of(context).closeDrawer();
             }
             debugPrint(
-              'viewer.song.select index=$index title="${_titleFor(entry)}" '
+              'viewer.song.select index=$index title="${_rawTitleFor(entry)}" '
               'from_drawer=$closeAfterPick '
               'scroll=${_songListScroll.hasClients ? _songListScroll.offset.toStringAsFixed(1) : 'detached'}',
             );
@@ -1959,6 +2057,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     IRealLibrary library,
     int songIndex,
   ) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final IRealSong entry = library.songs[songIndex];
     final SetlistItem? playing = _playingItemFor(entry);
     final int semitones = _shownSemitones(entry);
@@ -2003,7 +2102,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                   // be a button is not discoverable on its own.
                   Expanded(
                     child: Tooltip(
-                      message: 'Song info: title, composer, style and tempo',
+                      message: l10n.songInfoTooltip,
                       child: InkWell(
                         key: const ValueKey<String>('viewer-song-info'),
                         onTap: () => _openSongInfo(
@@ -2015,7 +2114,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                           children: <Widget>[
                             Flexible(
                               child: Text(
-                                _titleFor(entry),
+                                _titleFor(entry, l10n),
                                 style: Theme.of(context).textTheme.titleMedium,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -2036,12 +2135,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                   // does not change how many bars a chart has, so `displayed` and the written
                   // session document agree on this number and either would do; the displayed one is
                   // already here.
-                  Text('${displayed.writtenBarCount} bar(s)'),
+                  Text(l10n.barCount(displayed.writtenBarCount)),
                   if (entry.issues.isNotEmpty) ...<Widget>[
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () => unawaited(_showIssues(context, entry)),
-                      child: Text('${entry.issues.length} issue(s)'),
+                      child: Text(l10n.issueCount(entry.issues.length)),
                     ),
                   ],
                 ],
@@ -2597,6 +2696,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          what it is when touched is not discoverable on its own.
   // KEYWORDS: selection-label, edit-entry, falsifiable-feedback, musician-numbering, empty-state
   Widget _buildSelectionLine(BuildContext context, Song song) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final ChartHit? hit = _selection;
     final EditSession? session = _currentSession;
     final bool editable = hit != null && hit.cell != null;
@@ -2611,11 +2711,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                     ? null
                     : () => _openSongForm(context, session)));
     final String hint = editable
-        ? '— tap to change the chord'
-        : '— tap for bars & sections';
+        ? l10n.selectionHintChord
+        : l10n.selectionHintForm;
     final String text = hit == null
-        ? 'Tap a bar to select it.'
-        : _selectionLabel(song, hit);
+        ? l10n.selectionPrompt
+        : _selectionLabel(song, hit, l10n);
     final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
     );
@@ -2670,16 +2770,18 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // PURPOSE: Render a selection the way the musician counts — bars from the top of the chart and
   //          cells from the start of the bar, both one-based — while the model keeps zero-based
   //          indices. The conversion lives here so the label and the log cannot disagree silently.
-  // INPUTS: song — the chart. hit — the selection, holding the model's zero-based address.
+  // INPUTS: song — the chart. hit — the selection, holding the model's zero-based address. l10n —
+  //         the catalogue, because the two numbers are written into a sentence and the sentence is
+  //         not the same in both languages.
   // OUTPUTS: The label. A null cell means the touch landed on the bar and not on a cell, which is
   //          stated rather than rounded to the nearest cell.
   // KEYWORDS: label-format, one-based, global-bar-ordinal, model-address
-  String _selectionLabel(Song song, ChartHit hit) {
+  String _selectionLabel(Song song, ChartHit hit, AppLocalizations l10n) {
     final int bar = _writtenBarOrdinal(song, hit.sectionId, hit.barIndex);
     final int? beat = hit.beat;
     return beat == null
-        ? 'selected: bar $bar (whole bar)'
-        : 'selected: bar $bar cell ${beat + 1}';
+        ? l10n.selectionBar(bar)
+        : l10n.selectionBarCell(bar, beat + 1);
   }
 
   // PURPOSE: Number a bar the way a musician counts, across sections from the top, because the model
@@ -2738,6 +2840,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   ) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
+        final AppLocalizations l10n = AppLocalizations.of(context);
         final double pageWidth = constraints.maxWidth;
         final double pageHeight = constraints.maxHeight;
         _lastPageSurface = Size(pageWidth, pageHeight);
@@ -2747,7 +2850,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             pageWidth <= 0 ||
             pageHeight <= 0 ||
             displayed.writtenBarCount == 0) {
-          return const Center(child: Text('This song has no bars.'));
+          return Center(child: Text(l10n.noBars));
         }
         if (mode == PageMode.fit) {
           final FitOutcome outcome = _engine.fitToPage(
@@ -2772,7 +2875,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             cues: textCues,
           );
           if (fallback.isEmpty) {
-            return const Center(child: Text('This song has no bars.'));
+            return Center(child: Text(l10n.noBars));
           }
           // The mode reported to `_pageGeometry` is the one DRAWN, so a driving tool re-engraves
           // the paginated pages it is actually looking at instead of asking FIT again and getting
@@ -2780,7 +2883,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           _lastPageMode = PageMode.pages;
           _lastPageScale = fallback.first.scale;
           debugPrint(
-            'viewer.page.fit.fallback song="${_titleFor(entry)}" '
+            'viewer.page.fit.fallback song="${_rawTitleFor(entry)}" '
             'pane=${pageWidth.toStringAsFixed(0)}x${pageHeight.toStringAsFixed(0)} '
             'floor=${outcome.scale} pages=${fallback.length} '
             'bar0=${fallback.first.bars.length} '
@@ -2823,7 +2926,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           cues: textCues,
         );
         if (pages.isEmpty) {
-          return const Center(child: Text('This song has no bars.'));
+          return Center(child: Text(l10n.noBars));
         }
         _lastPageScale = pages.first.scale;
         return PageView.builder(
@@ -2868,12 +2971,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   Widget _fitFallbackNotice(BuildContext context, FitOutcome outcome) {
     final int percent = (outcome.scale * 100).round();
     // Kept to one line wherever the strip has the width for it, because the strip is pinned over the
-    // page and every line it wraps to covers a little more of the music's own band.
+    // page and every line it wraps to covers a little more of the music's own band. That is also why
+    // the two sentences are TWO catalogue entries rather than one sentence with a clause removed:
+    // a translator must be free to arrange "you asked for one page" and "it does not fit" as their
+    // own language does, and stitching a translated fragment onto a translated head would fix the
+    // English word order in place.
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final String message = _chosenPageMode == PageMode.fit
-        ? 'You asked for one page, but at the $percent% legible floor it needs '
-              'more. Shown as pages instead.'
-        : 'This song does not fit on one page at the $percent% legible floor. '
-              'Shown as pages instead.';
+        ? l10n.fitFallbackExplicit(percent)
+        : l10n.fitFallbackAuto(percent);
     return Container(
       color: _fitFallbackColor,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -2895,11 +3001,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // OUTPUTS: A one-line status bar.
   // KEYWORDS: status-bar, summary, playlist-name
   Widget _buildStatusBar(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final IRealLibrary? library = _library;
     final String summary = library == null
-        ? 'No file loaded.'
-        : '${library.songs.length} song(s)'
-              '${library.isPlaylist ? ' · playlist "${library.playlistName}"' : ''}';
+        ? l10n.noFileLoaded
+        : (library.isPlaylist
+              ? l10n.statusSongsPlaylist(
+                  library.songs.length,
+                  library.playlistName,
+                )
+              : l10n.songCount(library.songs.length));
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Align(

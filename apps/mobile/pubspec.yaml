@@ -28,6 +28,24 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter:
     sdk: flutter
+  # WHY THESE TWO, AND WHAT THEY COST. The interface is switchable between English and Russian at
+  # runtime, and Russian selects among THREE plural forms ("1 такт", "2 такта", "5 тактов") with a
+  # rule that also counts 11-14 as the "many" form ("11 тактов", not "11 такт") — the exact class of
+  # bug a hand-written rule gets wrong for a year. `intl` carries the CLDR plural rules
+  # (`lib/src/plural_rules.dart` is generated from ICU data by the Dart team and maps `ru` to the
+  # one/few/many rule), and `flutter_localizations` localizes the framework's OWN strings — the
+  # drawer's semantic label, a popup menu's default tooltip, dialog buttons — which a translation
+  # of this application's own text cannot reach.
+  #
+  # The cost, stated rather than implied: `flutter_localizations` is an SDK package, so it adds no
+  # third-party code and no version to keep current; `intl` is the Dart team's own package and was
+  # ALREADY in the resolved graph as a dependency of `flutter_localizations`, so declaring it adds
+  # a name, not a download. What is genuinely added is CLDR data in the bundle and a
+  # code-generation step (`flutter gen-l10n`, see `l10n.yaml`), whose output is committed so
+  # `melos run verify` stays one command. The measured size of both is recorded in `docs/sdd.md`.
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.3
   ink_native: any
   storage_drift: any
   telemetry: any
@@ -39,3 +57,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Turns on the localization build step, whose configuration lives in `l10n.yaml`. The GENERATED
+  # classes are committed under `lib/l10n/`, so this flag is what tells the toolchain the directory
+  # is generated rather than hand-written; nothing about it runs at application runtime.
+  generate: true

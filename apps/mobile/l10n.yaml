@@ -1,0 +1,20 @@
+# PURPOSE: Tell `flutter gen-l10n` where the ARB message files live, what to call the generated
+#          class, and where to write it. Without this file the generator would look in `lib/l10n/`
+#          by convention, but it would NOT know that the output must land beside the ARB files
+#          rather than in the (removed) synthetic package.
+# INPUTS: Read by the `flutter gen-l10n` command. Nothing at application runtime.
+# OUTPUTS: `lib/l10n/app_localizations.dart`, `app_localizations_en.dart` and
+#          `app_localizations_ru.dart`, all committed so that `dart analyze`, `dart test` and
+#          `melos run verify` see the messages without running a generator first.
+# KEYWORDS: l10n, arb, gen-l10n, localization, codegen, committed-output
+#
+# WHY THE OUTPUT IS COMMITTED. The repository's acceptance gate is `melos run verify`, which runs
+# the analyzer and the test suites and nothing else. Flutter 3.47 no longer supports the synthetic
+# `flutter_gen` package, so the generated classes are ordinary files in `lib/`; committing them is
+# what keeps the gate a single command rather than a command plus a generation step that anyone
+# can forget.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ChartApp — Russian and English at the same size</title>
+    <style>
+      body { margin: 0; background: #101820; font: 14px system-ui, sans-serif; color: #eee; }
+      .row { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
+      figure { margin: 0; }
+      figcaption { padding: 6px 0; font-weight: 700; }
+      img { display: block; border: 1px solid #334; }
+    </style>
+  </head>
+  <body>
+    <div class="row" id="row"></div>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const w = params.get('w');
+      const h = params.get('h');
+      const row = document.getElementById('row');
+      for (const [label, file] of [
+        ['РУССКИЙ', `i18n-${w}x${h}-ru.png`],
+        ['ENGLISH', `i18n-${w}x${h}-en.png`],
+      ]) {
+        const fig = document.createElement('figure');
+        const cap = document.createElement('figcaption');
+        cap.textContent = `${label} — ${w}×${h}`;
+        const img = document.createElement('img');
+        img.src = `/docs/verification/${file}`;
+        fig.append(cap, img);
+        row.append(fig);
+      }
+    </script>
+  </body>
+</html>

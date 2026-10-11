@@ -9,6 +9,7 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:chartapp/ireal_library.dart';
+import 'package:chartapp/l10n/app_localizations.dart';
 import 'package:chartapp/scene_bar.dart';
 import 'package:chartapp/viewer_screen.dart';
 // Flutter's widget-identity `Key` would collide with the musical Key this file names.
@@ -70,6 +71,11 @@ Future<void> pumpViewer(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     MaterialApp(
+      // The application's own delegates and locales, so the screen under test is the one the
+      // application builds. `flutter_test` reports `en_US` for the device locale, so these tests
+      // read the ENGLISH interface, which is what their assertions name.
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: IRealViewerScreen(
         loader: (String path) async => library,
         initialPath: 'synthetic',
@@ -88,12 +94,18 @@ ChartPainter shownPainter(WidgetTester tester) {
 }
 
 void main() {
+  // The interface strings the two calls below are compared against are the ENGLISH ones, so the
+  // English catalogue is passed explicitly rather than left to a default. Nothing asserted here
+  // changed when the lines became translatable: `repeatSummary` grew a parameter, and the words it
+  // must produce are the same.
+  final AppLocalizations english = lookupAppLocalizations(const Locale('en'));
+
   test(
     'the repeat summary states an absence as `none` and counts what is written',
     () {
-      expect(repeatSummary(syntheticSong(bars: 4)), 'none');
+      expect(repeatSummary(syntheticSong(bars: 4), english), 'none');
       expect(
-        repeatSummary(syntheticSong(bars: 4, repeats: true)),
+        repeatSummary(syntheticSong(bars: 4, repeats: true), english),
         '1× · 1 volta',
       );
     },

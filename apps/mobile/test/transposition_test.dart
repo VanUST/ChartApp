@@ -10,6 +10,7 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:chartapp/ireal_library.dart';
+import 'package:chartapp/l10n/app_localizations.dart';
 import 'package:chartapp/viewer_screen.dart';
 // Flutter's widget-identity `Key` would collide with the musical Key this file names.
 import 'package:flutter/material.dart' hide Key;
@@ -146,6 +147,11 @@ void main() {
       final IRealLibrary library = parseIRealLibrary(syntheticDPayload());
       await tester.pumpWidget(
         MaterialApp(
+          // The application's own delegates, so the screen under test is the one the application
+          // builds. `flutter_test` reports `en_US` as the device locale, so this reads the ENGLISH
+          // interface, which is what the assertions below name.
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: IRealViewerScreen(
             loader: (String path) async => library,
             initialPath: 'synthetic',
@@ -194,6 +200,8 @@ void main() {
     final IRealLibrary library = parseIRealLibrary(syntheticDPayload());
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: IRealViewerScreen(
           loader: (String path) async => library,
           initialPath: 'synthetic',

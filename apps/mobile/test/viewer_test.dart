@@ -7,6 +7,7 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:chartapp/ireal_library.dart';
+import 'package:chartapp/l10n/app_localizations.dart';
 import 'package:chartapp/viewer_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,6 +41,11 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        // The application's own delegates, so the screen under test is the one the application
+        // builds and every string it shows comes from the catalogue. `flutter_test` reports
+        // `en_US` as the device locale, so this reads the ENGLISH interface.
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: IRealViewerScreen(
           loader: (String path) async => library,
           initialPath: 'synthetic',

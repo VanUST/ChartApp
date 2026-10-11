@@ -35,7 +35,12 @@
 // on the page say. They move one tap away; the four that are read at a glance stay.
 
 import 'package:chart_core/chart_core.dart';
-import 'package:flutter/material.dart';
+// Flutter's own `Key` (widget identity) collides with the domain's musical Key, and this file now
+// names the musical one in [localizedKeyName]; its widget keys are all ValueKey, so nothing here
+// needs Flutter's. Same rule as `key_grid.dart`.
+import 'package:flutter/material.dart' hide Key;
+
+import 'l10n/app_localizations.dart';
 
 /// How a song is placed on the surface it is read on (owner decision D13).
 enum PageMode {
@@ -159,42 +164,45 @@ class SceneBar extends StatelessWidget {
   final VoidCallback onEditStyle;
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const ValueKey<String>('scene-bar'),
-    color: sceneBarColor,
-    padding: EdgeInsets.symmetric(
-      horizontal: compact ? 8 : 12,
-      vertical: compact ? 4 : 8,
-    ),
-    child: Wrap(
-      spacing: compact ? 6 : 16,
-      runSpacing: compact ? 4 : 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: compact ? _compactFields() : _fullFields(),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return Container(
+      key: const ValueKey<String>('scene-bar'),
+      color: sceneBarColor,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: compact ? 4 : 8,
+      ),
+      child: Wrap(
+        spacing: compact ? 6 : 16,
+        runSpacing: compact ? 4 : 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: compact ? _compactFields(l10n) : _fullFields(l10n),
+      ),
+    );
+  }
 
   /// The six readings of the full bar, which is what a tablet and a desktop get.
   ///
   /// The order is the order a performer reads them in: where they are, how fast, what it is, in
   /// what key, how many repeats, and whether the whole tune is on the page.
-  List<Widget> _fullFields() => <Widget>[
+  List<Widget> _fullFields(AppLocalizations l10n) => <Widget>[
     _Field(
       fieldKey: 'scene-bar-pos',
-      caption: 'POS',
+      caption: l10n.sceneCaptionPos,
       value: '$position/$songCount',
     ),
     _separator(large: true),
     _Field(
       fieldKey: 'scene-bar-bpm',
-      caption: 'BPM',
+      caption: l10n.sceneCaptionBpm,
       value: song.tempo > 0 ? '${song.tempo}' : '—',
       onTap: onEditTempo,
     ),
     _separator(large: true),
     _Field(
       fieldKey: 'scene-bar-style',
-      caption: 'STYLE',
+      caption: l10n.sceneCaptionStyle,
       value: song.style.isEmpty ? '—' : song.style,
       onTap: onEditStyle,
     ),
@@ -204,15 +212,16 @@ class SceneBar extends StatelessWidget {
       song: song,
       semitones: semitones,
       onTap: onOpenKeyGrid,
+      l10n: l10n,
     ),
     _separator(large: true),
     _Field(
       fieldKey: 'scene-bar-repeat',
-      caption: 'REPEATS',
-      value: repeatSummary(song),
+      caption: l10n.sceneCaptionRepeats,
+      value: repeatSummary(song, l10n),
     ),
     _separator(large: true),
-    _PageModeToggle(mode: pageMode, onChanged: onPageModeChanged),
+    _PageModeToggle(mode: pageMode, onChanged: onPageModeChanged, l10n: l10n),
   ];
 
   /// The four readings the compact bar keeps, plus the one control that reaches what it deferred.
@@ -222,17 +231,17 @@ class SceneBar extends StatelessWidget {
   /// and the page-mode toggle changes how the tune is engraved, which is not something to hunt for
   /// while playing. WHAT IS DEFERRED: STYLE and REPEATS, both into [_DeferredFields], which states
   /// both values and keeps the STYLE row an edit entry to the same sheet the full field opens.
-  List<Widget> _compactFields() => <Widget>[
+  List<Widget> _compactFields(AppLocalizations l10n) => <Widget>[
     _Field(
       fieldKey: 'scene-bar-pos',
-      caption: 'POS',
+      caption: l10n.sceneCaptionPos,
       value: '$position/$songCount',
       compact: true,
     ),
     _separator(large: false),
     _Field(
       fieldKey: 'scene-bar-bpm',
-      caption: 'BPM',
+      caption: l10n.sceneCaptionBpm,
       value: song.tempo > 0 ? '${song.tempo}' : '—',
       onTap: onEditTempo,
       compact: true,
@@ -244,19 +253,22 @@ class SceneBar extends StatelessWidget {
       semitones: semitones,
       onTap: onOpenKeyGrid,
       compact: true,
+      l10n: l10n,
     ),
     _separator(large: false),
     _PageModeToggle(
       mode: pageMode,
       onChanged: onPageModeChanged,
       compact: true,
+      l10n: l10n,
     ),
     // No rule before the deferred-readings control: a separating line belongs between two VALUES,
     // and this stands beside the toggle as a control rather than as a reading of its own.
     _DeferredFields(
       style: song.style,
-      repeats: repeatSummary(song),
+      repeats: repeatSummary(song, l10n),
       onEditStyle: onEditStyle,
+      l10n: l10n,
     ),
   ];
 
@@ -278,9 +290,16 @@ class SceneBar extends StatelessWidget {
 /// brackets drawn, and the `%` bars, which is what can be seen on the page; expanding the passage
 /// into a play order is a different question the model does not yet answer.
 ///
-/// [song] with no repeat sign at all returns `none`, so an absence is stated rather than shown as
-/// an empty field.
-String repeatSummary(Song song) {
+/// [song] with no repeat sign at all returns the catalogue's word for "none", so an absence is
+/// stated rather than shown as an empty field.
+///
+/// [l10n] IS REQUIRED AND NOT OPTIONAL. Two of the three segments are written words — the word for
+/// "none" and the word for an alternative ending — and the ending count takes a Russian plural the
+/// English one does not ("1 вольта", "2 вольты", "5 вольт"). A default would have to be an English
+/// catalogue, which is a second source of English text living beside the first; the four callers
+/// all have a context and pass one. The two tests that call this directly pass the English
+/// catalogue explicitly, which is exactly the fact they are asserting.
+String repeatSummary(Song song, AppLocalizations l10n) {
   int passages = 0;
   int voltas = 0;
   int previousBars = 0;
@@ -299,16 +318,50 @@ String repeatSummary(Song song) {
   }
   final List<String> parts = <String>[];
   if (passages > 0) {
-    parts.add('$passages×');
+    parts.add(l10n.repeatPassages(passages));
   }
   if (voltas > 0) {
-    parts.add('$voltas volta');
+    parts.add(l10n.repeatVoltas(voltas));
   }
   if (previousBars > 0) {
-    parts.add('$previousBars %');
+    parts.add(l10n.repeatPrevious(previousBars));
   }
-  return parts.isEmpty ? 'none' : parts.join(' · ');
+  return parts.isEmpty ? l10n.repeatNone : parts.join(' · ');
 }
+
+/// Names [key] for a musician, with [l10n] supplying the word for its mode.
+///
+// PURPOSE: Name a key for a musician, so that the key badge, the song list and the twelve-key grid
+//          all say the same words about the same key.
+// INPUTS: l10n — the catalogue. key — the key to name.
+// OUTPUTS: The key's own letter name followed by the catalogue's word for its mode, such as
+//          `D major` in English and `D мажор` in Russian.
+// KEYWORDS: key-name, localization, one-definition, tonic-letters, mode-word
+//
+// WHY THE LETTER IS NOT TRANSLATED AND THE MODE WORD IS. A chord chart writes chord roots in Latin
+// letters — `D`, `Eb`, `F#` — in every language, because that is the notation rather than a word: a
+// key badge reading `Ре мажор` would name a note the page beside it does not contain. The mode,
+// by contrast, IS a word, and it is the half a Russian reader needs in Russian.
+//
+// WHY THIS IS NOT `key.toString()`. `Key.toString()` exists for spike logs and test failure
+// messages (it says so itself in `chart_core`), and `chart_core` is deliberately free of both
+// Flutter and a translation catalogue. Translation belongs on this side of that boundary, so the
+// interface builds its own name from the key's public parts.
+String localizedKeyName(AppLocalizations l10n, Key key) =>
+    key.mode == Mode.major
+    ? l10n.keyNameMajor('${key.tonic}')
+    : l10n.keyNameMinor('${key.tonic}');
+
+/// Writes the signed interval [semitones] with the unit [l10n] abbreviates it by.
+///
+// PURPOSE: Write a signed interval in semitones the way a musician reads it, so the key badge and
+//          the twelve-key grid cannot abbreviate the unit differently.
+// INPUTS: l10n — the catalogue. semitones — the signed interval from the written key.
+// OUTPUTS: A signed number followed by the catalogue's unit, such as `+2 st` in English and
+//          `+2 пт` in Russian.
+// KEYWORDS: interval, label, semitones, one-definition, abbreviation
+String localizedSemitoneInterval(AppLocalizations l10n, int semitones) =>
+    l10n.semitonesShort('${semitones > 0 ? '+' : ''}$semitones');
 
 /// One captioned value in the bar, pressable when the value it shows can be changed here.
 class _Field extends StatelessWidget {
@@ -394,6 +447,7 @@ class _KeyBadge extends StatelessWidget {
     required this.song,
     required this.semitones,
     required this.onTap,
+    required this.l10n,
     this.compact = false,
   });
 
@@ -406,6 +460,9 @@ class _KeyBadge extends StatelessWidget {
   /// Called when the badge is pressed.
   final VoidCallback onTap;
 
+  /// The catalogue, used for the caption and the unit on the interval.
+  final AppLocalizations l10n;
+
   /// Whether this badge is drawn at the narrow form's smaller size.
   final bool compact;
 
@@ -413,7 +470,10 @@ class _KeyBadge extends StatelessWidget {
   ///
   /// The interval is always shown, including `+0 st` in the written key, because a musician thinks
   /// in both a key and a distance, and a hidden zero would make "written" and "moved" look alike.
-  String get label => '${song.key} · ${semitones > 0 ? '+' : ''}$semitones st';
+  String get label => l10n.keyBadgeLabel(
+    localizedKeyName(l10n, song.key),
+    localizedSemitoneInterval(l10n, semitones),
+  );
 
   @override
   Widget build(BuildContext context) => InkWell(
@@ -433,7 +493,7 @@ class _KeyBadge extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            compact ? 'KEY' : 'KEY · tap to transpose',
+            compact ? l10n.sceneCaptionKeyCompact : l10n.sceneCaptionKeyFull,
             style: TextStyle(
               color: sceneBarCaptionColor,
               fontSize: compact ? 9 : 11,
@@ -470,21 +530,26 @@ class _DeferredFields extends StatelessWidget {
     required this.style,
     required this.repeats,
     required this.onEditStyle,
+    required this.l10n,
   });
 
   /// The style as the full bar would show it, which may be empty.
   final String style;
 
-  /// The repeat summary as the full bar would show it, which is `none` when nothing is written.
+  /// The repeat summary as the full bar would show it, which is the word for "none" when nothing
+  /// is written.
   final String repeats;
 
   /// Called when the style row is picked, to open the song-info sheet on the style field.
   final VoidCallback onEditStyle;
 
+  /// The catalogue, used for the tooltip and the two row captions.
+  final AppLocalizations l10n;
+
   @override
   Widget build(BuildContext context) => PopupMenuButton<String>(
     key: const ValueKey<String>('scene-bar-more'),
-    tooltip: 'Style and repeats',
+    tooltip: l10n.sceneDeferredTooltip,
     icon: const Icon(Icons.more_horiz, color: sceneBarTextColor, size: 20),
     // The default padding of a menu button reserves a 48-pixel touch target, which is more width
     // than the narrow bar can spend on a control that is not a reading. It is pulled in to the same
@@ -498,12 +563,12 @@ class _DeferredFields extends StatelessWidget {
     itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
       PopupMenuItem<String>(
         value: 'style',
-        child: Text('STYLE · ${style.isEmpty ? '—' : style}'),
+        child: Text(l10n.sceneDeferredStyleRow(style.isEmpty ? '—' : style)),
       ),
       PopupMenuItem<String>(
         value: 'repeats',
         enabled: false,
-        child: Text('REPEATS · $repeats'),
+        child: Text(l10n.sceneDeferredRepeatsRow(repeats)),
       ),
     ],
   );
@@ -519,6 +584,7 @@ class _PageModeToggle extends StatelessWidget {
   const _PageModeToggle({
     required this.mode,
     required this.onChanged,
+    required this.l10n,
     this.compact = false,
   });
 
@@ -527,6 +593,9 @@ class _PageModeToggle extends StatelessWidget {
 
   /// Called with the other mode when it is picked.
   final ValueChanged<PageMode> onChanged;
+
+  /// The catalogue, used for the caption and the two button labels.
+  final AppLocalizations l10n;
 
   /// Whether this toggle is drawn at the narrow form's smaller size.
   final bool compact;
@@ -538,7 +607,7 @@ class _PageModeToggle extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
       Text(
-        'PAGE',
+        l10n.sceneCaptionPage,
         style: TextStyle(
           color: sceneBarCaptionColor,
           fontSize: compact ? 9 : 11,
@@ -557,14 +626,14 @@ class _PageModeToggle extends StatelessWidget {
         children: <Widget>[
           _ModeButton(
             fieldKey: 'scene-bar-mode-fit',
-            text: 'FIT',
+            text: l10n.sceneModeFit,
             active: mode == PageMode.fit,
             onTap: () => onChanged(PageMode.fit),
             compact: compact,
           ),
           _ModeButton(
             fieldKey: 'scene-bar-mode-pages',
-            text: 'PAGES',
+            text: l10n.sceneModePages,
             active: mode == PageMode.pages,
             onTap: () => onChanged(PageMode.pages),
             compact: compact,

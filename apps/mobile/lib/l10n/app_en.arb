@@ -1,0 +1,306 @@
+{
+  "@@locale": "en",
+
+  "appTitle": "ChartApp — iReal reader",
+  "@appTitle": {
+    "description": "The application title in the app bar on a surface wide enough for two words.",
+    "placeholders": {}
+  },
+
+  "openHtmlFile": "Open .html file",
+  "@openHtmlFile": { "description": "The button that opens the browser's file chooser for an iReal export." },
+
+  "iRealHtmlFileLabel": "iReal .html file",
+  "@iRealHtmlFileLabel": { "description": "The label of the text field holding the path to an iReal export." },
+
+  "load": "Load",
+  "@load": { "description": "The button that loads the file named in the path field." },
+
+  "promptFilePath": "Load an iReal .html file to see its songs.\nDefault: {path}",
+  "@promptFilePath": {
+    "description": "The empty state on a platform where a path names the file.",
+    "placeholders": { "path": { "type": "String" } }
+  },
+
+  "promptWeb": "Open an iReal .html file exported from iReal Pro.\nIt is read in the browser and is not uploaded.",
+  "@promptWeb": { "description": "The empty state in a browser, where no path exists." },
+
+  "payloadNoSongs": "The payload carried no songs.",
+  "@payloadNoSongs": { "description": "Shown when a parsed export contains no songs at all." },
+
+  "untitled": "Untitled",
+  "@untitled": { "description": "The name shown for a chart whose title is empty. Never data: it is the interface's own fallback." },
+
+  "noFileLoaded": "No file loaded.",
+  "@noFileLoaded": { "description": "The status bar before anything at all has been loaded." },
+
+  "songCount": "{count, plural, one{{count} song} other{{count} songs}}",
+  "@songCount": {
+    "description": "How many songs a loaded library holds.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "statusSongsPlaylist": "{count, plural, one{{count} song} other{{count} songs}} · playlist \"{name}\"",
+  "@statusSongsPlaylist": {
+    "description": "The status bar with a named playlist.",
+    "placeholders": { "count": { "type": "int" }, "name": { "type": "String" } }
+  },
+
+  "drawerSongsPlaylist": "{count, plural, one{{count} song} other{{count} songs}} · \"{name}\"",
+  "@drawerSongsPlaylist": {
+    "description": "The song drawer's header with a named playlist.",
+    "placeholders": { "count": { "type": "int" }, "name": { "type": "String" } }
+  },
+
+  "barCount": "{count, plural, one{{count} bar} other{{count} bars}}",
+  "@barCount": {
+    "description": "How many bars a chart has. Russian needs three written forms here.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "issueCount": "{count, plural, one{{count} issue} other{{count} issues}}",
+  "@issueCount": {
+    "description": "How many import issues a song produced.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "songInfoTooltip": "Song info: title, composer, style and tempo",
+  "@songInfoTooltip": { "description": "The tooltip on the song title, which opens the song-info sheet." },
+
+  "songInfoSheetTitle": "Song info",
+  "@songInfoSheetTitle": { "description": "The heading of the song-info sheet." },
+
+  "issuesTitle": "Import issues — {title}",
+  "@issuesTitle": {
+    "description": "The heading of the import-issue list for one song.",
+    "placeholders": { "title": { "type": "String" } }
+  },
+
+  "issueLine": "@{offset}: {message}",
+  "@issueLine": {
+    "description": "One import issue: where in the file it was found, and what the importer said.",
+    "placeholders": { "offset": { "type": "int" }, "message": { "type": "String" } }
+  },
+
+  "close": "Close",
+  "@close": { "description": "The button that dismisses a dialog." },
+
+  "done": "Done",
+  "@done": { "description": "The button that closes a sheet, keeping what was applied." },
+
+  "cancel": "Cancel",
+  "@cancel": { "description": "The button that dismisses a picker without applying anything." },
+
+  "tooltipInkOn": "Drawing: the pen draws, a finger still selects",
+  "@tooltipInkOn": { "description": "The pen toggle's tooltip while drawing is on." },
+
+  "tooltipInkOffEraserOn": "Pen off: the eraser is on",
+  "@tooltipInkOffEraserOn": { "description": "The pen toggle's tooltip while drawing is off and the eraser is on." },
+
+  "tooltipInkOff": "Selecting: the pen and a finger both select",
+  "@tooltipInkOff": { "description": "The pen toggle's tooltip while drawing is off." },
+
+  "tooltipEraserOn": "Erasing: tap a stroke and its whole length goes",
+  "@tooltipEraserOn": { "description": "The eraser toggle's tooltip while erasing is on." },
+
+  "tooltipEraserOff": "Eraser off",
+  "@tooltipEraserOff": { "description": "The eraser toggle's tooltip while erasing is off." },
+
+  "tooltipUndo": "Undo the last chart edit",
+  "@tooltipUndo": { "description": "The undo button's tooltip." },
+
+  "tooltipRedo": "Redo the last undone chart edit",
+  "@tooltipRedo": { "description": "The redo button's tooltip." },
+
+  "tooltipForm": "Bars and sections (the form)",
+  "@tooltipForm": { "description": "The tooltip of the button that opens the bars-and-sections sheet." },
+
+  "tooltipCues": "Words on the chart (To Coda, Solo, 4×)",
+  "@tooltipCues": { "description": "The tooltip of the button that opens the text-cue sheet." },
+
+  "tooltipSetlist": "Programme (setlist): order, transpose and play the charts",
+  "@tooltipSetlist": { "description": "The tooltip of the button that opens the programme sheet." },
+
+  "tooltipSettings": "Settings",
+  "@tooltipSettings": { "description": "The tooltip of the button that opens the settings sheet." },
+
+  "tooltipOverflowMenu": "Chart, form and programme",
+  "@tooltipOverflowMenu": { "description": "The phone app bar's overflow menu button tooltip." },
+
+  "menuForm": "Bars and sections",
+  "@menuForm": { "description": "The overflow menu row that opens the bars-and-sections sheet." },
+
+  "menuCues": "Words on the chart",
+  "@menuCues": { "description": "The overflow menu row that opens the text-cue sheet." },
+
+  "menuSetlist": "Programme (setlist)",
+  "@menuSetlist": { "description": "The overflow menu row that opens the programme sheet." },
+
+  "menuChartFile": "Save or open a .chart file",
+  "@menuChartFile": { "description": "The overflow menu row and app-bar action for the chart file dialog." },
+
+  "menuSettings": "Settings",
+  "@menuSettings": { "description": "The overflow menu row that opens the settings sheet." },
+
+  "selectionPrompt": "Tap a bar to select it.",
+  "@selectionPrompt": { "description": "The selection line before anything is selected." },
+
+  "selectionBar": "selected: bar {bar} (whole bar)",
+  "@selectionBar": {
+    "description": "The selection line when the touch landed on a bar and not on a cell.",
+    "placeholders": { "bar": { "type": "int" } }
+  },
+
+  "selectionBarCell": "selected: bar {bar} cell {cell}",
+  "@selectionBarCell": {
+    "description": "The selection line for a chosen cell. Both numbers are one-based, the way a musician counts.",
+    "placeholders": { "bar": { "type": "int" }, "cell": { "type": "int" } }
+  },
+
+  "selectionHintChord": "— tap to change the chord",
+  "@selectionHintChord": { "description": "The hint beside the selection line when the selection is a cell." },
+
+  "selectionHintForm": "— tap for bars & sections",
+  "@selectionHintForm": { "description": "The hint beside the selection line when the selection is a whole bar." },
+
+  "noBars": "This song has no bars.",
+  "@noBars": { "description": "Shown in place of a page when the chart has nothing to engrave." },
+
+  "fitFallbackAuto": "This song does not fit on one page at the {percent}% legible floor. Shown as pages instead.",
+  "@fitFallbackAuto": {
+    "description": "The strip pinned over the chart when the automatic FIT request could not be honoured.",
+    "placeholders": { "percent": { "type": "int" } }
+  },
+
+  "fitFallbackExplicit": "You asked for one page, but at the {percent}% legible floor it needs more. Shown as pages instead.",
+  "@fitFallbackExplicit": {
+    "description": "The same strip after an explicit FIT press, answered in the second person.",
+    "placeholders": { "percent": { "type": "int" } }
+  },
+
+  "sceneCaptionPos": "POS",
+  "@sceneCaptionPos": { "description": "The scene bar's caption over the running-order position." },
+
+  "sceneCaptionBpm": "BPM",
+  "@sceneCaptionBpm": { "description": "The scene bar's caption over the tempo." },
+
+  "sceneCaptionStyle": "STYLE",
+  "@sceneCaptionStyle": { "description": "The scene bar's caption over the style." },
+
+  "sceneCaptionKeyCompact": "KEY",
+  "@sceneCaptionKeyCompact": { "description": "The key badge's caption in the scene bar's narrow form." },
+
+  "sceneCaptionKeyFull": "KEY · tap to transpose",
+  "@sceneCaptionKeyFull": { "description": "The key badge's caption in the scene bar's full form, naming the gesture." },
+
+  "sceneCaptionRepeats": "REPEATS",
+  "@sceneCaptionRepeats": { "description": "The scene bar's caption over the repeat summary." },
+
+  "sceneCaptionPage": "PAGE",
+  "@sceneCaptionPage": { "description": "The scene bar's caption over the page-mode toggle." },
+
+  "sceneModeFit": "FIT",
+  "@sceneModeFit": { "description": "The page-mode toggle's label for one page fitted to the surface." },
+
+  "sceneModePages": "PAGES",
+  "@sceneModePages": { "description": "The page-mode toggle's label for the song paginated." },
+
+  "sceneDeferredTooltip": "Style and repeats",
+  "@sceneDeferredTooltip": { "description": "The tooltip of the narrow scene bar's control for the two deferred readings." },
+
+  "sceneDeferredStyleRow": "STYLE · {style}",
+  "@sceneDeferredStyleRow": {
+    "description": "The deferred-readings menu row naming the style.",
+    "placeholders": { "style": { "type": "String" } }
+  },
+
+  "sceneDeferredRepeatsRow": "REPEATS · {repeats}",
+  "@sceneDeferredRepeatsRow": {
+    "description": "The deferred-readings menu row naming the repeat summary.",
+    "placeholders": { "repeats": { "type": "String" } }
+  },
+
+  "repeatNone": "none",
+  "@repeatNone": { "description": "The repeat summary for a chart that carries no repeat sign at all." },
+
+  "repeatPassages": "{count}×",
+  "@repeatPassages": {
+    "description": "How many bars start a repeated passage. The multiplication sign is the notation, not a word.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "repeatVoltas": "{count, plural, one{{count} volta} other{{count} volta}}",
+  "@repeatVoltas": {
+    "description": "How many alternative endings the chart brackets. English writes 'volta' for every count; Russian does not.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "repeatPrevious": "{count} %",
+  "@repeatPrevious": {
+    "description": "How many bars carry the repeat-previous sign.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "keyBadgeLabel": "{key} · {interval}",
+  "@keyBadgeLabel": {
+    "description": "The key the chart is shown in, then the distance from the written key.",
+    "placeholders": { "key": { "type": "String" }, "interval": { "type": "String" } }
+  },
+
+  "semitonesShort": "{signed} st",
+  "@semitonesShort": {
+    "description": "A signed interval in semitones, as a musician abbreviates it.",
+    "placeholders": { "signed": { "type": "String" } }
+  },
+
+  "keyGridTitle": "Transpose — written in {writtenKey}",
+  "@keyGridTitle": {
+    "description": "The twelve-key grid's heading.",
+    "placeholders": { "writtenKey": { "type": "String" } }
+  },
+
+  "keyGridWritten": "written",
+  "@keyGridWritten": { "description": "The interval label of the key the chart is written in." },
+
+  "keyGridNotSpellable": "not spellable",
+  "@keyGridNotSpellable": { "description": "Shown on a key a chart in this written key has no practical spelling for." },
+
+  "keyNameMajor": "{tonic} major",
+  "@keyNameMajor": {
+    "description": "A major key named for a reader. The tonic letter is the chart's own notation and is not translated; the mode word is.",
+    "placeholders": { "tonic": { "type": "String" } }
+  },
+
+  "keyNameMinor": "{tonic} minor",
+  "@keyNameMinor": {
+    "description": "A minor key named for a reader, on the same rule as keyNameMajor.",
+    "placeholders": { "tonic": { "type": "String" } }
+  },
+
+  "settingsTitle": "Settings",
+  "@settingsTitle": { "description": "The settings sheet's heading." },
+
+  "settingsLanguageHeading": "Language",
+  "@settingsLanguageHeading": { "description": "The caption over the language choices." },
+
+  "settingsFollowSystem": "Device language",
+  "@settingsFollowSystem": { "description": "The language choice that follows whatever the device is set to." },
+
+  "settingsEnglish": "English",
+  "@settingsEnglish": { "description": "The name of English, written in English so it is readable either way." },
+
+  "settingsRussian": "Русский",
+  "@settingsRussian": { "description": "The name of Russian, written in Russian so it is readable either way." },
+
+  "settingsStorageNote": "The choice is remembered on this device. It is a setting, not part of your charts.",
+  "@settingsStorageNote": { "description": "Says where the language choice lives on a platform with a filesystem." },
+
+  "settingsStorageNoteWeb": "The choice is remembered in this browser's storage. Safari clears that storage after seven days without use, and the language then follows the device again. Your charts are files and are never affected.",
+  "@settingsStorageNoteWeb": { "description": "Says where the language choice lives in a browser, and what losing it costs." },
+
+  "languageChanged": "Language: {language}",
+  "@languageChanged": {
+    "description": "The confirmation shown after the language is switched.",
+    "placeholders": { "language": { "type": "String" } }
+  }
+}

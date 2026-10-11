@@ -31,6 +31,7 @@ import 'dart:ui' as ui;
 
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
+import 'package:chartapp/l10n/app_localizations.dart';
 import 'package:chartapp/song_form_sheet.dart';
 // Flutter's own `Key` (widget identity) collides with the domain's musical Key, and this instrument
 // names the musical one; its widget keys are ValueKey, so nothing here needs Flutter's.
@@ -354,7 +355,15 @@ void main() {
       File(path('before@2x.png')),
     );
 
-    await tester.pumpWidget(MaterialApp(home: _MarkHarness(session: session)));
+    await tester.pumpWidget(
+      MaterialApp(
+        // The application's own delegates, so anything the harness renders comes from the same
+        // catalogue the application uses.
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: _MarkHarness(session: session),
+      ),
+    );
     await tester.tap(find.byKey(const ValueKey<String>('harness-open-target')));
     await tester.pumpAndSettle();
     expect(
