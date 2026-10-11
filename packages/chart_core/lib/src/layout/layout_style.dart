@@ -139,7 +139,44 @@ class LayoutStyle {
   ///
   /// It is ZERO for a song with no melody, which is what makes a chords-only chart paginate and
   /// print exactly as it did before a melody staff existed.
+  ///
+  /// IT IS THE BAND FOR A STAFF THAT IS BEING WRITTEN ON. A declared staff that carries no note at
+  /// all reserves [melodyEmptyBandHeight] instead, which is the same staff with none of the ledger
+  /// room this value exists to guarantee; see that getter for the derivation and for why the reserve
+  /// can depend on whether a note exists while the STAFF itself cannot (D29).
   final double melodyBandHeight;
+
+  /// The vertical room a system gives up for a DECLARED melody staff that carries no note at all.
+  ///
+  /// WHY AN EMPTY STAFF MAY BE SHALLOWER, AND WHY THIS IS NOT D29 BEING RE-OPENED. D29 settled that
+  /// the staff EXISTS because the chart declared it, and it does: this is a shorter staff, not a
+  /// missing one — the five lines, the clef and the beat captions are all still drawn. What D29 did
+  /// not say, and what its own numbers make obvious on a chart nobody will ever put a note on, is
+  /// that a staff with nothing to write on it must reserve room for notes that do not exist:
+  /// [melodyBandHeight] is 270 pixels of which 216 is the five ledger lines either side of the
+  /// staff, and the guarantee it encodes — "every step [melodyStepOf] can return has a glyph inside
+  /// its own band" — is vacuously true when there is no glyph. The reserve follows the music; the
+  /// staff follows the declaration.
+  ///
+  /// HOW IT IS DERIVED, RATHER THAN PICKED. The layout centres the staff in the band (`melodyTop +
+  /// band / 2` is the staff's middle line, in both `LayoutEngine._placeMelody` and
+  /// `LayoutEngine._placeSystem`), so each HALF of the band must hold the staff's own half-height
+  /// plus everything that has to fit on that side of it. Above the middle line: half the staff, and
+  /// at least [melodyStaffGap] of air between the chord line and the staff's top line. Below it:
+  /// half the staff, and the beat caption's own row, [beatMarkGap] plus [beatMarkHeight]. The band
+  /// is twice the larger of the two, so the centring rule is left exactly as it is and no second
+  /// placement rule is introduced.
+  ///
+  /// WHEN THE FIRST NOTE ARRIVES THE BAND GROWS TO [melodyBandHeight], and that is a reflow the
+  /// musician sees once: every system of the song grows together, so the staff stays at one height
+  /// across the chart, which is the property this pair of values must not break.
+  double get melodyEmptyBandHeight {
+    final double aboveTheMiddle = melodyStaffHeight / 2 + melodyStaffGap;
+    final double belowTheMiddle =
+        melodyStaffHeight / 2 + beatMarkGap + beatMarkHeight;
+    return 2 *
+        (aboveTheMiddle > belowTheMiddle ? aboveTheMiddle : belowTheMiddle);
+  }
 
   /// The distance from the staff's TOP LINE up to the top of [melodyBandHeight].
   ///

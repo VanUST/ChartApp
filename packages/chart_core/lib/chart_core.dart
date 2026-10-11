@@ -18,9 +18,11 @@
 // The ink domain joins them at the same level: the canonical stroke form is already in the
 // catalogue above, and `src/ink/` adds the pure decisions a live capture needs — whether a
 // contact may draw (`InkPalmRule`), where a stroke's anchor landed on a page
-// (`resolveEventAnchor`) and which stroke a touch is on when the eraser asks (`hitTestInkErase`)
-// — plus the assembler that turns live samples into a canonical stroke, so all of them are
-// checkable with `dart test` and none of them needs a device.
+// (`resolveEventAnchor`), which anchor a stroke that begins anywhere on the page is stored against
+// (`resolveInkAnchor`: the cell under it, the bar, or the nearest bar when it began in a margin,
+// between two systems or on the staff) and which stroke a touch is on when the eraser asks
+// (`hitTestInkErase`) — plus the assembler that turns live samples into a canonical stroke, so all
+// of them are checkable with `dart test` and none of them needs a device.
 //
 // The song model stores the WRITTEN form only. The order a tune is played in — repeats,
 // alternative endings, navigation — is a pure function over this model, so there is no second

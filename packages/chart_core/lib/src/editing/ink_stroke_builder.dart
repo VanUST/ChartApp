@@ -10,6 +10,16 @@
 //          because it hands back a blob and a box — would move a stroke that overshot its cell into
 //          the neighbouring one, and the error would only appear after a transposition.
 //
+//          WHY A STROKE THAT BEGINS OUTSIDE EVERY BAR IS STILL STORED. It used to be refused. The
+//          owner falsified that with a pen: a stroke begun in a bar committed, and a stroke begun in
+//          the margin, in the space below the staff or between two systems was dropped with
+//          `no-anchor-at-start`, silently, on the whole part of the page that is not a bar. The
+//          anchor is a REFLOW mechanism and not a permission to write, so a first sample that lies
+//          over no bar is anchored to the bar nearest it — chosen once, here, and stored; see
+//          `ink/page_anchor.dart`'s [resolveNearestBarAnchor] for why the nearest bar and not the
+//          page, and what that costs. Refusing to store a mark the musician made is not a rule this
+//          class is allowed to have.
+//
 //          WHY A ONE-POINT STROKE IS NOT DROPPED. A dot is a real mark: a musician taps the pen to
 //          place a dot over a chord. It is stored as two identical points, because [InkStroke]
 //          rejects an empty list and because a stroke needs a finite length for a renderer to draw
@@ -17,14 +27,13 @@
 // INPUTS: A page to resolve the anchor against, the stroke's samples in SURFACE logical pixels, the
 //         pointer kind, the time base of the samples, and the identity and ink parameters to commit
 //         with.
-// OUTPUTS: An [InkStroke] in the canonical anchor-local form, or null when the stroke began outside
-//          every bar so there is no anchor to attach it to. Null is reported to the caller rather
-//          than stored as a fabricated anchor.
+// OUTPUTS: An [InkStroke] in the canonical anchor-local form. Null is returned only when the page
+//          carries no bar at all, in which case there is no address in the document to attach the
+//          stroke to; null is reported to the caller rather than stored as a fabricated anchor.
 // KEYWORDS: ink, stroke-assembly, canonical-form, anchor-local, dot-handling, pressure-normalising,
-//           pure-dart
+//           margin-writing, nearest-bar, pure-dart
 import 'package:chart_core/src/ink/page_anchor.dart';
 import 'package:chart_core/src/layout/geometry.dart';
-import 'package:chart_core/src/layout/hit_test.dart';
 import 'package:chart_core/src/layout/page_layout.dart';
 import 'package:chart_core/src/oplog/oplog.dart';
 
@@ -65,10 +74,11 @@ class InkSample {
 //          owns a widget's lifecycle and this owns a decision about geometry, and because this half
 //          can be run against synthetic samples with no browser and no hand.
 // INPUTS: See [begin]; the parameters of one stroke. The page is examined only once, at [begin].
-// OUTPUTS: A stroke per call to [end], in canonical anchor-local form, or null when no anchor
-//          resolved. [cancel] discards without producing anything, which is what a platform
-//          pointer-cancel means and not an error.
-// KEYWORDS: stroke-builder, single-use, anchor-once, surface-to-local, no-anchor-no-stroke
+// OUTPUTS: A stroke per call to [end], in canonical anchor-local form, or null when the page carried
+//          no bar to anchor to. [cancel] discards without producing anything, which is what a
+//          platform pointer-cancel means and not an error.
+// KEYWORDS: stroke-builder, single-use, anchor-once, surface-to-local, no-bar-no-stroke,
+//           margin-writing
 /// Builds one canonical stroke from the live samples of one contact.
 class InkStrokeAssembler {
   /// Opens an assembler for a stroke about to be drawn with [tool] and [color] at [size].
@@ -91,8 +101,7 @@ class InkStrokeAssembler {
   final double size;
 
   final List<InkSample> _samples = <InkSample>[];
-  EventAnchor? _anchor;
-  LayoutOffset _anchorOrigin = LayoutOffset.zero;
+  InkAnchorChoice? _choice;
   double _startTime = 0;
   bool _begun = false;
 
@@ -103,7 +112,20 @@ class InkStrokeAssembler {
   int get sampleCount => _samples.length;
 
   /// The anchor the open stroke resolved to, or null while it has not resolved one.
-  EventAnchor? get anchor => _anchor;
+  EventAnchor? get anchor => _choice?.anchor;
+
+  /// The rule that chose the open stroke's anchor, or null while it has not resolved one.
+  ///
+  /// Exposed because "where is the mark stored" and "why there" are two facts a report must state
+  /// separately: a stroke in the margin and a stroke in a cell can end up on the same bar rectangle,
+  /// and only this says which of them happened.
+  InkAnchorBasis? get anchorBasis => _choice?.basis;
+
+  /// How far outside its anchor's rectangle the open stroke began, in page pixels.
+  ///
+  /// Zero for a stroke that began inside a bar, and the distance into the margin for one that began
+  /// outside every bar — the number a reader checks a screenshot against.
+  double get anchorDistancePx => _choice?.distancePx ?? 0;
 
   /// The time the open stroke began, in the samples' own millisecond base.
   ///
@@ -122,30 +144,34 @@ class InkStrokeAssembler {
   /// a live preview is asked for on every move and a stroke between being refused and being replaced
   /// is a normal state.
   List<InkPoint> pointsSnapshot(PageLayout page) {
-    if (_anchor == null || _samples.isEmpty) {
+    final InkAnchorChoice? choice = _choice;
+    if (choice == null || _samples.isEmpty) {
       return const <InkPoint>[];
     }
     final bool anyPressure = _samples.any((InkSample s) => s.pressure > 0);
     return <InkPoint>[
       for (final InkSample sample in _samples)
-        _localPoint(sample, page, anyPressure: anyPressure),
+        _localPoint(sample, page, choice: choice, anyPressure: anyPressure),
     ];
   }
 
   // PURPOSE: Open the stroke and resolve, once, the anchor every later sample is measured against.
   // INPUTS: page — the layout the stroke is being drawn on, in engraved coordinates, which is what
-  //         the hit test speaks. surfacePoint — the stroke's first position on the surface the page
-  //         is drawn on, from which the page point is derived through the page's own
+  //         the anchor rule speaks. surfacePoint — the stroke's first position on the surface the
+  //         page is drawn on, from which the page point is derived through the page's own
   //         [PageLayout.pagePointOf]. pressure and time — the first sample's values, in `[0, 1]` and
   //         milliseconds from an arbitrary origin. The absolute origin does not matter: only
   //         differences between samples are stored, which is what keeps a clock reset from
   //         corrupting a stroke.
-  // OUTPUTS: True when an anchor resolved and the stroke is open; false when the first point lies
-  //          over no bar, in which case nothing was recorded and [end] would produce null. A
-  //          pen stroke that starts in the margin between two systems is refused rather than
-  //          attached to the nearest bar, because "the nearest bar" is a guess about intent.
-  // KEYWORDS: begin, anchor-resolution, hit-test, page-point, refuse-in-margin
-  /// Opens the stroke against the bar or cell under [surfacePoint], reporting whether it resolved.
+  // OUTPUTS: True when an anchor resolved and the stroke is open; false only when the page carries
+  //          no bar to anchor to, in which case nothing was recorded and [end] would produce null.
+  //          A first sample in a bar's padding anchors to the bar, and one over no bar at all
+  //          anchors to the bar NEAREST it — the margin, the space between systems and the melody
+  //          staff are all writable, and [anchorBasis] reports which of the three rules applied.
+  //          FOLLOWING A TAP WITH A DRAG IS NOT A FAILURE CASE: a musical mark begun in a margin
+  //          and continued across a bar is one stroke with one anchor, taken from where it began.
+  // KEYWORDS: begin, anchor-resolution, one-rule, page-point, margin-writing, nearest-bar
+  /// Opens the stroke against the anchor of [surfacePoint], reporting whether one resolved.
   bool begin({
     required PageLayout page,
     required LayoutOffset surfacePoint,
@@ -153,24 +179,14 @@ class InkStrokeAssembler {
     required double time,
   }) {
     final LayoutOffset pagePoint = page.pagePointOf(surfacePoint);
-    final ChartHit? hit = hitTestPage(page, pagePoint);
-    if (hit == null) {
+    final InkAnchorChoice? choice = resolveInkAnchor(page, pagePoint);
+    if (choice == null) {
       _begun = false;
-      _anchor = null;
+      _choice = null;
       _samples.clear();
       return false;
     }
-    final InkPlacement? placement = resolveEventAnchor(
-      page,
-      EventAnchor(sectionId: hit.sectionId, bar: hit.barIndex, beat: hit.beat),
-    );
-    if (placement == null) {
-      _begun = false;
-      _anchor = null;
-      return false;
-    }
-    _anchor = placement.anchor;
-    _anchorOrigin = placement.origin;
+    _choice = choice;
     _startTime = time;
     _samples
       ..clear()
@@ -228,26 +244,26 @@ class InkStrokeAssembler {
   // KEYWORDS: end, canonical-form, anchor-local, pressure-fallback, dot, single-use
   /// Closes the stroke, returning it in canonical form or null when there is none.
   InkStroke? end({required PageLayout page, required String id}) {
-    if (!_begun || _anchor == null) {
+    final InkAnchorChoice? choice = _choice;
+    if (!_begun || choice == null) {
       _reset();
       return null;
     }
     final bool anyPressure = _samples.any((InkSample s) => s.pressure > 0);
     final List<InkPoint> points = <InkPoint>[
       for (final InkSample sample in _samples)
-        _localPoint(sample, page, anyPressure: anyPressure),
+        _localPoint(sample, page, choice: choice, anyPressure: anyPressure),
     ];
     if (points.length == 1) {
       points.add(points.first);
     }
-    final EventAnchor anchor = _anchor!;
     _reset();
     return InkStroke(
       id: id,
       tool: tool,
       color: color,
       size: size,
-      anchor: anchor,
+      anchor: choice.anchor,
       points: points,
     );
   }
@@ -264,8 +280,7 @@ class InkStrokeAssembler {
   /// Clears the working state so the assembler can be reused for the next stroke.
   void _reset() {
     _samples.clear();
-    _anchor = null;
-    _anchorOrigin = LayoutOffset.zero;
+    _choice = null;
     _begun = false;
   }
 
@@ -275,24 +290,30 @@ class InkStrokeAssembler {
   //         surface-to-page transform as [PageLayout.pagePointOf]; the page is passed rather than its
   //         `scale` because a caller holding only the factor would have to re-derive the division
   //         here, and a second rule for one transform is exactly how a stroke and its renderer drift
-  //         apart by a factor of the scale. anyPressure — whether any sample of this stroke reported
+  //         apart by a factor of the scale. choice — the anchor chosen at [begin], whose origin the
+  //         point is measured from. anyPressure — whether any sample of this stroke reported
   //         pressure, which is passed in rather than recomputed per point because the answer is a
   //         property of the whole stroke and recomputing it here would give a per-point answer.
   // OUTPUTS: An [InkPoint]. The sample's surface position goes through the page's own
   //          [PageLayout.pagePointOf] and only then subtracts [inkPointToPage]'s inverse, so capture
   //          and the hit test that admitted the stroke are literally the same arithmetic. On a fitted
   //          page that transform DIVIDES by the scale — it does not multiply — because the painter
-  //          reaches the surface by multiplying the engraved geometry up (`canvas.scale`).
-  // KEYWORDS: point-conversion, anchor-local, pagePointOf, single-route, no-second-transform
+  //          reaches the surface by multiplying the engraved geometry up (`canvas.scale`). A point
+  //          measured from a bar's corner may be NEGATIVE on either axis: that is a mark written
+  //          above, left of or beyond the bar, and it is what puts the stroke back in the margin when
+  //          the page is drawn again.
+  // KEYWORDS: point-conversion, anchor-local, pagePointOf, single-route, no-second-transform,
+  //           negative-offset, margin-writing
   InkPoint _localPoint(
     InkSample sample,
     PageLayout page, {
+    required InkAnchorChoice choice,
     required bool anyPressure,
   }) {
     final LayoutOffset pagePoint = page.pagePointOf(
       LayoutOffset(sample.x, sample.y),
     );
-    final LayoutOffset local = pagePointToAnchorLocal(pagePoint, _anchorOrigin);
+    final LayoutOffset local = pagePointToAnchorLocal(pagePoint, choice.origin);
     return InkPoint(
       x: local.x,
       y: local.y,

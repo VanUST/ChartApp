@@ -10,14 +10,26 @@
 //          one of the bar's paddings where no cell has a column. A cell rect spans the bar's full
 //          stave height and one beat's column, so a stroke begun anywhere in a cell — above, on or
 //          below the chord symbol — is anchored to that cell and moves with the music.
+//
+//          A STROKE THAT BEGINS OUTSIDE EVERY BAR IS ANCHORED TO THE BAR NEAREST IT, and that
+//          third case is the rule this file now exists to state. The page a musician writes on has
+//          more room than the bars occupy: the top margin above the first system, the space a
+//          section label leaves, the gap between two systems, the left margin, the white below the
+//          last system and the whole of the melody staff. It is all paper a musician marks, and the
+//          anchor is a REFLOW mechanism rather than a permission to write. See
+//          [resolveNearestBarAnchor] for why the nearest bar and not the page.
 // INPUTS: A [PageLayout], an [EventAnchor], and positions in page or surface logical pixels.
 // OUTPUTS: Immutable values and total functions. A resolution that cannot find the anchor on the
 //          page returns null rather than a guessed rectangle, because a stroke drawn at a fabricated
 //          position is worse than one that is visibly missing: it would look correct on screen and
-//          be anchored to nothing.
+//          be anchored to nothing. The one place null is still reachable for a stroke's FIRST
+//          sample is a page that carries no bar at all, which the layout engine does not produce.
 // KEYWORDS: ink, anchor-local, coordinate-transform, fit-scale, page-transform, transposition,
-//           reflow-survival, pure-dart
+//           reflow-survival, nearest-bar, margin-writing, pure-dart
+import 'dart:math' as math;
+
 import 'package:chart_core/src/layout/geometry.dart';
+import 'package:chart_core/src/layout/hit_test.dart';
 import 'package:chart_core/src/layout/page_layout.dart';
 import 'package:chart_core/src/oplog/oplog.dart';
 
@@ -162,6 +174,193 @@ InkPlacement? resolveEventAnchor(PageLayout page, EventAnchor anchor) {
     );
   }
   return null;
+}
+
+/// Which of the three rules chose a stroke's anchor, so that "this stroke is anchored to the bar
+/// nearest it" is a fact the log states rather than one a reader infers from a rectangle.
+enum InkAnchorBasis {
+  /// The stroke began inside a cell's column, so it is anchored to that beat of that bar.
+  cell('cell'),
+
+  /// The stroke began on a bar but in one of its paddings, where no cell has a column, so it is
+  /// anchored to the bar itself.
+  bar('bar'),
+
+  /// The stroke began outside every bar — a margin, the space between two systems, or the melody
+  /// staff — so it is anchored to the bar nearest the point it began at.
+  nearestBar('nearest-bar');
+
+  const InkAnchorBasis(this.token);
+
+  /// Stable spelling used in a log line.
+  final String token;
+}
+
+/// The anchor one stroke's first sample resolved to, together with the rule that chose it.
+///
+/// The rule travels with the anchor because two strokes with the same rectangle can be different
+/// statements — one written inside a cell, one written in the margin and hung on the same bar —
+/// and a report that could not tell them apart would be unable to show that margin writing works.
+class InkAnchorChoice {
+  /// Creates a choice of [placement] made by [basis], [distancePx] from the stroke's first sample.
+  const InkAnchorChoice({
+    required this.placement,
+    required this.basis,
+    this.distancePx = 0,
+  });
+
+  /// Where the anchor landed on the page the stroke was drawn on.
+  final InkPlacement placement;
+
+  /// The rule that chose it.
+  final InkAnchorBasis basis;
+
+  /// How far the first sample lay outside the anchor's rectangle, in ENGINE-PAGE pixels.
+  ///
+  /// Zero for [InkAnchorBasis.cell] and [InkAnchorBasis.bar], which contain the point by
+  /// construction. A positive value on [InkAnchorBasis.nearestBar] is the honest measure of how far
+  /// into the margin the musician wrote: it is what a reader checks against the picture, and it is
+  /// what a future "should this have been refused" question can be asked of instead of a guess.
+  final double distancePx;
+
+  /// The address the stroke is stored against.
+  EventAnchor get anchor => placement.anchor;
+
+  /// The anchor's top-left corner on the page, which every stored coordinate is measured from.
+  LayoutOffset get origin => placement.origin;
+
+  @override
+  String toString() =>
+      'InkAnchorChoice(${basis.token}, $anchor, '
+      'distance=${distancePx.toStringAsFixed(1)})';
+}
+
+// PURPOSE: Answer the distance, in page pixels, from a point to a rectangle, which is what "the
+//          nearest bar" is measured with. It is a function rather than a line in the search below
+//          because the meaning of the number is what the whole rule rests on: a point to the SIDE
+//          of a bar and a point ABOVE it are measured on the same footing, and neither is favoured
+//          by the page's reading order.
+// INPUTS: rect — a rectangle in the page's coordinates. point — a position in the same coordinates.
+// OUTPUTS: Zero when the point lies inside or on the rectangle, otherwise the length of the
+//          shortest straight line from the point to the rectangle's edge, always finite and never
+//          negative. The diagonal case is the Euclidean distance to the nearest corner, which is
+//          the only answer consistent with the two axis-aligned cases.
+// KEYWORDS: rectangle-distance, nearest, geometry, total-function, pure-dart
+/// Returns how far [point] lies outside [rect], in the same units.
+double inkRectDistance(LayoutRect rect, LayoutOffset point) {
+  final double dx = point.x < rect.left
+      ? rect.left - point.x
+      : (point.x > rect.right ? point.x - rect.right : 0);
+  final double dy = point.y < rect.top
+      ? rect.top - point.y
+      : (point.y > rect.bottom ? point.y - rect.bottom : 0);
+  return math.sqrt(dx * dx + dy * dy);
+}
+
+// PURPOSE: Find the bar a stroke written OUTSIDE every bar hangs on, so that the paper between the
+//          bars stops being unwritable. This is the answer to a defect the owner reported in his own
+//          words — "всё ещё нет свободного письма по всему документу" — after reproducing it with a
+//          pen: a stroke that began in a bar committed, and a stroke that began in the margin was
+//          refused with `no-anchor-at-start`.
+//
+//          WHY THE NEAREST BAR, AND WHY THAT IS NOT A GUESS ABOUT INTENT. The alternatives were
+//          considered and each fails on the one requirement that matters — that the mark must
+//          survive a reflow without teleporting:
+//
+//            - THE PAGE, stored as page coordinates. A margin mark then does not move when the page
+//              is re-paginated, so inserting bars that push the music onto another page leaves the
+//              mark on a page whose content has changed: it teleports onto unrelated music, or
+//              falls off the document entirely. Page numbers are an OUTPUT of layout and cannot be
+//              an address for something that has to outlive it.
+//            - A PAGE-LEVEL ANCHOR carried in the anchor's own fields. Same defect, one level down:
+//              `EventAnchor` addresses a SECTION and a bar, and a page is not expressible in it
+//              without inventing a fifth address space that every renderer, the eraser and the file
+//              format would then have to learn.
+//            - ATTACHING TO THE NEAREST BAR. This is the only one that survives, and the reason is
+//              that the choice is made ONCE, at the moment of writing, and then STORED. The
+//              objection that "the nearest bar is a guess about intent" is right about a decision
+//              re-derived at every render, and wrong about one frozen at capture: from then on it
+//              is a record of where the musician wrote, exactly as the cell anchor is. The mark
+//              moves with the bar it was written beside through a transposition, a reflow and a
+//              save-and-reopen, which is the same promise every other anchor in the document makes.
+//
+//          WHAT IT COSTS, NAMED RATHER THAN HIDDEN. A mark in the gap between two systems is hung on
+//          whichever of the neighbouring bars is nearer, and on an exact tie on the EARLIER one in
+//          reading order; a reflow that moves those bars apart takes the mark with the bar it was
+//          hung on. And because a bar index inside a section is the model's address, inserting a bar
+//          before it moves the mark with the index, exactly as it moves a chord at that index — the
+//          document's existing address semantics, not a new exception.
+//
+//          WHY IT PREFERS THE BAR AND NEVER THE CELL. A cell is a column of TIME inside a bar, and a
+//          point outside the bar has no column: choosing one would silently claim the mark was
+//          written on a beat. Bar level is the honest granularity for something written beside the
+//          music rather than at a beat of it, and it is the same value `hitTestPage` already
+//          returns for a point in a bar's own padding.
+// INPUTS: page — the layout the stroke is being drawn on, in engraved coordinates. pagePoint — the
+//         stroke's first position in those same coordinates, which a caller obtains through
+//         [PageLayout.pagePointOf] if it holds a point on the glass.
+// OUTPUTS: The placement of the nearest bar, or null when the page carries no bar at all. Null is
+//          reachable only for a page the layout engine does not produce — a song with no bars is
+//          reported to the musician as an empty song rather than engraved as a blank page — so in
+//          every state a musician can draw on, a stroke begun anywhere resolves to some bar.
+//          Ties go to the FIRST bar in reading order, because the comparison is strict: two bars
+//          equidistant from a point must not resolve differently on two runs of the same app.
+// KEYWORDS: ink-anchor, margin-writing, nearest-bar, reflow-survival, no-teleport, once-at-capture,
+//           deterministic-tie-break, d32
+/// Returns the placement of the bar nearest [pagePoint], or null when the page has no bar.
+InkPlacement? resolveNearestBarAnchor(PageLayout page, LayoutOffset pagePoint) {
+  InkPlacement? nearest;
+  double nearestDistance = double.infinity;
+  for (final PlacedBar bar in page.bars) {
+    final double distance = inkRectDistance(bar.bounds, pagePoint);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearest = InkPlacement(
+        anchor: EventAnchor(sectionId: bar.sectionId, bar: bar.barIndex),
+        pageIndex: page.index,
+        bounds: bar.bounds,
+      );
+    }
+  }
+  return nearest;
+}
+
+// PURPOSE: Choose, in ONE place, the anchor one stroke is stored against, so that capture has a
+//          single rule and a reader can see the whole of it without following a call site. The
+//          three cases are decided here in the order of how much the musician's own address is
+//          known: a cell when the point is over one, the bar when it is over the bar's padding, and
+//          the nearest bar when it is over no bar at all.
+// INPUTS: page — the layout, in engraved coordinates. pagePoint — the stroke's first sample in
+//         those coordinates.
+// OUTPUTS: The choice, or null only for a page that carries no bar, in which case there is nothing
+//          in the document to anchor to and the caller must report the refusal rather than store a
+//          fabricated address. Every other outcome is an anchor: refusing to store a mark the
+//          musician made is the defect this function was written to remove.
+// KEYWORDS: ink-anchor, single-rule, cell-then-bar-then-nearest, no-refusal, capture-entry
+/// Returns the anchor for a stroke that began at [pagePoint], with the rule that chose it.
+InkAnchorChoice? resolveInkAnchor(PageLayout page, LayoutOffset pagePoint) {
+  final ChartHit? hit = hitTestPage(page, pagePoint);
+  if (hit != null) {
+    final InkPlacement? placement = resolveEventAnchor(
+      page,
+      EventAnchor(sectionId: hit.sectionId, bar: hit.barIndex, beat: hit.beat),
+    );
+    if (placement != null) {
+      return InkAnchorChoice(
+        placement: placement,
+        basis: hit.beat == null ? InkAnchorBasis.bar : InkAnchorBasis.cell,
+      );
+    }
+  }
+  final InkPlacement? nearest = resolveNearestBarAnchor(page, pagePoint);
+  if (nearest == null) {
+    return null;
+  }
+  return InkAnchorChoice(
+    placement: nearest,
+    basis: InkAnchorBasis.nearestBar,
+    distancePx: inkRectDistance(nearest.bounds, pagePoint),
+  );
 }
 
 // PURPOSE: Turn a stored point into the position it occupies on the page, which is what the

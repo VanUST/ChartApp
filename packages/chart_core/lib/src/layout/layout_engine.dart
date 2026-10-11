@@ -31,6 +31,7 @@
 import '../key.dart';
 import '../oplog/oplog.dart';
 import '../song/bar.dart';
+import '../song/section.dart';
 import '../song/song.dart';
 import '../spelling_table.dart';
 import 'geometry.dart';
@@ -134,23 +135,64 @@ class LayoutEngine {
   //          SONG rather than of a bar: either every bar on the page carries a staff, so that the
   //          five lines run unbroken across each system, or none does.
   // INPUTS: song — the chart about to be engraved.
-  // OUTPUTS: [LayoutStyle.melodyBandHeight] when the song DECLARES a pitched staff
-  //          (`song.staffSet.pitched != null`), and ZERO otherwise. Zero is the load-bearing case:
-  //          a chords-only chart — every imported chart, and every chart that never declared a
-  //          staff — then computes exactly the page it computed before a melody staff existed,
-  //          because the band is the only term this change adds to a system's height.
+  // OUTPUTS: ZERO when the song declares no pitched staff (`song.staffSet.pitched == null`), which
+  //          is the load-bearing case: a chords-only chart — every imported chart, and every chart
+  //          that never declared a staff — then computes exactly the page it computed before a
+  //          melody staff existed, because the band is the only term this change adds to a system's
+  //          height.
   //
-  //          WHY THE DECLARATION AND NOT THE NOTES. This used to return the band only when some bar
-  //          already carried a note, which made the staff appear AFTER the musician had written on
-  //          it — and therefore nowhere to write. Owner decision D29: the staff exists because the
-  //          chart DECLARED it, and `Song.staffSet` is that declaration. A chart whose pitched
-  //          staff is declared and holds no note is a blank staff, which is exactly what a musician
-  //          needs in order to put the first note on it. The page a chords-only chart computes is
-  //          untouched, and that is what keeps every imported chart byte-identical.
-  // KEYWORDS: melody-band, song-level-decision, declared-staff, blank-staff, unchanged-chords-only,
-  //           d29
-  double _melodyBand(Song song) =>
-      song.staffSet.pitched == null ? 0 : style.melodyBandHeight;
+  //          [LayoutStyle.melodyBandHeight] when the song declares a pitched staff AND carries at
+  //          least one note somewhere, and [LayoutStyle.melodyEmptyBandHeight] when it declares one
+  //          and carries none. That last case is the refinement of D29 the owner's picture asked
+  //          for: a chord-only chart in the app's default state declared a staff and therefore
+  //          reserved the full 270-pixel band — five ledger lines' worth of room above and below the
+  //          five lines — to draw nothing on. The staff still exists (D29), with its lines, its clef
+  //          and its beat captions; only the room reserved for notes that do not exist is gone.
+  //          See [LayoutStyle.melodyEmptyBandHeight] for why the reserve may follow the music while
+  //          the staff follows the declaration, and for the derivation of the smaller number.
+  //
+  //          WHY THE DECLARATION AND NOT THE NOTES, FOR THE STAFF ITSELF. This used to return the
+  //          band only when some bar already carried a note, which made the staff appear AFTER the
+  //          musician had written on it — and therefore nowhere to write. Owner decision D29: the
+  //          staff exists because the chart DECLARED it, and `Song.staffSet` is that declaration. A
+  //          chart whose pitched staff is declared and holds no note is a blank staff, which is
+  //          exactly what a musician needs in order to put the first note on it. The page a
+  //          chords-only chart computes is untouched, and that is what keeps every imported chart
+  //          byte-identical.
+  //
+  //          THE WHOLE SONG DECIDES, NOT THE BAR. One bar carrying a note puts the full band on every
+  //          system of the song, so the staff sits at one height across the chart — the property
+  //          `melody_layout_test.dart` measures. A note in bar 40 must not make page 1 reserve a
+  //          different amount of paper from the page the note is on.
+  // KEYWORDS: melody-band, song-level-decision, declared-staff, blank-staff, empty-staff-shallower,
+  //           unchanged-chords-only, d29, d32
+  double _melodyBand(Song song) {
+    if (song.staffSet.pitched == null) {
+      return 0;
+    }
+    return _carriesAnyNote(song)
+        ? style.melodyBandHeight
+        : style.melodyEmptyBandHeight;
+  }
+
+  // PURPOSE: Answer whether the song holds a pitched note anywhere, which is the one fact that
+  //          separates a staff being written on from a staff that is merely there.
+  // INPUTS: song — the chart.
+  // OUTPUTS: True when any bar of any section carries a non-empty `melody`. False for a song with no
+  //          bars, which is the same answer an empty song must give: nothing is written on it.
+  //          The walk is bounded by the bar count and allocates nothing, so calling it once per
+  //          engraving costs a comparison per bar.
+  // KEYWORDS: melody-presence, song-level, no-allocation, band-decision
+  bool _carriesAnyNote(Song song) {
+    for (final Section section in song.sections) {
+      for (final Bar bar in section.bars) {
+        if (bar.melody.isNotEmpty) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   /// The smallest fraction of the requested page size the FIT mode will shrink to.
   ///

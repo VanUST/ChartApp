@@ -109,13 +109,28 @@ class InkPalmRule {
 
   /// Stable reason token: a non-stylus contact whose width the platform never reported.
   ///
-  /// Refused rather than admitted, and that is a deliberate reversal of the naive "fail open"
-  /// reading. The width is the ONE thing that tells a fingertip from a palm — the pointer kind calls
-  /// both of them a finger — so an unmeasured width cannot support the conclusion "this may draw".
-  /// The cost of guessing in the admitting direction is a smear across the chart while the musician
-  /// is writing; the cost of guessing in this direction is that a finger taps and selects, which is a
-  /// feature and destroys nothing. On the web target this is what a finger produces until the raw
-  /// pointer bridge has supplied a width, because Flutter's own web binding reports none.
+  /// **ADMITTED, AND THE SENTENCE THAT USED TO STAND HERE SAID THE OPPOSITE. It is corrected rather
+  /// than deleted, because the reasoning is the interesting part and it was wrong on a real device.**
+  /// What it said: an unmeasured width "cannot support the conclusion 'this may draw'", the cost of
+  /// admitting is "a smear across the chart", and the cost of refusing is merely "a finger taps and
+  /// selects, which is a feature and destroys nothing".
+  ///
+  /// **THE OWNER'S TABLET FALSIFIED THAT, and it falsified the whole trade.** His S Pen's touches
+  /// arrive as `PointerDeviceKind.finger` with `width == 0`, so EVERY PEN CONTACT ON EVERY SCREEN
+  /// LANDED HERE AND WAS REFUSED — silently. He reported it as "рисует сейчас через раз" and then as
+  /// "на всём экране", and the app's own log named the reason while saying nothing to him:
+  /// `ink.contact.down ... no-ink reason=width-not-reported kind=finger width=0.0`.
+  ///
+  /// The trade was priced wrongly, and that is the lesson worth keeping. A wrong stroke is VISIBLE,
+  /// ATTRIBUTABLE and ERASABLE — the musician sees it, knows he did not write it, and removes it. A
+  /// refused stroke is INVISIBLE: nothing appears, nothing is said, and the tool reads as broken. The
+  /// cost of refusing was written down as "destroys nothing", and in fact it destroys the only
+  /// question that matters, which is whether the pen works at all. **Fail open, because a failure
+  /// nobody can see cannot be diagnosed by the person suffering it.**
+  ///
+  /// The palm protection this token sat behind is NOT weakened: a contact whose width IS measured and
+  /// is palm-like while a stylus is in play is still refused, and that is where a real palm lands —
+  /// the spike on this tablet measured palms at 71 and 87 logical pixels.
   static const String reasonWidthNotReported = 'width-not-reported';
 
   /// Stable reason token: a palm-like contact refused while a stylus was in play.
@@ -177,8 +192,17 @@ class InkPalmRule {
     }
     // What is left is a finger, a palm the platform called a finger, or a kind this build does not
     // know. All three are subject to the same two signals.
+    //
+    // AN UNMEASURED WIDTH ADMITS. It used to refuse, and on the owner's tablet that refused EVERY
+    // PEN CONTACT he made, because his S Pen arrives as a pointer kind of `finger` with no width. He
+    // reported it first as "рисует сейчас через раз" and then as "на всём экране", while the app's
+    // log named the reason and said nothing to him. Refusing is the one failure a musician cannot
+    // see, cannot attribute and cannot report as anything but "the pen is broken", so the doubt
+    // resolves toward drawing. `reasonWidthNotReported` carries the full correction, and the PALM
+    // half below is untouched: a measured, palm-like contact while a stylus is in play is still
+    // refused, and that is where a real palm lands.
     if (!widthMeasured) {
-      return build(mayInk: false, reason: reasonWidthNotReported);
+      return build(mayInk: true, reason: reasonWidthNotReported);
     }
     if (palmLike && stylusInPlay) {
       return build(mayInk: false, reason: reasonPalmLikeWidth);

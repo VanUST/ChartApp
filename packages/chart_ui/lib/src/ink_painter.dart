@@ -79,7 +79,18 @@ class InkPainter extends CustomPainter {
   // INPUTS: canvas — the target. size — the extent the painter was given, used only as the clip.
   // OUTPUTS: Nothing. The canvas is saved and restored around the clip, so a caller stacking this
   //          painter over the chart painter gets its transform back unchanged.
-  // KEYWORDS: paint, clip, render-order, save-restore, transform
+  //
+  //          ONE `Paint` FOR THE WHOLE FRAME, MUTATED BETWEEN SEGMENTS, AND THAT IS A MEASURED
+  //          DECISION. This used to build a `Paint()` inside the per-segment loop, so a page holding
+  //          ten thousand sampled points allocated ten thousand engine-backed paints on every
+  //          frame. On the owner's tablet that showed up as the pen slowing down as the chart filled
+  //          up: with twenty short strokes drawn one after another, the number of samples the app
+  //          could take from a fixed-length gesture fell from 546 to 4. A `Paint` here is not a
+  //          plain Dart object — it is a handle onto an engine-side paint — so allocating one per
+  //          segment was the most expensive thing on the drawing path. Mutating a single scratch
+  //          paint between `drawLine` calls is safe because the call consumes the paint immediately,
+  //          and it is the ordinary way to draw many segments.
+  // KEYWORDS: paint, clip, render-order, save-restore, transform, paint-reuse, allocation-hot-path
   @override
   void paint(Canvas canvas, Size size) {
     if (strokes.isEmpty) {
@@ -90,15 +101,21 @@ class InkPainter extends CustomPainter {
     if (pageScale != 1) {
       canvas.scale(pageScale, pageScale);
     }
+    // The scratch paint is created once per frame and reused for every glyph, dot and segment. Its
+    // colour, style and caps are set per STROKE and only its width per segment, so nothing a caller
+    // could observe depends on the reuse.
+    final Paint scratch = Paint();
     for (final ResolvedInkStroke resolved in strokes) {
-      _paintStroke(canvas, resolved);
+      _paintStroke(canvas, resolved, scratch);
     }
     canvas.restore();
   }
 
   // PURPOSE: Draw one stroke, as a sequence of round-capped segments whose widths follow the
   //          pressure recorded with each point.
-  // INPUTS: canvas — the target. resolved — the stroke and the page position of its anchor.
+  // INPUTS: canvas — the target. resolved — the stroke and the page position of its anchor. scratch
+  //         — the one paint this frame reuses, whose properties are set here for this stroke and for
+  //         each of its segments in turn.
   // OUTPUTS: Nothing. A stroke with no points draws nothing; a one-point stroke draws a dot, because
   //          its stored form repeats the point and a zero-length segment with a round cap is a dot.
   //
@@ -108,8 +125,8 @@ class InkPainter extends CustomPainter {
   //          and the file without ever being used. Per-segment width is the cheapest honest way to
   //          spend it, and the overlap at a joint is invisible because the caps are round and the
   //          width change between neighbouring samples is small.
-  // KEYWORDS: segment, pressure-width, round-cap, nib, dot, tilt-not-used
-  void _paintStroke(Canvas canvas, ResolvedInkStroke resolved) {
+  // KEYWORDS: segment, pressure-width, round-cap, nib, dot, tilt-not-used, paint-reuse
+  void _paintStroke(Canvas canvas, ResolvedInkStroke resolved, Paint scratch) {
     final InkStroke stroke = resolved.stroke;
     final List<InkPoint> points = stroke.points;
     if (points.isEmpty) {
@@ -126,28 +143,30 @@ class InkPainter extends CustomPainter {
     final LayoutOffset origin = resolved.origin;
 
     if (points.length == 1) {
+      scratch
+        ..color = color
+        ..style = PaintingStyle.fill;
       canvas.drawCircle(
         Offset(origin.x + points.first.x, origin.y + points.first.y),
         nib / 2,
-        Paint()..color = color,
+        scratch,
       );
       return;
     }
+    scratch
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
     for (int index = 1; index < points.length; index++) {
       final InkPoint from = points[index - 1];
       final InkPoint to = points[index];
       final double pressure = (from.w + to.w) / 2;
-      final double width = isHighlighter ? nib : nib * (0.65 + 0.7 * pressure);
-      final Paint paint = Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = width
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
+      scratch.strokeWidth = isHighlighter ? nib : nib * (0.65 + 0.7 * pressure);
       canvas.drawLine(
         Offset(origin.x + from.x, origin.y + from.y),
         Offset(origin.x + to.x, origin.y + to.y),
-        paint,
+        scratch,
       );
     }
   }

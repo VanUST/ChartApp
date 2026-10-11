@@ -405,6 +405,19 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// The last probe state published, so a rebuild that changes nothing writes nothing.
   String? _publishedInkState;
 
+  /// What the pen path has cost during the stroke in progress.
+  ///
+  /// The page is re-laid-out whenever this screen rebuilds, and this screen used to rebuild on every
+  /// pointer sample: `fitToPage`/`layout` then ran once per sample, over the whole song, with the
+  /// melody band making each system taller. That is a claim about a cost, so it is MEASURED here and
+  /// written to the log as a number rather than left to be inferred from the code — the whole reason
+  /// this field exists. See [_PenPathCost] for what each number means.
+  final _PenPathCost _penCost = _PenPathCost();
+
+  /// Whether the previous move sample was one the ink layer was drawing, so the cost counters are
+  /// reset at the first sample of a stroke and not in the middle of one.
+  bool _penWasDrawing = false;
+
   /// Whether the contact that started the current tap was one the ink rule admitted.
   ///
   /// Set when the tap begins and read when it completes, because the two callbacks are the only two
@@ -2440,59 +2453,142 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     PageLayout page,
     Song song,
     InkCaptureLayer layer,
-    List<InkStroke> strokes,
     List<TextCue> textCues,
   ) => RawPointerCapture(
     layer: layer,
     page: page,
     child: Listener(
-      // Only the live stroke is handled here: the layer above has already been given the sample, and
-      // this listener exists so the page repaints while the pen is down. A move the layer did not
-      // take — a finger, or a pen with the mode off — rebuilds nothing.
+      // This listener does NOT repaint. The ink layer repaints itself through its own tick, and the
+      // only jobs left here are the throttled publication of the verification state and the pen
+      // path's cost accounting — see [_onPagePointerMove]. A move the layer did not take — a finger,
+      // or a pen with the mode off — therefore costs one comparison and nothing else.
       onPointerMove: (PointerMoveEvent event) => _onPagePointerMove(),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapDown: (TapDownDetails details) => _onPageTapDown(layer, details),
         onTapUp: (TapUpDetails details) => _onPageTapUp(page, layer, details),
         onTapCancel: _onPageTapCancel,
-        child: _layeredPage(page, song, layer, strokes, textCues),
+        child: _layeredPage(page, song, layer, textCues),
       ),
     ),
   );
 
-  // PURPOSE: Repaint the page while a stroke is being drawn, so the musician sees their own line
-  //          before they lift the pen.
+  // PURPOSE: Publish the verification state while a stroke is being drawn, throttled, and account
+  //          for what the pen path costs.
+  //
+  //          IT NO LONGER REBUILDS ANYTHING, AND THAT IS THE WHOLE OF THE LATENCY FIX. The live line
+  //          is repainted by the ink layer's own tick (see [_layeredPage]); this listener is left
+  //          with the two jobs that are not a repaint. Both of them were measured on the owner's
+  //          tablet and both were expensive, in this order: publishing the verification state cost
+  //          1 738 ms of a 2 882 ms stroke — sixty per cent of the pen path, because the published
+  //          document carries every stroke's canonical form and is re-serialised and re-parsed whole
+  //          each time — and the rebuild that carried it re-engraved the chart on 105 of the stroke's
+  //          246 samples.
+  //
+  //          WHY THE PUBLICATION IS THROTTLED RATHER THAN DROPPED. It is a one-way convenience for a
+  //          tool inspecting the page, and the state itself says so: `_inkProbeState` is built on
+  //          demand and `inkInputReport` is the live reader a verification should call. Four updates
+  //          a second keeps a browser-driven check useful at a fraction of the cost of one per
+  //          sample, which at the sample rate a working pen delivers was a hundred serialisations of
+  //          the whole document per second.
   // INPUTS: None; the ink layer is asked whether a contact is drawing.
-  // OUTPUTS: Nothing. The rebuild happens only while a contact is actually drawing, so a finger tap
-  //          and a pen with the mode off do not rebuild on every sample.
-  // KEYWORDS: live-preview-repaint, guarded-rebuild
+  // OUTPUTS: Nothing that a frame depends on. The cost counters are reset at the first sample of a
+  //          stroke and reported, throttled, for as long as it lasts; the verification state is
+  //          published at most once per [_inkPublishIntervalMs], and immediately when the number of
+  //          committed strokes changed — so a tool that reads the state after a stroke sees the
+  //          stroke even if the throttle would otherwise have skipped it.
+  // KEYWORDS: verification-handoff, throttled-publish, cost-measurement, no-rebuild, latency
   void _onPagePointerMove() {
-    if (_activeInkLayer?.isDrawingInk ?? false) {
-      setState(() {});
-      _publishInkState();
+    final InkCaptureLayer? layer = _activeInkLayer;
+    if (!(layer?.isDrawingInk ?? false)) {
+      _penWasDrawing = false;
+      return;
     }
+    if (!_penWasDrawing) {
+      _penWasDrawing = true;
+      _penCost.beginStroke();
+    }
+    _penCost.noteSample();
+    final int strokes = layer!.strokeCount;
+    final bool documentChanged = strokes != _publishedStrokeCount;
+    final DateTime now = DateTime.now();
+    if (documentChanged ||
+        now.difference(_lastInkPublish).inMilliseconds >=
+            _inkPublishIntervalMs) {
+      _lastInkPublish = now;
+      _publishedStrokeCount = strokes;
+      final Stopwatch publishing = Stopwatch()..start();
+      _publishInkState();
+      _penCost.notePublish(publishing.elapsedMicroseconds);
+    }
+    final String? report = _penCost.reportIfDue();
+    if (report != null) {
+      debugPrint(report);
+    }
+  }
+
+  /// How often the verification state may be re-published while the pen is down.
+  ///
+  /// MEASURED, NOT CHOSEN. One publication per pointer sample cost 7.06 ms of the UI thread on
+  /// average over one 246-sample stroke — 1 738 ms of a 2 882 ms stroke — because
+  /// `publishInkProbeState` validates what it was just told by parsing it back, so the whole
+  /// document is serialised twice per sample. Four publications a second is a fortieth of that and
+  /// still finer than any browser-driving check reads it.
+  static const int _inkPublishIntervalMs = 250;
+
+  /// When the verification state was last published, so the throttle has a base to measure from.
+  DateTime _lastInkPublish = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// How many strokes the document held when the verification state was last published.
+  int _publishedStrokeCount = 0;
+
+  // PURPOSE: Run one chart engraving and record what it cost, so that "the page was re-laid-out on
+  //          every pen sample" is a number in the log rather than an inference from the code.
+  // INPUTS: engrave — the call, which is either `fitToPage` or `layout` at one of the three places
+  //         this screen engraves a page.
+  // OUTPUTS: Whatever [engrave] returns, unchanged. The cost is a side effect on [_penCost], which
+  //          publishes it at most a few times a second.
+  // KEYWORDS: layout-cost, stopwatch, single-wrap, measurement-not-assertion
+  T _meteredLayout<T>(T Function() engrave) {
+    final Stopwatch watch = Stopwatch()..start();
+    final T result = engrave();
+    _penCost.noteLayout(watch.elapsedMicroseconds);
+    return result;
   }
 
   // PURPOSE: Stack the chart, the words written on it and the ink, with all three positioned by the
   //          same page transform.
-  // INPUTS: page, song, layer, strokes and textCues, as in [_tappablePage].
+  // INPUTS: page, song, layer and textCues, as in [_tappablePage].
   // OUTPUTS: The page widget. The cue layer is drawn AFTER the chart, so a remark lies over the
   //          music it annotates, and BEFORE the ink, so the ink stays the topmost layer and the
   //          ordering this file already documents for it (see [_tappablePage] and A37) is left
   //          exactly as it was. Each layer is given the page's own scale, which is what keeps them
   //          in one coordinate system rather than three that agree until the page is fitted.
-  // KEYWORDS: painter-stack, cues-over-chart, ink-stays-on-top, shared-scale, one-coordinate-system
+  //
+  //          THE INK LAYER REPAINTS ITSELF, AND THE OTHER TWO DO NOT. Everything below this widget —
+  //          the chart, the cues, the app bar, the song list — is built from values that change when
+  //          the DOCUMENT changes, not when a pen moves. The ink is the one layer whose content
+  //          changes sixty to a hundred and twenty times a second, so it is the one layer wrapped in
+  //          a listener: a sample raises the layer's own tick and only this `CustomPaint` is marked
+  //          for painting, while the surrounding widget tree — and with it the chart's engraving — is
+  //          left alone. Before this, a sample called `setState` on the whole screen, which
+  //          re-engraved the page (measured: 105 layout passes for one 246-sample stroke) and
+  //          re-serialised the verification state (measured: 1 738 ms of that stroke's 2 882 ms).
+  //
+  //          WHY THE STROKES ARE READ INSIDE THE BUILDER AND NOT CAPTURED OUTSIDE IT. A captured
+  //          list is the document as it was when the page was built, so a stroke committed while no
+  //          rebuild happens would be invisible — and a long drag does not always resolve as a tap,
+  //          which is the rebuild that would otherwise have carried it. Reading them through the
+  //          layer inside the builder is what makes a committed stroke appear the instant it is
+  //          committed, whatever the gesture arena decided about the contact.
+  // KEYWORDS: painter-stack, cues-over-chart, ink-stays-on-top, shared-scale, one-coordinate-system,
+  //           self-repainting-ink, listenable-builder, latency
   Widget _layeredPage(
     PageLayout page,
     Song song,
     InkCaptureLayer layer,
-    List<InkStroke> strokes,
     List<TextCue> textCues,
   ) {
-    final List<ResolvedInkStroke> committed = _resolveStrokes(page, strokes);
-    final List<ResolvedInkStroke> live = layer.liveStrokes
-        .where((ResolvedInkStroke resolved) => _isOnPage(page, resolved))
-        .toList();
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -2512,15 +2608,65 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           ),
           child: const SizedBox.expand(),
         ),
-        CustomPaint(
-          painter: InkPainter(
-            strokes: <ResolvedInkStroke>[...committed, ...live],
-            pageScale: page.scale,
+        ListenableBuilder(
+          listenable: layer.liveRevision,
+          builder: (BuildContext context, Widget? child) => CustomPaint(
+            painter: InkPainter(
+              strokes: _inkStrokes(page, layer),
+              pageScale: page.scale,
+            ),
+            child: child,
           ),
           child: const SizedBox.expand(),
         ),
       ],
     );
+  }
+
+  // PURPOSE: Collect every stroke the ink layer draws on [page]: the document's committed strokes
+  //          plus the ones still under the pen, both resolved against the page on screen.
+  //
+  //          THE ANCHOR IS RESOLVED HERE, ONCE PER REPAINT, AGAINST THE PAGE ON SCREEN, and that is
+  //          the whole reason a stroke stays where the musician put it. The stored coordinates are
+  //          measured from the anchor's own corner, so adding the corner's position on THIS page
+  //          moves the ink with the music: a transposition re-engraves the bars, the anchor resolves
+  //          to the bar's new rectangle, and the stroke's own geometry is untouched. A stroke whose
+  //          address is on another page of a paginated document is simply not drawn here. The
+  //          strokes come from the layer's session — the WRITTEN document — so the transposition on
+  //          screen changes where a stroke is placed and never what it says.
+  // INPUTS: page — the page being drawn. layer — the ink layer of the song on screen, which is the
+  //         live source of both halves.
+  // OUTPUTS: The strokes that resolved, in render order: the document's order first, so a later
+  //          stroke lies over an earlier one, and the live preview last, because it is the newest
+  //          mark and the one the musician is watching.
+  // KEYWORDS: anchor-resolution, page-filter, render-order, transposition-survival, fit-survival,
+  //           live-source, no-cached-document
+  List<ResolvedInkStroke> _inkStrokes(PageLayout page, InkCaptureLayer layer) =>
+      <ResolvedInkStroke>[
+        ..._resolveStrokes(page, layer.documentStrokes),
+        ...layer.liveStrokes.where(
+          (ResolvedInkStroke resolved) => _isOnPage(page, resolved),
+        ),
+      ];
+
+  // PURPOSE: Turn every committed stroke into the pair a painter needs, skipping the ones this page
+  //          cannot place.
+  // INPUTS: page — the page being drawn. strokes — the document's strokes, in render order.
+  // OUTPUTS: The strokes that resolved, with the anchor's origin, in the document's own order.
+  // KEYWORDS: anchor-resolution, page-filter, render-order, transposition-survival, fit-survival
+  List<ResolvedInkStroke> _resolveStrokes(
+    PageLayout page,
+    List<InkStroke> strokes,
+  ) {
+    final List<ResolvedInkStroke> resolved = <ResolvedInkStroke>[];
+    for (final InkStroke stroke in strokes) {
+      final InkPlacement? placement = resolveEventAnchor(page, stroke.anchor);
+      if (placement == null) {
+        continue;
+      }
+      resolved.add(ResolvedInkStroke(stroke: stroke, origin: placement.origin));
+    }
+    return resolved;
   }
 
   // PURPOSE: Turn every cue of the document into the triple the cue painter needs, skipping the
@@ -2556,33 +2702,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       resolved.add(
         ResolvedTextCue(cue: cue, origin: placed.origin, size: placed.size),
       );
-    }
-    return resolved;
-  }
-
-  // PURPOSE: Turn every committed stroke into the pair a painter needs, skipping the ones this page
-  //          cannot place.
-  //
-  //          THE ANCHOR IS RESOLVED HERE, ONCE PER REBUILD, AGAINST THE PAGE ON SCREEN, and that is
-  //          the whole reason a stroke stays where the musician put it. The stored coordinates are
-  //          measured from the anchor's own corner, so adding the corner's position on THIS page
-  //          moves the ink with the music: a transposition re-engraves the bars, the anchor resolves
-  //          to the bar's new rectangle, and the stroke's own geometry is untouched. A stroke whose
-  //          address is on another page of a paginated document is simply not drawn here.
-  // INPUTS: page — the page being drawn. strokes — every stroke of the document, in render order.
-  // OUTPUTS: The strokes that resolved, with the anchor's origin, in the document's own order.
-  // KEYWORDS: anchor-resolution, page-filter, render-order, transposition-survival, fit-survival
-  List<ResolvedInkStroke> _resolveStrokes(
-    PageLayout page,
-    List<InkStroke> strokes,
-  ) {
-    final List<ResolvedInkStroke> resolved = <ResolvedInkStroke>[];
-    for (final InkStroke stroke in strokes) {
-      final InkPlacement? placement = resolveEventAnchor(page, stroke.anchor);
-      if (placement == null) {
-        continue;
-      }
-      resolved.add(ResolvedInkStroke(stroke: stroke, origin: placement.origin));
     }
     return resolved;
   }
@@ -3033,41 +3152,47 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // and the third tap that writes a note is spent deliberately. The measure of what that costs is
     // in the decision record: chord editing went from two taps to three on the pane, and both
     // surfaces are now reachable from one named place.
+    //
+    // THE TWO ACTIONS BELONG TO THE SAME WRAP AS THE TWO TEXTS, AND THAT IS A FIX RATHER THAN A
+    // TIDY-UP. They used to sit in a `Row` under the label inside a `Column`, so a selected cell
+    // always cost a SECOND row: on the owner's tablet that was 24 logical pixels of chart height —
+    // measured on the device, the page's top edge sat 24 logical pixels lower with a cell selected
+    // than without one — spent on a row that had 1 300 logical pixels of empty width beside it. A
+    // `Wrap` holding all four runs keeps them on one line wherever one line fits and falls back to
+    // two only where the pane really cannot hold them, which is the same rule the label and the hint
+    // already follow. `WrapCrossAlignment.center` keeps the two texts on the buttons' centre line
+    // rather than at their top, which is what makes one row read as one row.
     final bool cellSelected = editable && session != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
-          Align(
-            alignment: Alignment.centerLeft,
-            child: onTap == null
-                ? label
-                : InkWell(
-                    key: const ValueKey<String>('viewer-selection-edit'),
-                    onTap: onTap,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: label,
-                    ),
-                  ),
-          ),
-          if (cellSelected)
-            Row(
-              children: <Widget>[
-                _SelectionAction(
-                  widgetKey: 'viewer-selection-chord',
-                  label: l10n.viewerChord,
-                  onTap: () => _editSelection(context),
-                ),
-                const SizedBox(width: 8),
-                _SelectionAction(
-                  widgetKey: 'viewer-selection-note',
-                  label: l10n.viewerNote,
-                  onTap: () => _editNoteSelection(context),
-                ),
-              ],
+          if (onTap == null)
+            label
+          else
+            InkWell(
+              key: const ValueKey<String>('viewer-selection-edit'),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: label,
+              ),
             ),
+          if (cellSelected) ...<Widget>[
+            _SelectionAction(
+              widgetKey: 'viewer-selection-chord',
+              label: l10n.viewerChord,
+              onTap: () => _editSelection(context),
+            ),
+            _SelectionAction(
+              widgetKey: 'viewer-selection-note',
+              label: l10n.viewerNote,
+              onTap: () => _editNoteSelection(context),
+            ),
+          ],
         ],
       ),
     );
@@ -3159,26 +3284,30 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           return Center(child: Text(l10n.noBars));
         }
         if (mode == PageMode.fit) {
-          final FitOutcome outcome = _engine.fitToPage(
-            displayed,
-            pageWidth: pageWidth,
-            pageHeight: pageHeight,
-            cues: textCues,
+          final FitOutcome outcome = _meteredLayout(
+            () => _engine.fitToPage(
+              displayed,
+              pageWidth: pageWidth,
+              pageHeight: pageHeight,
+              cues: textCues,
+            ),
           );
           final PageLayout? page = outcome.page;
           if (page != null) {
             _lastPageScale = page.scale;
-            return _tappablePage(page, displayed, layer, strokes, textCues);
+            return _tappablePage(page, displayed, layer, textCues);
           }
           // --- THE FIT FALLBACK -----------------------------------------------------------------
           // FIT could not put the song on one page above the legible floor, so the chart is shown
           // PAGINATED rather than left blank. The decision and the reasons behind it are recorded
           // beside [_fitFallbackNotice] and in `docs/sdd.md` A50; this is where it is carried out.
-          final List<PageLayout> fallback = _engine.layout(
-            displayed,
-            pageWidth: pageWidth,
-            pageHeight: pageHeight,
-            cues: textCues,
+          final List<PageLayout> fallback = _meteredLayout(
+            () => _engine.layout(
+              displayed,
+              pageWidth: pageWidth,
+              pageHeight: pageHeight,
+              cues: textCues,
+            ),
           );
           if (fallback.isEmpty) {
             return Center(child: Text(l10n.noBars));
@@ -3201,13 +3330,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               PageView.builder(
                 key: ValueKey<int>(entry.index),
                 itemCount: fallback.length,
-                itemBuilder: (BuildContext context, int index) => _tappablePage(
-                  fallback[index],
-                  displayed,
-                  layer,
-                  strokes,
-                  textCues,
-                ),
+                itemBuilder: (BuildContext context, int index) =>
+                    _tappablePage(fallback[index], displayed, layer, textCues),
               ),
               // IGNORED BY THE POINTER, so the band states the substitution WITHOUT taking a contact
               // away from the page under it. The page's own contract is that a touch on its white
@@ -3225,11 +3349,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             ],
           );
         }
-        final List<PageLayout> pages = _engine.layout(
-          displayed,
-          pageWidth: pageWidth,
-          pageHeight: pageHeight,
-          cues: textCues,
+        final List<PageLayout> pages = _meteredLayout(
+          () => _engine.layout(
+            displayed,
+            pageWidth: pageWidth,
+            pageHeight: pageHeight,
+            cues: textCues,
+          ),
         );
         if (pages.isEmpty) {
           return Center(child: Text(l10n.noBars));
@@ -3239,7 +3365,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           key: ValueKey<int>(entry.index),
           itemCount: pages.length,
           itemBuilder: (BuildContext context, int index) =>
-              _tappablePage(pages[index], displayed, layer, strokes, textCues),
+              _tappablePage(pages[index], displayed, layer, textCues),
         );
       },
     );
@@ -3367,4 +3493,88 @@ class _SelectionAction extends StatelessWidget {
       ),
     ),
   );
+}
+
+// PURPOSE: Measure what the pen path costs, so a latency claim about handwriting is a number in the
+//          log rather than an adjective. The two numbers that matter are the pair the defect is
+//          made of: how many SAMPLES arrived, and how many full chart ENGRAVINGS those samples paid
+//          for. A sample that triggers an engraving is a sample that re-measured every bar of the
+//          song, re-packed its systems and re-paginated them, and the cost of that grows with the
+//          melody band, with the number of systems and — in FIT mode — with a bisection over the
+//          whole song. Alongside them the time spent serialising the verification probe state is
+//          counted, because that publication scales with every stroke the document has accumulated
+//          and is therefore the other thing that can make a later stroke slower than the first.
+//
+//          WHY A REPORT AND NOT AN ASSERTION. Nothing here fails: it writes a line. A measurement
+//          that a passing test suite could not see is exactly what this project needed when a
+//          latency regression arrived in the owner's hand with every gate green.
+// INPUTS: Nothing; the numbers are about one screen's pen path.
+// OUTPUTS: A `viewer.pen.cost` line, at most once per [_reportIntervalMs] while a stroke is being
+//          drawn, carrying the elapsed time, the sample count, the layout pass count and the two
+//          accumulated millisecond totals. A stroke that ends contributes no final line, so the
+//          last report of a stroke is partial: the sample count at its end is in the stroke's own
+//          `ink.stroke.commit` line, which is the number to compare across builds.
+// KEYWORDS: pen-latency, cost-measurement, layout-passes, structured-log, no-flood, ldd
+class _PenPathCost {
+  int _samples = 0;
+  int _layoutPasses = 0;
+  int _layoutMicros = 0;
+  int _publishMicros = 0;
+  DateTime _strokeStart = DateTime.now();
+  int _lastReportMicros = 0;
+
+  /// How often a report may be written while a stroke lasts.
+  ///
+  /// Four hundred milliseconds is a fifth of a slow stroke and several reports for a long one, which
+  /// is enough to see the cost GROW as the stroke lengthens without turning the log itself into a
+  /// cost: a line per sample would be a hundred lines a second at the sample rate a working pen
+  /// delivers, and reading the log would then perturb what it measures.
+  static const int _reportIntervalMs = 400;
+
+  /// Starts counting for a new stroke, dropping whatever the previous one accumulated.
+  void beginStroke() {
+    _samples = 0;
+    _layoutPasses = 0;
+    _layoutMicros = 0;
+    _publishMicros = 0;
+    _strokeStart = DateTime.now();
+    _lastReportMicros = 0;
+  }
+
+  /// Records that one more pointer sample arrived.
+  void noteSample() => _samples++;
+
+  /// Records one chart engraving and how long it took.
+  void noteLayout(int micros) {
+    _layoutPasses++;
+    _layoutMicros += micros;
+  }
+
+  /// Records the time one probe publication took.
+  void notePublish(int micros) => _publishMicros += micros;
+
+  /// Returns the report line when one is due, or null when the interval has not elapsed.
+  ///
+  /// The line is written even when nothing is wrong, because the point is the ratio the reader
+  /// compares across two builds: `layout_passes` equal to `samples` means the page was re-engraved
+  /// once per pen sample, and `layout_passes` zero means it never was.
+  String? reportIfDue() {
+    final int elapsedMicros = DateTime.now()
+        .difference(_strokeStart)
+        .inMicroseconds;
+    if (_lastReportMicros != 0 &&
+        elapsedMicros - _lastReportMicros < _reportIntervalMs * 1000) {
+      return null;
+    }
+    _lastReportMicros = elapsedMicros;
+    if (_samples == 0) {
+      return null;
+    }
+    final double perSample = _layoutMicros / 1000 / _samples;
+    return 'viewer.pen.cost elapsed_ms=${(elapsedMicros / 1000).round()} '
+        'samples=$_samples layout_passes=$_layoutPasses '
+        'layout_ms=${(_layoutMicros / 1000).toStringAsFixed(1)} '
+        'layout_per_sample_ms=${perSample.toStringAsFixed(2)} '
+        'publish_ms=${(_publishMicros / 1000).toStringAsFixed(1)}';
+  }
 }

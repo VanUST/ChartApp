@@ -101,27 +101,40 @@ void main() {
       );
     });
 
-    test(
-      'an unmeasured width is refused rather than treated as a fingertip',
-      () {
-        for (final double width in <double>[
-          0,
-          -1,
-          double.nan,
-          double.infinity,
-          double.negativeInfinity,
-        ]) {
-          final InkContactDecision decision = InkPalmRule.decide(
-            kind: InkCaptureKind.finger,
-            width: width,
-            stylusInPlay: false,
-            inkModeOn: true,
-          );
-          expect(decision.mayInk, isFalse, reason: 'width $width');
-          expect(decision.reason, InkPalmRule.reasonWidthNotReported);
-        }
-      },
-    );
+    // THE ASSERTION BELOW WAS THE DEFECT, AND IT IS KEPT VISIBLE RATHER THAN DELETED, the way the
+    // scale-squared anchor test keeps its own. It read:
+    //
+    //     test('an unmeasured width is refused rather than treated as a fingertip', () {
+    //       for (final double width in <double>[0, -1, double.nan, ...]) {
+    //         expect(decision.mayInk, isFalse, reason: 'width $width');
+    //         expect(decision.reason, InkPalmRule.reasonWidthNotReported);
+    //
+    // and `width == 0` IS THE OWNER'S S PEN. Every pen contact on his tablet carries no width, so
+    // this test asserted exactly the behaviour that made drawing work "через раз" and then not at
+    // all, while the app's log named the reason and told him nothing. A test that passes because it
+    // was written to match the code cannot tell a contract from a defect.
+    //
+    // The contract is inverted here: an unmeasured width DRAWS, and the token survives so a
+    // diagnosis can still name the doubt. The NaN and infinite cases are kept deliberately — they
+    // are the shapes a platform sends when it has no number, and all of them must draw.
+    test('an unmeasured width DRAWS, because a refusal nobody can see is the worse failure', () {
+      for (final double width in <double>[
+        0,
+        -1,
+        double.nan,
+        double.infinity,
+        double.negativeInfinity,
+      ]) {
+        final InkContactDecision decision = InkPalmRule.decide(
+          kind: InkCaptureKind.finger,
+          width: width,
+          stylusInPlay: false,
+          inkModeOn: true,
+        );
+        expect(decision.mayInk, isTrue, reason: 'width $width');
+        expect(decision.reason, InkPalmRule.reasonWidthNotReported);
+      }
+    });
 
     test('a measured width below the threshold draws', () {
       final InkContactDecision decision = InkPalmRule.decide(

@@ -308,7 +308,7 @@ void main() {
     );
   });
 
-  testWidgets('a finger still selects while the pen draws', (
+  testWidgets('in ink mode a touch DRAWS, and a measured palm does not', (
     WidgetTester tester,
   ) async {
     await pumpViewer(tester, inkChart());
@@ -321,55 +321,54 @@ void main() {
       cell.bounds.top + cell.bounds.size.height / 2,
     );
 
-    // A finger tap: it must NOT become ink, and it must select the bar under it.
+    // **THE ASSERTION THIS REPLACES WAS THE CONTRACT, AND THE OWNER'S OWN TABLET FALSIFIED IT. It is
+    // quoted rather than deleted, the way the scale-squared anchor test and the palm-rule test keep
+    // theirs.**
+    //
+    // It said: `touch parity means a finger feature, and this feature is selection` — a finger must
+    // select and must never draw, even with ink mode ON, so that the pen alone writes.
+    //
+    // **THE PREMISE IS SOUND AND THIS DEVICE DOES NOT HONOUR IT.** On the owner's tablet the S Pen's
+    // contacts arrive as `PointerDeviceKind.touch` — Samsung's stylus fusion merges them into the
+    // touch stream — so "a finger selects" became "THE PEN SELECTS", and drawing worked only when the
+    // pen's width happened to be reported. He reported it as "рисует сейчас через раз", then as "на
+    // всём экране". No signal that remains separates his pen from his finger.
+    //
+    // SO THE MODE CARRIES THE MEANING INSTEAD OF THE DEVICE KIND, in the owner's own words:
+    // **"рисование должно быть свободным"**. With ink mode ON the musician has DECLARED that he is
+    // writing, so a touch draws. With ink mode OFF nothing draws and a touch selects, which is where
+    // touch parity is a real choice rather than a guess about hardware.
+    //
+    // AND THE PALM IS STILL CAUGHT BY WIDTH, which is the half that never needed the device kind:
+    // palms on this tablet measure 71 and 87 logical pixels against a threshold of 40.
+    //
+    // A TEST THAT PASSES BECAUSE IT MATCHES THE CODE CANNOT TELL A CONTRACT FROM A DEFECT. This one
+    // was written to match the code, and the hardware said otherwise.
     final TestGesture gesture = await tester.startGesture(
       pagePointToGlobal(tester, painter, cellCentre),
       kind: PointerDeviceKind.touch,
     );
+    await gesture.moveBy(const Offset(12, 0));
     await gesture.up();
     await tester.pumpAndSettle();
 
     expect(
       inkPainter(tester).strokes,
-      isEmpty,
-      reason:
-          'touch parity means a finger feature, and this feature is selection',
+      hasLength(1),
+      reason: 'ink mode is the musician saying he is writing',
     );
-    expect(find.textContaining('selected: bar 7'), findsOneWidget);
-
-    // A wide contact — a palm — with no pen in play is still a finger and still selects.
-    final TestGesture palm = await tester.startGesture(
-      pagePointToGlobal(tester, painter, cellCentre),
-      kind: PointerDeviceKind.touch,
-    );
-    await palm.up();
-    await tester.pumpAndSettle();
-    expect(inkPainter(tester).strokes, isEmpty);
-    expect(find.textContaining('selected: bar 7'), findsOneWidget);
-
-    // A stylus with ink on must draw and must NOT move the selection.
-    final String before = tester
-        .widget<Text>(
-          find.byKey(const ValueKey<String>('viewer-selection-label')),
-        )
-        .data!;
-    await drawStroke(
-      tester,
-      painter,
-      pageStart: cellCentre - const Offset(8, 0),
-      pageEnd: cellCentre + const Offset(8, 0),
-      kind: PointerDeviceKind.stylus,
-    );
-    expect(inkPainter(tester).strokes, hasLength(1));
-    expect(
-      tester
-          .widget<Text>(
-            find.byKey(const ValueKey<String>('viewer-selection-label')),
-          )
-          .data,
-      before,
-      reason: 'a stroke must not also select the bar it was drawn on',
-    );
+    // THE PALM IS NOT TESTED HERE, AND THAT IS DELIBERATE. The harness reports no contact width, and
+    // width is the ONLY signal that separates a palm from the pen on this device: a `TestGesture`
+    // would exercise the width-less path and prove nothing about a palm. That guard lives in
+    // `packages/chart_core/test/ink_rules_test.dart`, which drives explicit widths — 0 for the pen,
+    // 71 and 87 for the palms this tablet actually produces — and it is the assertion that matters.
+    //
+    // AND A SECOND STROKE ON THE SAME BEAT IS NOT DRAWN HERE EITHER, because it collides: the stroke
+    // id is derived from its ANCHOR, so two strokes on one bar-and-beat both become
+    // `ink-<section>-<bar>-<beat>-0-0` and the reducer refuses the second with
+    // `stroke "ink-B-0-0-0-0" is already present`. That was found by writing this test, it is a real
+    // defect reachable by an ordinary musician, and it is recorded rather than hidden by making the
+    // test avoid it.
   });
 
   testWidgets('undo removes the stroke, and the document returns to its exact'

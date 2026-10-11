@@ -310,7 +310,10 @@ class PlacedMelodyStaff {
 /// The furthest from the staff [melodyStepOf] will write: ten staff steps beyond the staff's own
 /// extent, which is five ledger lines each way.
 ///
-/// The bound is the one `LayoutStyle.melodyBandHeight` reserves room for. A note beyond it is
+/// The bound is the one `LayoutStyle.melodyBandHeight` reserves room for — the band a song gets once
+/// it carries a note. A song whose declared staff is still empty reserves the smaller
+/// `LayoutStyle.melodyEmptyBandHeight`, which has no glyphs to bound and therefore never reaches
+/// this limit. A note beyond it is
 /// clamped to the last writable step ([melodyLowestStep] or [melodyHighestStep]) and its ledger
 /// lines stop there, so it is drawn at the wrong pitch — visibly, inside the staff rather than off
 /// the page. The alternative, drawing it at its true height, would put the glyph outside the band

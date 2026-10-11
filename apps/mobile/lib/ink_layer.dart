@@ -12,11 +12,23 @@
 // INPUTS: A live [EditSession], the current [PageLayout], and pointer events in the widget's own
 //         logical pixels.
 // OUTPUTS: Nothing directly: it appends an [InkStrokeAddEvent] through the session when a stroke
-//          finishes, and answers [decideContact] so the widget can route a tap to selection instead.
-//          A stroke whose first point lies over no bar is dropped, counted, and reported; it is not
-//          attached to the nearest bar, because that would be a guess about intent.
+//          finishes, answers [decideContact] so the widget can route a tap to selection instead,
+//          and ticks [liveRevision] so the ink layer of the screen repaints itself. A stroke whose
+//          first sample lies over no bar at all is anchored to the bar nearest it — see
+//          `chart_core`'s `resolveInkAnchor` — and is not attached to the nearest CELL, because a
+//          cell is a column of time and a point outside the bar has none.
+//
+//          WHY IT OWNS A REPAINT TICK, AND WHY THAT IS A PERFORMANCE DECISION RATHER THAN A
+//          RENDERING ONE. A pen delivers samples far faster than the screen draws, and the page is
+//          expensive to re-lay-out: on the owner's tablet, re-engraving during a stroke cost a
+//          layout pass on 105 of the 246 samples of one stroke, and the screen's verification-state
+//          publication cost 1 738 ms of a 2 882 ms stroke. Both were paid because a widget rebuilt
+//          itself on every sample. The layer is the only object that knows when the live preview
+//          actually changed, so the tick lives here and the screen listens to it — one small
+//          subtree repaints, and nothing re-engraves the chart. It renders nothing itself; see the
+//          file header on why the renderer stays in `chart_ui`.
 // KEYWORDS: ink-mode, eraser-mode, pointer-routing, palm-rule, stylus-proximity, op-log-writer,
-//           commit, erase-by-tap, anchor-local, web-ink
+//           commit, erase-by-tap, anchor-local, web-ink, repaint-tick, latency
 //
 // WHY THE ERASER IS A MODE AND NOT A SECOND SWITCH, AND WHY IT REUSES THE PALM RULE. The model
 // removes whole strokes (`oplog/ink.dart`), so erasing is an operation on the stroke list and not a
@@ -46,11 +58,12 @@
 // erosion is deliberately not offered.
 //
 // WHAT THIS DOES NOT DO. It does not render: a committed stroke reaches the screen because the
-// document changed and the painter was rebuilt, and drawing it anywhere else would put the same
-// information in two places. It does not own selection: it answers whether a contact would draw,
-// and the widget decides what a contact that does not draw means.
+// document changed and the ink painter was told to repaint, and drawing it anywhere else would put
+// the same information in two places. It does not own selection: it answers whether a contact would
+// draw, and the widget decides what a contact that does not draw means.
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 
@@ -170,6 +183,31 @@ class InkCaptureLayer {
 
   final List<ResolvedInkStroke> _live = <ResolvedInkStroke>[];
 
+  /// Ticks once whenever the live preview or the committed stroke list changed.
+  ///
+  /// A counter rather than a `ChangeNotifier` subclass, because the value is never read: what matters
+  /// is that a listener is called, and `ValueNotifier` already fires exactly once per assignment to a
+  /// new value. It is never disposed because its listener count is driven by the widget that
+  /// listens, which removes its own listener when it is disposed — the notifier and the layer go
+  /// together, so there is nothing left to notify after the layer is dropped.
+  final ValueNotifier<int> _liveRevision = ValueNotifier<int>(0);
+
+  /// The tick a screen listens to in order to repaint ONLY the ink layer while a stroke is drawn.
+  ///
+  /// See the file header for why the repaint is not a `setState`: a widget rebuild here re-engraves
+  /// the whole chart, which was measured at 105 layout passes and 1 738 ms of probe publication for
+  /// one 246-sample stroke on the owner's tablet.
+  Listenable get liveRevision => _liveRevision;
+
+  /// The committed strokes of the document this layer writes to, in render order.
+  ///
+  /// Read through the session rather than held: a screen that cached a list of strokes would keep
+  /// drawing the document from before the last commit, and this getter is what lets the ink layer
+  /// refresh itself without the surrounding widget rebuilding. The list is the WRITTEN document, so
+  /// a stroke placed by address against the page on screen moves with the music when the chart is
+  /// transposed.
+  List<InkStroke> get documentStrokes => _session.document.strokes;
+
   /// Milliseconds of the last event of any kind that proved a stylus is near the glass.
   ///
   /// Set by a stylus contact AND by a stylus hover, because the second is the whole reason the
@@ -184,7 +222,11 @@ class InkCaptureLayer {
   /// would silently win. See [InkMode].
   InkMode _mode = InkMode.off;
 
-  /// How many strokes this layer has taken up but refused for want of an anchor.
+  /// How many strokes this layer took up but refused because the page carried no bar.
+  ///
+  /// A page with no bar is the only refusal left: a sample over the margin, between two systems or
+  /// on the melody staff anchors to the bar nearest it, and is committed like any other. The count
+  /// is kept because a refusal must be visible in the published state rather than only in the log.
   int _dropped = 0;
 
   /// What FLUTTER's own pointer stream delivered, accumulated here because this is the one place the
@@ -211,7 +253,7 @@ class InkCaptureLayer {
   /// How many strokes the document holds right now.
   int get strokeCount => _session.document.strokes.length;
 
-  /// How many contacts this layer refused because their first point was over no bar.
+  /// How many contacts this layer refused because the page they landed on carried no bar.
   int get droppedStrokeCount => _dropped;
 
   /// How many contacts are drawing right now, which is normally zero or one.
@@ -484,11 +526,15 @@ class InkCaptureLayer {
   // INPUTS: pointer — the engine's pointer id, which is the identity of this contact. page — the
   //         layout being drawn on. kind — the pointer kind. position — where the contact landed, in
   //         the widget's pixels. pressure and time — the first sample's values.
-  // OUTPUTS: True when a stroke was opened; false when the first point resolved to no anchor, in
+  // OUTPUTS: True when a stroke was opened; false only when the page carries no bar to anchor to, in
   //          which case the contact is tracked as refused and no stroke will be committed. A second
   //          contact with the same pointer id replaces the first, because one pointer id cannot be
   //          two contacts and the older one is a leaked stroke rather than a real second hand.
-  // KEYWORDS: begin-stroke, anchor-resolution, admitted-contact, replace-guard
+  //          The `ink.stroke.begin` line reports WHICH rule chose the anchor (`basis=`) and how far
+  //          into the margin the stroke began (`margin_px=`), because "the mark was kept" and "the
+  //          mark was hung on the nearest bar" are two different facts a report must be able to
+  //          state separately.
+  // KEYWORDS: begin-stroke, anchor-resolution, admitted-contact, replace-guard, margin-writing
   /// Begins drawing a contact the rule admitted.
   bool beginStroke({
     required int pointer,
@@ -515,7 +561,7 @@ class InkCaptureLayer {
       _dropped++;
       debugPrint(
         'ink.stroke.refused pointer=$pointer kind=${captureKind.token} '
-        'reason=no-anchor-at-start surface=(${position.x.toStringAsFixed(1)},'
+        'reason=page-has-no-bar surface=(${position.x.toStringAsFixed(1)},'
         '${position.y.toStringAsFixed(1)}) scale=${page.scale}',
       );
       return false;
@@ -525,7 +571,8 @@ class InkCaptureLayer {
     _refreshLive(page);
     debugPrint(
       'ink.stroke.begin pointer=$pointer kind=${captureKind.token} '
-      'anchor=${assembler.anchor} '
+      'anchor=${assembler.anchor} basis=${assembler.anchorBasis?.token ?? 'none'} '
+      'margin_px=${assembler.anchorDistancePx.toStringAsFixed(1)} '
       'surface=(${position.x.toStringAsFixed(1)},${position.y.toStringAsFixed(1)}) '
       'scale=${page.scale} pressure=${pressure.toStringAsFixed(2)}',
     );
@@ -605,12 +652,13 @@ class InkCaptureLayer {
   //          means when it cancels a pointer: the contact was taken away rather than finished.
   // INPUTS: pointer — the contact.
   // OUTPUTS: Nothing.
-  // KEYWORDS: cancel, discard, pointer-cancel
+  // KEYWORDS: cancel, discard, pointer-cancel, repaint-tick
   /// Abandons a drawing contact without committing anything.
   void cancelStroke(int pointer) {
     final InkStrokeAssembler? assembler = _assemblers.remove(pointer);
     assembler?.cancel();
     _live.clear();
+    _liveRevision.value++;
     debugPrint('ink.stroke.cancel pointer=$pointer dropped=$_dropped');
   }
 
@@ -753,8 +801,10 @@ class InkCaptureLayer {
   //          visible before it is committed.
   // INPUTS: page — the layout, used to resolve each open stroke's anchor rectangle.
   // OUTPUTS: Nothing. The list is rebuilt rather than mutated so a painter holding the previous list
-  //          keeps a value rather than seeing it change underneath it.
-  // KEYWORDS: live-preview, rebuild, anchor-resolution, immutability
+  //          keeps a value rather than seeing it change underneath it. The repaint tick is raised
+  //          here and nowhere else on this path, so the screen's listener is called exactly when the
+  //          preview has something new to draw.
+  // KEYWORDS: live-preview, rebuild, anchor-resolution, immutability, repaint-tick
   void _refreshLive(PageLayout page) {
     final List<ResolvedInkStroke> next = <ResolvedInkStroke>[];
     for (final InkStrokeAssembler assembler in _assemblers.values) {
@@ -783,6 +833,7 @@ class InkCaptureLayer {
     _live
       ..clear()
       ..addAll(next);
+    _liveRevision.value++;
   }
 
   // PURPOSE: Name the colour a stroke is stored with, per tool.

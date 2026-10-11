@@ -259,7 +259,9 @@ void _reportStaff(String label, PageLayout page, LayoutStyle style) {
         ].join(',');
   stdout.writeln(
     'probe.staff name=$label system_height=${system.bounds.size.height} '
-    'band=${style.melodyBandHeight} empty=${staff.isEmpty} '
+    'band=${style.melodyBandHeight} '
+    'empty_band=${style.melodyEmptyBandHeight} '
+    'empty=${staff.isEmpty} '
     'staff_top=${staff.isEmpty ? 'none' : staff.bounds.top.toStringAsFixed(1)} '
     'staff_bottom=${staff.isEmpty ? 'none' : staff.bounds.bottom.toStringAsFixed(1)} '
     'line_ys=$lines clef=${staff.clef} glyphs=${staff.glyphs.length}',
