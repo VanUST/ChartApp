@@ -2105,6 +2105,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Touch a beat of the staff to write its note.'**
   String get melodyTapStaffHint;
+
+  /// The one always-visible button's tooltip while the library rail and the top block are shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide the list and the panels: more room for the chart'**
+  String get tooltipChromeHide;
+
+  /// The same button's tooltip while the rail and the top block are hidden, so the musician can get them back.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the list and the panels'**
+  String get tooltipChromeShow;
+
+  /// The selection line's text while the eraser is the active tool, so the mode and what it does are stated in words rather than by a lit icon.
+  ///
+  /// In en, this message translates to:
+  /// **'Eraser on: touch a stroke and the whole stroke goes'**
+  String get eraserActiveHint;
 }
 
 class _AppLocalizationsDelegate

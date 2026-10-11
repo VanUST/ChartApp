@@ -177,6 +177,7 @@ import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
 import 'text_cue_sheet.dart';
 import 'two_finger_view_gesture.dart';
+import 'ui_kit.dart';
 
 /// Turns a reference into the library it holds.
 ///
@@ -288,7 +289,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// a second literal somewhere else would silently change what the page is engraved for. It is
   /// deliberately NOT read on a phone, where the list is a drawer and the chart gets the whole
   /// window.
-  static const double _songRailWidth = 260;
+  static const double _songRailWidth = UiKit.railWidth;
 
   late final TextEditingController _pathController;
 
@@ -312,6 +313,27 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   int _selectedSong = 0;
   String? _error;
   bool _loading = false;
+
+  /// Whether the library rail and the top block are hidden, giving their room to the document.
+  ///
+  /// OWNER DECISION: the rail and the top block hide TOGETHER, and one small always-visible button
+  /// brings them back. Hiding them separately was rejected, as was hiding only the top block, and a
+  /// GESTURE was rejected with them — which is why this is a button and not a swipe. D34 gives the
+  /// page's own gestures to the pen (always writes) and to two fingers (pan and pinch), so a third
+  /// gesture over the same glass would be a third thing competing for the same contacts, and the
+  /// owner picked the control that needs none.
+  ///
+  /// It is NOT persisted: the chart is what is being read, and a surface that opened with the list
+  /// gone and no obvious way to get it back would be a state the musician did not set on this run.
+  bool _chromeHidden = false;
+
+  /// The pane size the last `viewer.page.pane` line reported, so it is logged on a CHANGE and not on
+  /// every layout pass.
+  ///
+  /// The pane's height is the number hiding the chrome is FOR, and a number nobody can read off the
+  /// running application is a claim rather than a measurement — see `_buildPages`.
+  double _loggedPaneWidth = -1;
+  double _loggedPaneHeight = -1;
 
   /// How far each song is shown from its written key, by [IRealSong.index].
   ///
@@ -1745,20 +1767,32 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final EditSession? session = _currentSession;
     final IRealLibrary? library = _library;
     final bool phone = _isPhoneWidth(MediaQuery.sizeOf(context).width);
+    final bool chrome = !_chromeHidden;
     return Scaffold(
-      appBar: AppBar(
-        // The title names the application, not the file, and on a phone it names it in one word:
-        // eight actions beside a two-word title is what left the bar reading `Cha…`, and a title
-        // that cannot be read is worse than a shorter one that can. The phone form is the brand
-        // name alone, which is the same string in every language and so is not in the catalogue.
-        title: Text(phone ? 'ChartApp' : l10n.appTitle),
-        actions: phone
-            ? <Widget>[_buildOverflowMenu(context, session)]
-            : <Widget>[
-                ..._documentTools(context, session),
-                ..._sheetActions(context, session),
-              ],
-      ),
+      // THE APP BAR IS THE TOP BLOCK'S FIRST HALF, and hiding the chrome replaces it rather than
+      // removing it: the document tools live here on a tablet, and a hidden state that took the pen
+      // and the eraser away would be a state a musician writing cannot get out of without leaving
+      // the page. What goes is everything that does not change what is already on the page.
+      appBar: chrome
+          ? AppBar(
+              // The title names the application, not the file, and on a phone it names it in one
+              // word: eight actions beside a two-word title is what left the bar reading `Cha…`, and
+              // a title that cannot be read is worse than a shorter one that can. The phone form is
+              // the brand name alone, which is the same string in every language and so is not in
+              // the catalogue.
+              title: Text(phone ? 'ChartApp' : l10n.appTitle),
+              actions: phone
+                  ? <Widget>[
+                      _chromeToggle(context),
+                      _buildOverflowMenu(context, session),
+                    ]
+                  : <Widget>[
+                      ..._documentTools(context, session),
+                      ..._sheetActions(context, session),
+                      _chromeToggle(context),
+                    ],
+            )
+          : _buildDocumentBar(context),
       // The drawer exists only when there is a library to list: an empty drawer over a screen that
       // says "load a file" offers a control that opens nothing.
       drawer: phone && library != null && library.songs.isNotEmpty
@@ -1768,12 +1802,72 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       bottomNavigationBar: phone ? _buildPhoneDock(context, session) : null,
       body: Column(
         children: <Widget>[
-          _buildPathBar(context),
+          // The path bar is the entry point to a chart and the first thing that stops earning its
+          // height once one is open, so it belongs to the chrome and goes with it.
+          if (chrome) _buildPathBar(context),
           if (error != null) _buildError(context, error),
           Expanded(child: _buildBody(context)),
-          _buildStatusBar(context),
+          if (chrome) _buildStatusBar(context),
         ],
       ),
+    );
+  }
+
+  // PURPOSE: Build the one bar the document keeps while the rest of the chrome is hidden, holding
+  //          the control that brings everything back and — on a tablet, where there is no dock — the
+  //          four tools that change what is already written.
+  // INPUTS: context — the build context. session — the session of the song on screen, or null.
+  // OUTPUTS: A bar [UiKit.toolBarHeight] tall. On a phone it holds the toggle alone, because the
+  //          dock below the chart already carries the four tools and a second copy of them in a
+  //          second place is how two surfaces come to disagree about which mode is on.
+  // KEYWORDS: document-bar, chrome-hidden, always-visible-toggle, tools-stay-reachable, no-duplicate
+  PreferredSizeWidget _buildDocumentBar(BuildContext context) {
+    final EditSession? session = _currentSession;
+    final bool phone = _isPhoneWidth(MediaQuery.sizeOf(context).width);
+    return AppBar(
+      toolbarHeight: UiKit.toolBarHeight,
+      titleSpacing: UiKit.spaceM,
+      title: phone ? null : Row(children: _documentTools(context, session)),
+      actions: <Widget>[_chromeToggle(context)],
+    );
+  }
+
+  // PURPOSE: Build the ONE always-visible control that hides the library rail and the top block, and
+  //          brings them back — the owner's own answer to "make the top block open and close", chosen
+  //          over a gesture precisely because a button needs no gesture of its own.
+  // INPUTS: context — the build context.
+  // OUTPUTS: An [IconButton] that is present in every shell form and in both chrome states, so the
+  //          control never moves and never disappears: a control that vanishes with the thing it
+  //          controls is a state the musician can enter and not leave.
+  // KEYWORDS: chrome-toggle, always-visible, hide-rail-and-top, button-not-gesture, d34-safe
+  Widget _chromeToggle(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return IconButton(
+      key: const ValueKey<String>('viewer-chrome-toggle'),
+      icon: Icon(_chromeHidden ? Icons.fullscreen_exit : Icons.fullscreen),
+      tooltip: _chromeHidden ? l10n.tooltipChromeShow : l10n.tooltipChromeHide,
+      onPressed: _toggleChrome,
+    );
+  }
+
+  // PURPOSE: Turn the library rail and the top block on or off together, and report the pane the
+  //          decision left behind.
+  // INPUTS: None.
+  // OUTPUTS: Nothing. Rebuilds the shell. The two surfaces are ONE decision and not two, because
+  //          that is what the owner chose: a rail hidden over a visible scene bar would be a screen
+  //          that is neither reading nor editing.
+  //
+  //          THE LINE REPORTS THE WINDOW AND NOT THE PANE, and that is deliberate: the window is
+  //          known here, while the pane is only known after the frame this call causes. The pane's
+  //          own number is printed by `_buildPages`, once per size change, which is where it is
+  //          actually known.
+  // KEYWORDS: chrome-toggle, one-decision, rebuild, structured-log, measurable
+  void _toggleChrome() {
+    final Size window = MediaQuery.sizeOf(context);
+    setState(() => _chromeHidden = !_chromeHidden);
+    debugPrint(
+      'viewer.chrome.toggle hidden=$_chromeHidden '
+      'window=${window.width.toStringAsFixed(0)}x${window.height.toStringAsFixed(0)}',
     );
   }
 
@@ -1796,6 +1890,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       IconButton(
         key: const ValueKey<String>('viewer-ink-toggle'),
         icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
+        isSelected: _inkOn,
         tooltip: _inkOn
             ? l10n.tooltipInkOn
             : (_eraserOn ? l10n.tooltipInkOffEraserOn : l10n.tooltipInkOff),
@@ -1809,9 +1904,29 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       // discover a mode from an icon. This button, `_toggleEraser` below `_toggleInk`, the
       // `_eraserOn` getter beside `_inkOn`, the `eraser` keys in `_inkProbeState`, and the eraser
       // branch of `_onPageTapUp` are the whole of this feature's footprint in this file.
+      //
+      // WHY THE GLYPH IS DRAWN RATHER THAN TAKEN FROM THE FONT. It was `Icons.auto_fix_normal`,
+      // which is a wand with sparkles and reads as a feature that does something FOR the musician
+      // rather than as the tool that removes what he wrote; the owner's report is that the eraser is
+      // missing outright, and a wand is a candidate explanation for that. The bundled Material Icons
+      // font of this Flutter version carries NO eraser glyph at all, and the nearest substitute
+      // (`Icons.highlight_remove`) was built, looked at on the tablet and rejected for reading as a
+      // circle with a cross — that is "cancel", not "rub". `_EraserGlyph` draws the picture everyone
+      // already knows, and `_buildSelectionLine` states the mode in WORDS as well, because a glyph
+      // nobody can name is how this tool went missing in the first place.
       IconButton(
         key: const ValueKey<String>('viewer-eraser-toggle'),
-        icon: const Icon(Icons.auto_fix_normal),
+        // The colour is read from the button's OWN `IconTheme`, which `IconButton` sets from its
+        // enabled and selected state: a drawn glyph that picked its own colour would stay dark when
+        // the button is disabled and would not light up when the eraser is on.
+        icon: Builder(
+          builder: (BuildContext context) => _EraserGlyph(
+            color:
+                IconTheme.of(context).color ??
+                Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        isSelected: _eraserOn,
         tooltip: _eraserOn ? l10n.tooltipEraserOn : l10n.tooltipEraserOff,
         onPressed: session == null ? null : () => _toggleEraser(session),
       ),
@@ -2353,7 +2468,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     if (!sourceIsFilePath) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        padding: UiKit.barPadding,
         child: Align(
           alignment: Alignment.centerLeft,
           child: FilledButton.icon(
@@ -2366,7 +2481,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       );
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      padding: UiKit.barPadding,
       child: Row(
         children: <Widget>[
           Expanded(
@@ -2505,13 +2620,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       children: <Widget>[
         // The rail is NOT built on a phone rather than built and hidden: a `SizedBox` still in the
         // tree would still be taking its width, and the list would then exist twice — once in the
-        // drawer and once in a column the reader cannot see.
-        if (!phone) ...<Widget>[
+        // drawer and once in a column the reader cannot see. The same rule holds when the chrome is
+        // hidden, for the same reason: this is the owner's "hide the library" and a rail that kept
+        // its 260 pixels while drawing nothing would be hiding in name only.
+        if (!phone && !_chromeHidden) ...<Widget>[
           SizedBox(
             width: _songRailWidth,
             child: _buildSongList(context, library),
           ),
-          const VerticalDivider(width: 1),
+          const VerticalDivider(width: UiKit.hairline),
         ],
         Expanded(child: _buildSongPane(context, library, songIndex)),
       ],
@@ -2644,113 +2761,139 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final PageMode mode = _pageModeFor(constraints.maxWidth);
+        // THE TOP BLOCK, IN ONE PIECE. Everything from the chart's title to the selection line is
+        // one `if`: the owner chose that the rail and the top block hide TOGETHER, and a half-hidden
+        // state — a title over a hidden scene bar — is exactly the "does not look like one whole"
+        // complaint this arrangement exists to answer.
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: Row(
-                children: <Widget>[
-                  // The title is where the song's own facts are read, so it is where they are
-                  // edited: tapping it opens the sheet that holds the title, the composer, the style
-                  // and the tempo. The pencil is what says so — a title that silently turns out to
-                  // be a button is not discoverable on its own.
-                  Expanded(
-                    child: Tooltip(
-                      message: l10n.songInfoTooltip,
-                      child: InkWell(
-                        key: const ValueKey<String>('viewer-song-info'),
-                        onTap: () => _openSongInfo(
-                          context,
-                          session,
-                          SongMetadataField.title,
-                        ),
-                        child: Row(
-                          children: <Widget>[
-                            Flexible(
-                              child: Text(
-                                _titleFor(entry, l10n),
-                                style: Theme.of(context).textTheme.titleMedium,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+            if (!_chromeHidden) ...<Widget>[
+              Padding(
+                padding: UiKit.paneHeaderPadding,
+                child: Row(
+                  children: <Widget>[
+                    // The title is where the song's own facts are read, so it is where they are
+                    // edited: tapping it opens the sheet that holds the title, the composer, the style
+                    // and the tempo. The pencil is what says so — a title that silently turns out to
+                    // be a button is not discoverable on its own.
+                    Expanded(
+                      child: Tooltip(
+                        message: l10n.songInfoTooltip,
+                        child: InkWell(
+                          key: const ValueKey<String>('viewer-song-info'),
+                          onTap: () => _openSongInfo(
+                            context,
+                            session,
+                            SongMetadataField.title,
+                          ),
+                          child: Row(
+                            children: <Widget>[
+                              Flexible(
+                                child: Text(
+                                  _titleFor(entry, l10n),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(
-                              Icons.edit_outlined,
-                              size: 14,
-                              color: Color(0xFF486581),
-                            ),
-                          ],
+                              const SizedBox(width: UiKit.spaceXs),
+                              const Icon(
+                                Icons.edit_outlined,
+                                size: 14,
+                                color: Color(0xFF486581),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  // The EDITED count, which is what the page under it is drawn from. Transposition
-                  // does not change how many bars a chart has, so `displayed` and the written
-                  // session document agree on this number and either would do; the displayed one is
-                  // already here.
-                  Text(l10n.barCount(displayed.writtenBarCount)),
-                  if (entry.issues.isNotEmpty) ...<Widget>[
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => unawaited(_showIssues(context, entry)),
-                      child: Text(l10n.issueCount(entry.issues.length)),
-                    ),
+                    // The EDITED count, which is what the page under it is drawn from. Transposition
+                    // does not change how many bars a chart has, so `displayed` and the written
+                    // session document agree on this number and either would do; the displayed one is
+                    // already here.
+                    Text(l10n.barCount(displayed.writtenBarCount)),
+                    if (entry.issues.isNotEmpty) ...<Widget>[
+                      const SizedBox(width: UiKit.spaceS),
+                      TextButton(
+                        onPressed: () => unawaited(_showIssues(context, entry)),
+                        child: Text(l10n.issueCount(entry.issues.length)),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            SceneBar(
-              position: position,
-              songCount: songCount,
-              song: displayed,
-              semitones: semitones,
-              pageMode: mode,
-              // The bar's FORM follows the SHELL's decision about the surface, taken from the
-              // WINDOW by [_isBarCompact] — not from the pane this bar is drawn in. The pane is the
-              // right measure for the page mode above and the wrong one here: the owner's tablet has
-              // a 564-pixel pane, so a bar that called itself narrow on that number would drop STYLE
-              // and REPEATS on the owner's own device while the shell around it was still the
-              // tablet's. The window is read on BOTH axes, and the height is the one that matters on
-              // a phone held sideways: see [_isBarCompact] and A49.
-              compact: _isBarCompact(MediaQuery.sizeOf(context)),
-              // The key badge keeps its two-tap meaning in BOTH senses of D14: on a chart read on
-              // its own it edits the editor interval, and while a programme entry is playing it
-              // edits that entry's scene interval through the setlist log. Which one is in force is
-              // the same `_playingItemFor` answer the display used, so the badge and the page can
-              // never disagree about which document is being changed.
-              onOpenKeyGrid: () => unawaited(
-                playing == null ? _chooseKey(entry) : _chooseSceneKey(entry),
+              SceneBar(
+                position: position,
+                songCount: songCount,
+                song: displayed,
+                semitones: semitones,
+                pageMode: mode,
+                // The bar's FORM follows the SHELL's decision about the surface, taken from the
+                // WINDOW by [_isBarCompact] — not from the pane this bar is drawn in. The pane is the
+                // right measure for the page mode above and the wrong one here: the owner's tablet has
+                // a 564-pixel pane, so a bar that called itself narrow on that number would drop STYLE
+                // and REPEATS on the owner's own device while the shell around it was still the
+                // tablet's. The window is read on BOTH axes, and the height is the one that matters on
+                // a phone held sideways: see [_isBarCompact] and A49.
+                compact: _isBarCompact(MediaQuery.sizeOf(context)),
+                // The key badge keeps its two-tap meaning in BOTH senses of D14: on a chart read on
+                // its own it edits the editor interval, and while a programme entry is playing it
+                // edits that entry's scene interval through the setlist log. Which one is in force is
+                // the same `_playingItemFor` answer the display used, so the badge and the page can
+                // never disagree about which document is being changed.
+                onOpenKeyGrid: () => unawaited(
+                  playing == null ? _chooseKey(entry) : _chooseSceneKey(entry),
+                ),
+                onPageModeChanged: (PageMode picked) =>
+                    setState(() => _chosenPageMode = picked),
+                // THE VIEW THE MUSICIAN HAS ON THE CHART, shown and driven where he reads. D33 asks
+                // for a zoom reachable from the interface beside the touch gesture, and D34 gives the
+                // GESTURE to two fingers; these three controls are the interface half, and the middle
+                // one is how he gets back to a known view after a pan he cannot see the edges of.
+                zoom: _viewZoom,
+                onZoomIn: () => _zoomBy(1.25),
+                onZoomOut: () => _zoomBy(0.8),
+                onZoomReset: _resetView,
+                // The tempo and the style are edited where they are shown. The sheet is one surface
+                // for all four facts and opens with the tapped field focused, so the tempo a musician
+                // pressed is the tempo the cursor is in.
+                onEditTempo: () =>
+                    _openSongInfo(context, session, SongMetadataField.tempo),
+                onEditStyle: () =>
+                    _openSongInfo(context, session, SongMetadataField.style),
               ),
-              onPageModeChanged: (PageMode picked) =>
-                  setState(() => _chosenPageMode = picked),
-              // THE VIEW THE MUSICIAN HAS ON THE CHART, shown and driven where he reads. D33 asks
-              // for a zoom reachable from the interface beside the touch gesture, and D34 gives the
-              // GESTURE to two fingers; these three controls are the interface half, and the middle
-              // one is how he gets back to a known view after a pan he cannot see the edges of.
-              zoom: _viewZoom,
-              onZoomIn: () => _zoomBy(1.25),
-              onZoomOut: () => _zoomBy(0.8),
-              onZoomReset: _resetView,
-              // The tempo and the style are edited where they are shown. The sheet is one surface
-              // for all four facts and opens with the tapped field focused, so the tempo a musician
-              // pressed is the tempo the cursor is in.
-              onEditTempo: () =>
-                  _openSongInfo(context, session, SongMetadataField.tempo),
-              onEditStyle: () =>
-                  _openSongInfo(context, session, SongMetadataField.style),
-            ),
-            const SizedBox(height: 6),
-            _buildSelectionLine(context, displayed),
+              _buildSelectionLine(context, displayed),
+            ],
+            // THE DOCUMENT IS FRAMED BY THE SHELL AND NOT BY ITSELF. One rounded field behind the
+            // music, drawn from the same corner radius as every other framed surface, is what makes
+            // the pane read as the page rather than as the leftover part of the screen — and it is a
+            // background and an outline and NOT a padding, because a frame that consumed pixels would
+            // be paying for looks with exactly the room this change exists to return.
             Expanded(
-              child: _buildPages(
-                entry,
-                displayed,
-                mode,
-                layer,
-                strokes,
-                textCues,
+              child: DecoratedBox(
+                key: const ValueKey<String>('viewer-document-frame'),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(UiKit.radius),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                    width: UiKit.hairline,
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(UiKit.radius),
+                  child: _buildPages(
+                    entry,
+                    displayed,
+                    mode,
+                    layer,
+                    strokes,
+                    textCues,
+                  ),
+                ),
               ),
             ),
           ],
@@ -3469,8 +3612,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final String hint = editable
         ? l10n.selectionHintChord
         : l10n.selectionHintForm;
+    // THE ERASER'S OWN WORDS, WHILE THE ERASER IS THE TOOL IN FORCE. Its icon is a glyph and its
+    // tooltip needs a long press on a tablet, so the one place the mode can say what it does in
+    // words is this line: with nothing selected the line has nothing else to say, and a musician
+    // who has just switched tools is exactly the person who needs to be told what a touch will do.
     final String text = hit == null
-        ? l10n.selectionPrompt
+        ? (_eraserOn ? l10n.eraserActiveHint : l10n.selectionPrompt)
         : _selectionLabel(song, hit, l10n);
     final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
@@ -3521,7 +3668,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // rather than at their top, which is what makes one row read as one row.
     final bool cellSelected = editable && session != null;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      padding: UiKit.paneRowPadding,
       child: Wrap(
         spacing: 8,
         runSpacing: 4,
@@ -3646,6 +3793,23 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         final double pageWidth = constraints.maxWidth;
         final double pageHeight = constraints.maxHeight;
         _lastPageSurface = Size(pageWidth, pageHeight);
+        // THE PANE'S OWN SIZE, PRINTED WHEN IT CHANGES AND NOWHERE ELSE. This is the number the
+        // hideable chrome is FOR — `FIT` engraves from the pane's width AND its verdict depends on
+        // the pane's height — and a claim about it that nobody can read off the running application
+        // is exactly the kind of number this project has three times caught being asserted rather
+        // than measured. Logging on a CHANGE rather than per frame is what keeps it off the pen's
+        // path: a pan rebuilds this subtree every frame, and a line per frame would be a flood.
+        if (_loggedPaneWidth != pageWidth || _loggedPaneHeight != pageHeight) {
+          _loggedPaneWidth = pageWidth;
+          _loggedPaneHeight = pageHeight;
+          debugPrint(
+            'viewer.page.pane width=${pageWidth.toStringAsFixed(1)} '
+            'height=${pageHeight.toStringAsFixed(1)} '
+            'area=${(pageWidth * pageHeight).toStringAsFixed(0)} '
+            'chrome_hidden=$_chromeHidden mode=${mode.name} '
+            'song="${_rawTitleFor(entry)}"',
+          );
+        }
         _lastPageMode = mode;
         // The view belongs to the chart and the page mode it is being read in — not to the app. A
         // fresh chart opens at the identity, and switching how the chart is engraved starts the
@@ -3736,7 +3900,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          as the widget is in the same place, which is what lets a gesture survive the rebuild
   //          its own first frame caused: a recogniser replaced mid-gesture would lose the touches
   //          it is measuring and the gesture would end at the first frame it moved.
-  // KEYWORDS: gesture-detector, recogniser-factory, stable-across-rebuild, d34
+  //
+  //          THE GATE IS BOUND TO THE INK LAYER AND NOT TO A RULE OF ITS OWN. [refuseTouch] asks
+  //          `InkCaptureLayer.refuseViewGestureTouch`, so the question "may this contact move the
+  //          page?" is answered by the one object that also answers "may this contact write?" — the
+  //          palm rule, the width arbitration and the pen's proximity window all live there, and a
+  //          copy here is exactly how the two answers would come to disagree. See the ink layer for
+  //          why a palm-like contact and a pen in play are both refusals.
+  // KEYWORDS: gesture-detector, recogniser-factory, stable-across-rebuild, d34, palm-refusal,
+  //           single-rule-binding
   Widget _twoFingerView(Widget child) => RawGestureDetector(
     // OPAQUE, so a touch on the page's own white space still reaches the recogniser: that is where
     // the musician's two fingers most often land, and a deferring detector would let exactly those
@@ -3752,11 +3924,48 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                 onUpdate: _onViewGestureUpdate,
                 onEnd: _onViewGestureEnd,
               );
+              recognizer.refuseTouch = _refuseViewGestureTouch;
+              recognizer.onTouchRefused = _onViewGestureTouchRefused;
             },
           ),
     },
     child: child,
   );
+
+  // PURPOSE: Answer whether one touch may become part of the two-finger view gesture, which is the
+  //          ruling that keeps a resting palm from panning the page under a writing hand.
+  // INPUTS: event — the engine's pointer-down, whose kind, radius and timestamp are the three
+  //         numbers the ink layer's rule reads.
+  // OUTPUTS: Null when the touch is admitted, otherwise the ink layer's own reason token. A null
+  //          layer — a build in which the pane has not made one yet — admits, because a gesture
+  //          refused by an absence would be a control that works only sometimes.
+  // KEYWORDS: view-gesture-gate, palm-rule-delegation, null-admits, no-second-copy
+  String? _refuseViewGestureTouch(PointerDownEvent event) {
+    final InkCaptureLayer? layer = _activeInkLayer;
+    if (layer == null) {
+      return null;
+    }
+    return layer.refuseViewGestureTouch(
+      kind: event.kind,
+      width: InkInputMapper.contactWidthOf(event),
+      time: InkInputMapper.millisOf(event),
+    );
+  }
+
+  // PURPOSE: Report a touch the view gesture refused, so the owner's defect has a log line that
+  //          names which half of the rule fired rather than a silently missing pan.
+  // INPUTS: event — the refused pointer-down. reason — the ink layer's stable reason token.
+  // OUTPUTS: Nothing. One line per refused contact: a CONTACT, not a move, so this cannot flood a
+  //          log the way a per-sample probe would, and cannot cost anything on the pen's path.
+  // KEYWORDS: view-gesture-refusal, instrumented-decision, palm-like-width, pen-in-play, cheap-once
+  void _onViewGestureTouchRefused(PointerDownEvent event, String reason) {
+    debugPrint(
+      'viewer.view.gesture.refuse pointer=${event.pointer} reason=$reason '
+      'kind=${event.kind.name} width=${InkInputMapper.contactWidthOf(event).toStringAsFixed(1)} '
+      'at=(${event.localPosition.dx.toStringAsFixed(1)},'
+      '${event.localPosition.dy.toStringAsFixed(1)})',
+    );
+  }
 
   // PURPOSE: Produce the pages of one chart for one pane, once, and hand back the same pages while
   //          the inputs that determine them are unchanged.
@@ -3923,13 +4132,84 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                 )
               : l10n.songCount(library.songs.length));
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: UiKit.statusPadding,
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(summary, style: Theme.of(context).textTheme.bodySmall),
       ),
     );
   }
+}
+
+// PURPOSE: Draw the one glyph this application could not take from the icon font: an eraser.
+//          The bundled Material Icons of this Flutter version carry NO eraser at all — their nearest
+//          relatives are the `auto_fix_*` wands, and `Icons.highlight_remove` renders as a circle
+//          with a cross, which reads as "cancel" and was rejected after looking at it on the tablet.
+//          A wand is worse still: the owner's report is that the eraser is missing outright, and a
+//          glyph that suggests a feature does something FOR him is a candidate explanation for that.
+//          So the tool gets the picture everyone already knows, drawn from two rectangles.
+// INPUTS: color — the ink the glyph is stroked and tipped with, taken from the button's own icon
+//         theme so a disabled or selected button tints it the way Material does.
+// OUTPUTS: A [CustomPaint] of exactly 24 logical pixels square, which is the icon slot every
+//          [IconButton] in this bar reserves. Nothing throws; every coordinate is a constant.
+// KEYWORDS: eraser-glyph, custom-paint, no-font-glyph, discoverability, tool-icon, self-contained
+class _EraserGlyph extends StatelessWidget {
+  /// Creates the eraser glyph in [color].
+  const _EraserGlyph({required this.color});
+
+  /// The colour the outline and the eraser's tip are drawn in.
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 24,
+    height: 24,
+    child: CustomPaint(painter: _EraserGlyphPainter(color)),
+  );
+}
+
+/// Paints the eraser: a block tilted the way a hand holds one, with the working tip filled in.
+class _EraserGlyphPainter extends CustomPainter {
+  /// Creates a painter in [color].
+  const _EraserGlyphPainter(this.color);
+
+  /// The colour of the outline and of the tip.
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double unit = size.shortestSide / 24;
+    canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
+    // A hand holds an eraser tilted; the tilt is what makes the block read as an eraser rather than
+    // as a card. About 32 degrees, which is the angle the two corners still clear the square at.
+    canvas.rotate(-0.56);
+    final RRect body = RRect.fromRectAndRadius(
+      Rect.fromLTRB(-8 * unit, -5 * unit, 8 * unit, 5 * unit),
+      Radius.circular(1.6 * unit),
+    );
+    canvas.drawRRect(body, Paint()..color = color.withValues(alpha: 0.18));
+    // THE TIP IS THE PART THAT DOES THE WORK, so it is the only part drawn solid: a reader who sees
+    // only two shapes still sees "a block with a working end", which is what an eraser is.
+    canvas.save();
+    canvas.clipRRect(body);
+    canvas.drawRect(
+      Rect.fromLTRB(1.5 * unit, -6 * unit, 9 * unit, 6 * unit),
+      Paint()..color = color,
+    );
+    canvas.restore();
+    canvas.drawRRect(
+      body,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5 * unit,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_EraserGlyphPainter old) => old.color != color;
 }
 
 /// One named action beside the selection line, sized for a thumb and worded for the surface it

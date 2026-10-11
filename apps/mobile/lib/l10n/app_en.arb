@@ -1192,5 +1192,14 @@
   "@formStaffMelodyHidden": { "description": "The form sheet's note under the staff button when the staff is off, stating that the notes are not deleted." },
 
   "melodyTapStaffHint": "Touch a beat of the staff to write its note.",
-  "@melodyTapStaffHint": { "description": "The note palette's hint, telling the musician that a beat of the staff itself opens this surface." }
+  "@melodyTapStaffHint": { "description": "The note palette's hint, telling the musician that a beat of the staff itself opens this surface." },
+
+  "tooltipChromeHide": "Hide the list and the panels: more room for the chart",
+  "@tooltipChromeHide": { "description": "The one always-visible button's tooltip while the library rail and the top block are shown." },
+
+  "tooltipChromeShow": "Show the list and the panels",
+  "@tooltipChromeShow": { "description": "The same button's tooltip while the rail and the top block are hidden, so the musician can get them back." },
+
+  "eraserActiveHint": "Eraser on: touch a stroke and the whole stroke goes",
+  "@eraserActiveHint": { "description": "The selection line's text while the eraser is the active tool, so the mode and what it does are stated in words rather than by a lit icon." }
 }

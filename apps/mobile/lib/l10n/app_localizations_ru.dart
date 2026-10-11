@@ -1304,4 +1304,15 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get melodyTapStaffHint =>
       'Коснитесь доли на стане, чтобы записать ноту.';
+
+  @override
+  String get tooltipChromeHide =>
+      'Убрать список и панели: больше места для ча́рта';
+
+  @override
+  String get tooltipChromeShow => 'Вернуть список и панели';
+
+  @override
+  String get eraserActiveHint =>
+      'Ластик включён: коснитесь штриха — сотрётся весь штрих целиком';
 }

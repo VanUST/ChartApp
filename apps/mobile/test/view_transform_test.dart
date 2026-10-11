@@ -36,6 +36,7 @@ import 'dart:io';
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:chartapp/ink_capture_surface.dart';
+import 'package:chartapp/ink_layer.dart';
 import 'package:chartapp/ireal_library.dart';
 import 'package:chartapp/l10n/app_localizations.dart';
 import 'package:chartapp/viewer_screen.dart';
@@ -205,6 +206,87 @@ Future<void> drawStroke(
 /// magnification and every legal pan; see the file header.
 Offset pageCentreOf(PageLayout page) =>
     Offset(page.size.width / 2, page.size.height / 2);
+
+/// The ink layer the page currently on screen routes its contacts into.
+///
+/// Read from the widget rather than from a private field of the screen: the widget already carries
+/// the layer as its own public contract, and a test that could only see it through the screen would
+/// have to be told about a copy of the state that the screen does not own.
+InkCaptureLayer inkLayerOf(WidgetTester tester) =>
+    tester.widget<RawPointerCapture>(pageSurfaceFinder()).layer;
+
+/// Sends one raw touch-down with an EXPLICIT contact radius, through the binding's own hit test.
+///
+/// WHY THE HAND-BUILT EVENT RATHER THAN `TestGesture`. `TestGesture` builds its own
+/// `PointerDownEvent` and exposes no way to set `radiusMajor`; the palm rule compares the contact's
+/// WIDTH — measured on this panel at 71 and 87 logical pixels against a threshold of 40 — so a
+/// gesture built by the harness would exercise the width-less path and prove nothing about a palm.
+/// Dispatching the event by hand is the only way this file can put a palm on the glass.
+///
+/// The radius is half the width the rule compares, because `InkInputMapper.contactWidthOf` doubles
+/// `radiusMajor` before the comparison: a real palm that reports 71 logical pixels of width is sent
+/// here as `radiusMajor: 35.5`.
+void sendTouchDown(
+  WidgetTester tester, {
+  required int pointer,
+  required Offset at,
+  required double radiusMajor,
+  required int timeMs,
+}) {
+  tester.binding.handlePointerEvent(
+    PointerDownEvent(
+      pointer: pointer,
+      kind: PointerDeviceKind.touch,
+      position: at,
+      radiusMajor: radiusMajor,
+      radiusMinor: radiusMajor,
+      buttons: kPrimaryButton,
+      device: 1,
+      timeStamp: Duration(milliseconds: timeMs),
+    ),
+  );
+}
+
+/// Sends one raw touch-move for a contact already down; see [sendTouchDown].
+void sendTouchMove(
+  WidgetTester tester, {
+  required int pointer,
+  required Offset at,
+  required double radiusMajor,
+  required int timeMs,
+}) {
+  tester.binding.handlePointerEvent(
+    PointerMoveEvent(
+      pointer: pointer,
+      kind: PointerDeviceKind.touch,
+      position: at,
+      radiusMajor: radiusMajor,
+      radiusMinor: radiusMajor,
+      buttons: kPrimaryButton,
+      device: 1,
+      timeStamp: Duration(milliseconds: timeMs),
+    ),
+  );
+}
+
+/// Sends one raw touch-up for a contact already down; see [sendTouchDown].
+void sendTouchUp(
+  WidgetTester tester, {
+  required int pointer,
+  required Offset at,
+  required int timeMs,
+}) {
+  tester.binding.handlePointerEvent(
+    PointerUpEvent(
+      pointer: pointer,
+      kind: PointerDeviceKind.touch,
+      position: at,
+      buttons: kPrimaryButton,
+      device: 1,
+      timeStamp: Duration(milliseconds: timeMs),
+    ),
+  );
+}
 
 /// One text line describing the view, for the numbers each test prints.
 String viewOf(PageLayout page) =>
@@ -479,5 +561,269 @@ void main() {
         'named=${hit.sectionId}#${hit.barIndex} beat=${hit.beat}',
       );
     }
+  });
+
+  // --- THE PALM ----------------------------------------------------------------------------------
+  //
+  // WHY THESE CASES ARE HERE AND WHAT THEY ARE WORTH. The owner reported that resting his palm on
+  // the glass while writing was read as a two-finger movement, so the chart panned under his hand.
+  // A genuine two-finger contact CANNOT be injected by `adb shell input`, which carries one pointer
+  // id and cannot hold two contacts down at once, so the GESTURE half of the rule is measured here,
+  // with two synthetic pointers, and the PEN half is measured on the tablet. Which instrument
+  // produced which claim is the point of saying so.
+
+  testWidgets('a palm-like contact does not start the view gesture', (
+    WidgetTester tester,
+  ) async {
+    await pumpViewer(tester, viewChart());
+    // Ink OFF, so this case is about the palm alone and cannot pass because of the pen's gate: the
+    // width signal is the only reason the gesture may be refused here.
+    final Offset centre = tester.getRect(pageSurfaceFinder()).center;
+    final InkCaptureLayer layer = inkLayerOf(tester);
+    const double palmWidth = 71;
+    final int before = layer.viewGestureRefusalCount;
+
+    // Two contacts, 120 apart, exactly as an honest two-finger pinch: one an ordinary finger, the
+    // other the palm the spike measured. The palm is the second, so a gesture that counted it would
+    // be holding two touches.
+    sendTouchDown(
+      tester,
+      pointer: 41,
+      at: centre - const Offset(60, 0),
+      radiusMajor: 0,
+      timeMs: 0,
+    );
+    await tester.pump();
+    sendTouchDown(
+      tester,
+      pointer: 42,
+      at: centre + const Offset(60, 0),
+      radiusMajor: palmWidth / 2,
+      timeMs: 16,
+    );
+    await tester.pump();
+    for (int step = 0; step < 4; step++) {
+      sendTouchMove(
+        tester,
+        pointer: 41,
+        at: centre - Offset(60 + 20.0 * step, 0),
+        radiusMajor: 0,
+        timeMs: 32 + 16 * step,
+      );
+      sendTouchMove(
+        tester,
+        pointer: 42,
+        at: centre + Offset(60 + 20.0 * step, 0),
+        radiusMajor: palmWidth / 2,
+        timeMs: 32 + 16 * step,
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    sendTouchUp(tester, pointer: 41, at: centre, timeMs: 200);
+    sendTouchUp(tester, pointer: 42, at: centre, timeMs: 216);
+    await tester.pumpAndSettle();
+
+    final PageLayout page = chartPainter(tester).page;
+    expect(
+      layer.viewGestureRefusalCount,
+      greaterThan(before),
+      reason: 'the palm-like contact must be refused a place in the gesture',
+    );
+    expect(page.zoom, 1, reason: 'a palm is not a finger of the view gesture');
+    expect(
+      page.pan,
+      LayoutOffset.zero,
+      reason: 'the chart must not move under a palm-like contact',
+    );
+    stdout.writeln(
+      'view.test.palm width_sent=$palmWidth refused=${layer.viewGestureRefusalCount - before} '
+      '${viewOf(page)}',
+    );
+  });
+
+  testWidgets('no touch joins the view gesture while a stroke is open', (
+    WidgetTester tester,
+  ) async {
+    await pumpViewer(tester, viewChart());
+    await setInkMode(tester, true);
+    final Offset centre = tester.getRect(pageSurfaceFinder()).center;
+    final InkCaptureLayer layer = inkLayerOf(tester);
+
+    // The pen goes down and moves, and is NOT lifted: that is what "a pen contact is active" means
+    // here, and it is the definition the gate uses because it is observable without trusting the
+    // platform to name the pointer's kind or to report its width.
+    final TestGesture pen = await tester.startGesture(
+      centre - const Offset(40, 30),
+      kind: PointerDeviceKind.stylus,
+      pointer: 51,
+    );
+    await tester.pump(const Duration(milliseconds: 8));
+    await pen.moveTo(centre - const Offset(10, 10));
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(
+      layer.isDrawingInk,
+      isTrue,
+      reason: 'the pen is down and the case is only tested while it is',
+    );
+    final int before = layer.viewGestureRefusalCount;
+
+    // Two ordinary fingers — no palm-like width at all — try to pinch while the pen is writing.
+    sendTouchDown(
+      tester,
+      pointer: 61,
+      at: centre - const Offset(60, 0),
+      radiusMajor: 0,
+      timeMs: 100,
+    );
+    await tester.pump();
+    sendTouchDown(
+      tester,
+      pointer: 62,
+      at: centre + const Offset(60, 0),
+      radiusMajor: 0,
+      timeMs: 116,
+    );
+    await tester.pump();
+    for (int step = 0; step < 4; step++) {
+      sendTouchMove(
+        tester,
+        pointer: 61,
+        at: centre - Offset(60 + 20.0 * step, 0),
+        radiusMajor: 0,
+        timeMs: 132 + 16 * step,
+      );
+      sendTouchMove(
+        tester,
+        pointer: 62,
+        at: centre + Offset(60 + 20.0 * step, 0),
+        radiusMajor: 0,
+        timeMs: 132 + 16 * step,
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    sendTouchUp(tester, pointer: 61, at: centre, timeMs: 220);
+    sendTouchUp(tester, pointer: 62, at: centre, timeMs: 236);
+    await tester.pumpAndSettle();
+
+    final PageLayout page = chartPainter(tester).page;
+    expect(
+      layer.viewGestureRefusalCount,
+      greaterThan(before),
+      reason: 'a touch while a pen is in play must be refused the gesture',
+    );
+    expect(
+      page.zoom,
+      1,
+      reason: 'the page must not zoom while a pen writes on it',
+    );
+    expect(
+      page.pan,
+      LayoutOffset.zero,
+      reason:
+          'THE DEFECT: the chart moved under a writing hand. It must not move at all while a pen '
+          'contact is active, whatever the platform calls that contact',
+    );
+    expect(layer.isDrawingInk, isTrue, reason: 'the pen is still down');
+
+    // The pen is unaffected by the refusal: the stroke it was drawing when the touches arrived is
+    // still committed when it lifts. What is compared is the DOCUMENT's own list before the lift and
+    // after it, not the painter's, because the painter also carries the stroke still being drawn and
+    // a count of it would count the pen's own open work as if it had already been committed.
+    final int committedBeforeLift = layer.documentStrokes.length;
+    await pen.moveTo(centre - const Offset(4, 4));
+    await tester.pump(const Duration(milliseconds: 8));
+    await pen.up();
+    await tester.pumpAndSettle();
+    expect(
+      layer.documentStrokes.length,
+      committedBeforeLift + 1,
+      reason:
+          'the pen keeps writing, which is the half that must never regress',
+    );
+    stdout.writeln(
+      'view.test.pen_in_play refused=${layer.viewGestureRefusalCount - before} '
+      '${viewOf(page)} strokes=${layer.documentStrokes.length}',
+    );
+  });
+
+  testWidgets('two ordinary touches still pan and pinch while ink is ON', (
+    WidgetTester tester,
+  ) async {
+    // THE OVER-BLOCKING CASE, AND IT IS A REAL RISK. With the ink mode on a touch DRAWS (A61's
+    // decision for this panel), so the first of the two fingers opens a stroke before the second
+    // arrives, and a gate that refused whenever any stroke was open would forbid two-finger panning
+    // in the one mode where a musician writing is most likely to want it. This test was written
+    // because the first version of the gate did exactly that, and it failed here.
+    //
+    // What must survive: the gesture takes over from its OWN first finger, cancels its half-drawn
+    // stroke, and moves the page.
+    await pumpViewer(tester, viewChart());
+    await setInkMode(tester, true);
+    final Offset centre = tester.getRect(pageSurfaceFinder()).center;
+    final InkCaptureLayer layer = inkLayerOf(tester);
+    final int before = layer.viewGestureRefusalCount;
+
+    sendTouchDown(
+      tester,
+      pointer: 71,
+      at: centre - const Offset(60, 0),
+      radiusMajor: 0,
+      timeMs: 0,
+    );
+    await tester.pump();
+    expect(
+      layer.isDrawingInk,
+      isTrue,
+      reason: 'the first finger drew, which is the state this case is about',
+    );
+    sendTouchDown(
+      tester,
+      pointer: 72,
+      at: centre + const Offset(60, 0),
+      radiusMajor: 0,
+      timeMs: 16,
+    );
+    await tester.pump();
+    for (int step = 1; step <= 4; step++) {
+      sendTouchMove(
+        tester,
+        pointer: 71,
+        at: centre - Offset(60 + 20.0 * step, 0),
+        radiusMajor: 0,
+        timeMs: 16 + 16 * step,
+      );
+      sendTouchMove(
+        tester,
+        pointer: 72,
+        at: centre + Offset(60 + 20.0 * step, 0),
+        radiusMajor: 0,
+        timeMs: 16 + 16 * step,
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    sendTouchUp(tester, pointer: 71, at: centre, timeMs: 200);
+    sendTouchUp(tester, pointer: 72, at: centre, timeMs: 216);
+    await tester.pumpAndSettle();
+
+    final PageLayout page = chartPainter(tester).page;
+    expect(
+      layer.viewGestureRefusalCount,
+      before,
+      reason: 'the gesture must take over from its own first finger',
+    );
+    expect(
+      page.zoom,
+      closeTo(140 / 60, 0.05),
+      reason: 'two fingers must still pinch the chart with the pen mode on',
+    );
+    expect(
+      inkPainter(tester).strokes,
+      isEmpty,
+      reason: 'the first finger was a finger of the gesture, not a mark',
+    );
+    stdout.writeln(
+      'view.test.pen_free_ink_on pinch=${page.zoom.toStringAsFixed(4)} '
+      'refused=${layer.viewGestureRefusalCount - before} strokes=0 ${viewOf(page)}',
+    );
   });
 }

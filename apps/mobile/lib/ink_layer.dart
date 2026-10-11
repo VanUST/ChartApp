@@ -1,12 +1,12 @@
-// PURPOSE: Turn a stream of Flutter pointer events into committed strokes, and decide — once per
-//          contact, from the two signals the rule allows — whether that contact draws or selects.
+﻿// PURPOSE: Turn a stream of Flutter pointer events into committed strokes, and decide вЂ” once per
+//          contact, from the two signals the rule allows вЂ” whether that contact draws or selects.
 //          It is the one place in the app where "the pen is drawing" becomes "the document has a
 //          stroke", so the palm rule, the coordinate conversion, the anchor choice and the write
 //          through the operation log are decided together and cannot drift apart.
 //
 //          WHY THIS HOLDS A PALM RULE RATHER THAN CALLING INTO THE NATIVE ONE. The rule itself is
-//          shared — it lives in `chart_core`'s `InkPalmRule` and is applied identically by the
-//          Android surface — but this class owns the WINDOW that makes it work: which contact last
+//          shared вЂ” it lives in `chart_core`'s `InkPalmRule` and is applied identically by the
+//          Android surface вЂ” but this class owns the WINDOW that makes it work: which contact last
 //          proved a stylus is near the glass, and how long ago. A window is state, and state belongs
 //          to whoever sees the event stream.
 // INPUTS: A live [EditSession], the current [PageLayout], and pointer events in the widget's own
@@ -14,8 +14,8 @@
 // OUTPUTS: Nothing directly: it appends an [InkStrokeAddEvent] through the session when a stroke
 //          finishes, answers [decideContact] so the widget can route a tap to selection instead,
 //          and ticks [liveRevision] so the ink layer of the screen repaints itself. A stroke whose
-//          first sample lies over no bar at all is anchored to the bar nearest it — see
-//          `chart_core`'s `resolveInkAnchor` — and is not attached to the nearest CELL, because a
+//          first sample lies over no bar at all is anchored to the bar nearest it вЂ” see
+//          `chart_core`'s `resolveInkAnchor` вЂ” and is not attached to the nearest CELL, because a
 //          cell is a column of time and a point outside the bar has none.
 //
 //          IT ALSO HOLDS THE ONE RULE THAT SAYS WHEN A CONTACT MUST NOT DRAW AT ALL, and that is the
@@ -25,13 +25,23 @@
 //          turns a contact into a stroke, so there is exactly one place where "may this contact
 //          write?" is answered.
 //
+//          AND IT HOLDS THE MIRROR OF THAT RULE, which is what the owner reported as a defect that
+//          breaks writing: A PALM RESTING ON THE GLASS WAS READ AS A TWO-FINGER GESTURE, so the page
+//          panned out from under his hand and the mark he was drawing moved with it. The gesture's
+//          admission is answered by [refuseViewGestureTouch] and nowhere else, for the same reason
+//          the drawing decision is: two copies of "may this contact move the page?" would drift, and
+//          the drift would be a page that moves while a pen is writing on it. A palm-like contact is
+//          refused, and NO CONTACT AT ALL joins the gesture while a pen is in play вЂ” with the pen
+//          defined by what is observable here rather than by the device kind, because on some
+//          platforms the S Pen's contacts arrive as touches (see the method's own note).
+//
 //          WHY IT OWNS A REPAINT TICK, AND WHY THAT IS A PERFORMANCE DECISION RATHER THAN A
 //          RENDERING ONE. A pen delivers samples far faster than the screen draws, and the page is
 //          expensive to re-lay-out: on the owner's tablet, re-engraving during a stroke cost a
 //          layout pass on 105 of the 246 samples of one stroke, and the screen's verification-state
 //          publication cost 1 738 ms of a 2 882 ms stroke. Both were paid because a widget rebuilt
 //          itself on every sample. The layer is the only object that knows when the live preview
-//          actually changed, so the tick lives here and the screen listens to it — one small
+//          actually changed, so the tick lives here and the screen listens to it вЂ” one small
 //          subtree repaints, and nothing re-engraves the chart. It renders nothing itself; see the
 //          file header on why the renderer stays in `chart_ui`.
 // KEYWORDS: ink-mode, eraser-mode, pointer-routing, palm-rule, stylus-proximity, op-log-writer,
@@ -53,7 +63,7 @@
 //     undo restores exactly that stroke; a drag through several strokes appends several deletions
 //     in one motion and has to be walked back one at a time.
 //   - The aim question is asked at ONE point, with one answer the musician can predict (nearest
-//     stroke; on a near tie, the one drawn on top — see chart_core's `ink_hit.dart`). Along a drag
+//     stroke; on a near tie, the one drawn on top вЂ” see chart_core's `ink_hit.dart`). Along a drag
 //     the candidate set changes at every sample and no single point's answer is visible beforehand.
 //   - It does not fight the pager. A horizontal swipe to turn a page begins as a contact that may
 //     land on ink; a tap predicate (travel within [eraseTapSlopPx]) leaves the swipe alone, while a
@@ -156,8 +166,8 @@ class InkInputMapper {
   ///
   /// WHAT THIS RETURNS ON THE WEB TARGET, MEASURED RATHER THAN ASSUMED: zero. Flutter's web
   /// `PointerBinding` builds each `PointerData` from the DOM event's position, pressure, tilt and
-  /// pointer type and never reads the event's `width`, so `radiusMajor` — the field the framework
-  /// exposes — arrives as the constructor default of 0.0. That is the reason the ink capture is not
+  /// pointer type and never reads the event's `width`, so `radiusMajor` вЂ” the field the framework
+  /// exposes вЂ” arrives as the constructor default of 0.0. That is the reason the ink capture is not
   /// the whole story on this target: the browser DOES report a contact width (the web pen spike
   /// measured admitted fingers at 1-8 and palm-like contacts at 71 and 87), and the framework drops
   /// it on the way in, so the width half of the palm rule can only be fed by a raw pointer listener.
@@ -195,7 +205,7 @@ class InkCaptureLayer {
   /// A counter rather than a `ChangeNotifier` subclass, because the value is never read: what matters
   /// is that a listener is called, and `ValueNotifier` already fires exactly once per assignment to a
   /// new value. It is never disposed because its listener count is driven by the widget that
-  /// listens, which removes its own listener when it is disposed — the notifier and the layer go
+  /// listens, which removes its own listener when it is disposed вЂ” the notifier and the layer go
   /// together, so there is nothing left to notify after the layer is dropped.
   final ValueNotifier<int> _liveRevision = ValueNotifier<int>(0);
 
@@ -300,6 +310,7 @@ class InkCaptureLayer {
     'documentStrokes': _session.document.strokes.length,
     'liveContacts': _assemblers.length,
     'droppedForWantOfAnchor': _dropped,
+    'viewGestureRefused': _viewGestureRefused,
     'lastPointWasInk': _lastPointWasInk,
     'eraseArmed': _erasePointer != null,
     'lastErase': _lastErase,
@@ -318,7 +329,7 @@ class InkCaptureLayer {
   /// Whether the screen's own two-finger view gesture currently owns the contacts.
   ///
   /// Owner decision D34 makes TWO FINGERS TOGETHER the pan, and a pinch the zoom. Two fingers cannot
-  /// write — the gesture does not exist in handwriting — so while they are down nothing may draw,
+  /// write вЂ” the gesture does not exist in handwriting вЂ” so while they are down nothing may draw,
   /// and the composer that routes a lift must not select either. This flag is how the screen tells
   /// the layer that the gesture is live; the layer is where it matters, because the layer is the one
   /// place a contact becomes a stroke, and a second copy of the rule in a widget is how the two come
@@ -333,7 +344,7 @@ class InkCaptureLayer {
 
   // PURPOSE: Tell the layer that the screen's two-finger view gesture started or ended, so no
   //          contact draws while it is live and a contact that had already begun is abandoned.
-  // INPUTS: active — true when a two-finger gesture has been accepted, false when it ended.
+  // INPUTS: active вЂ” true when a two-finger gesture has been accepted, false when it ended.
   // OUTPUTS: Nothing. Turning it ON abandons every open stroke and any armed erase, because those
   //          contacts are the fingers now panning: committing a stroke whose hand has moved on to
   //          panning would put a mark on the chart that the musician did not write, and an erase
@@ -355,6 +366,7 @@ class InkCaptureLayer {
       assembler.cancel();
     }
     _assemblers.clear();
+    _openStylusPointers.clear();
     _live.clear();
     final bool hadErase = _erasePointer != null;
     _clearErase();
@@ -370,7 +382,7 @@ class InkCaptureLayer {
   /// The pointer of the contact currently armed to erase, or null when none is.
   ///
   /// The eraser decides at the LIFT and not at the touch (see the file header), so the down has to
-  /// remember which contact it was, where it landed and whether it has since moved — three facts
+  /// remember which contact it was, where it landed and whether it has since moved вЂ” three facts
   /// that only the down can supply and only the up can act on.
   int? _erasePointer;
 
@@ -384,7 +396,7 @@ class InkCaptureLayer {
   ///
   /// A swipe to turn the page begins as a contact that may land on ink; this is what keeps such a
   /// swipe from deleting the stroke it started on. Once set, the contact erases nothing even if the
-  /// hand comes back — the gesture was a drag, and a drag is not the eraser's act.
+  /// hand comes back вЂ” the gesture was a drag, and a drag is not the eraser's act.
   bool _eraseMoved = false;
 
   /// How far a contact may travel and still count as a tap, in surface logical pixels.
@@ -444,12 +456,12 @@ class InkCaptureLayer {
   }
 
   // PURPOSE: Find the width the raw stream reported for a framework event at [time].
-  // INPUTS: time — the framework's timestamp for the event, in milliseconds, and the width the
+  // INPUTS: time вЂ” the framework's timestamp for the event, in milliseconds, and the width the
   //         framework itself reported, which is preferred when it is non-zero.
   // OUTPUTS: The width to judge the contact by: the framework's own when it has one, otherwise the
   //          closest raw report inside [rawWidthMatchWindowMs], otherwise zero. Zero means "not
   //          measured" and the rule treats it as not palm-like, so an unmatched contact is a finger
-  //          and selects — which is the safe direction to fail in, because refusing a contact the
+  //          and selects вЂ” which is the safe direction to fail in, because refusing a contact the
   //          musician meant to make is worse than admitting a palm that a later sample will reject.
   // KEYWORDS: width-arbitration, framework-first, raw-fallback, nearest-within-window, fail-open
   /// Returns the width to judge a contact by.
@@ -490,7 +502,7 @@ class InkCaptureLayer {
   ///
   /// A half-drawn stroke is abandoned rather than kept: the mode changed under the musician's hand,
   /// and committing a stroke whose beginning was captured under another mode would be a mark they
-  /// did not finish making. An armed erase is dropped for the same reason — the contact that armed
+  /// did not finish making. An armed erase is dropped for the same reason вЂ” the contact that armed
   /// it was aimed at the old mode, and carrying it into the new one would delete a stroke on a lift
   /// the musician never intended as an eraser gesture.
   void _setMode(InkMode next) {
@@ -502,6 +514,7 @@ class InkCaptureLayer {
       assembler.cancel();
     }
     _assemblers.clear();
+    _openStylusPointers.clear();
     _live.clear();
     _clearErase();
     debugPrint(
@@ -511,11 +524,11 @@ class InkCaptureLayer {
 
   // PURPOSE: Answer what one contact is and what may be done with it, which is the single entrance
   //          through which both drawing and selection are routed.
-  // INPUTS: kind — the engine's pointer kind. width — the contact width in logical pixels, which is
-  //         what the palm half of the rule compares. time — the contact's timestamp. pressure and
-  //         tilt — the engine's own values for this event, recorded for the delivery measurement and
+  // INPUTS: kind вЂ” the engine's pointer kind. width вЂ” the contact width in logical pixels, which is
+  //         what the palm half of the rule compares. time вЂ” the contact's timestamp. pressure and
+  //         tilt вЂ” the engine's own values for this event, recorded for the delivery measurement and
   //         used for nothing else here: the rule does not read them, because a pressure reading is a
-  //         measurement of a hand and not evidence of which tool is in it. isHover — whether this is
+  //         measurement of a hand and not evidence of which tool is in it. isHover вЂ” whether this is
   //         a hover rather than a contact, which changes only what is recorded.
   // OUTPUTS: The decision, or null for a kind that is not a contact.
   //
@@ -571,7 +584,7 @@ class InkCaptureLayer {
 
   // PURPOSE: Report whether a stylus counts as in play at [time], which is the gate the palm half of
   //          the rule turns on.
-  // INPUTS: time — the timestamp to judge, in the same base as the events.
+  // INPUTS: time вЂ” the timestamp to judge, in the same base as the events.
   // OUTPUTS: True when a stylus was seen within the proximity window. A window of zero or negative
   //          length, which nothing in this app produces, makes this always false rather than always
   //          true, because a rule that cannot be satisfied must not silently become one that never
@@ -581,10 +594,124 @@ class InkCaptureLayer {
   bool stylusInPlay(double time) =>
       time - _lastStylusSeenMs <= InkPalmRule.stylusProximityWindowMs;
 
+  /// Stable token: a contact was refused the view gesture because a STYLUS contact is open.
+  ///
+  /// This is the strongest form of "a pen is in play": the pen is literally on the glass, drawing,
+  /// at the moment the contact arrives. On the owner's tablet the S Pen's contacts arrive as
+  /// `PointerDeviceKind.stylus` вЂ” measured from the application's own log, `ink.contact.down ...
+  /// kind=stylus width=0.0` вЂ” and this is the token that fires when a palm lands while he writes.
+  static const String viewRefusalInkContactOpen = 'ink-contact-open';
+
+  /// Stable token: a contact was refused the view gesture because a stylus is inside its window.
+  ///
+  /// It names the weaker form, which covers the gaps a hand makes while writing: a palm that lands
+  /// between two pen strokes sees no open stroke and no pen on the glass, and is refused because the
+  /// pen was seen вЂ” as a contact or as a hover вЂ” a moment ago. It is only consulted while the ink
+  /// mode is on; see [refuseViewGestureTouch].
+  static const String viewRefusalStylusInPlay = 'stylus-in-play';
+
+  /// Stable token: a contact of a kind that is not a touch was offered to the view gesture.
+  ///
+  /// The recogniser filters these out before it asks, so this is a safety net rather than the usual
+  /// path: it keeps the answer total, so a caller that forgot the filter still gets a refusal and a
+  /// name instead of a silent admission.
+  static const String viewRefusalNotATouch = 'not-a-touch';
+
+  /// The pointers of the contacts that are drawing right now whose kind is a STYLUS.
+  ///
+  /// Held separately from [_assemblers] because the view gesture asks a different question of it:
+  /// the assembler map answers "is something writing", while this answers "is the PEN writing", and
+  /// only the second can be a reason to refuse a two-finger gesture. A stylus pointer can never be
+  /// one of the gesture's own touches вЂ” the recogniser counts touches only вЂ” so a refusal on this
+  /// signal can never forbid the gesture to its own first finger. See [refuseViewGestureTouch].
+  final Set<int> _openStylusPointers = <int>{};
+
+  /// How many contacts this layer refused a place in the two-finger view gesture.
+  ///
+  /// Kept beside [_dropped] and for the same reason: a refusal that exists only in a log line is a
+  /// refusal nobody can count after the run, and the published state is what a driving tool reads.
+  int _viewGestureRefused = 0;
+
+  /// How many contacts were refused a place in the two-finger view gesture.
+  int get viewGestureRefusalCount => _viewGestureRefused;
+
+  // PURPOSE: Answer whether one contact may become part of the two-finger view gesture, and name the
+  //          reason when it must not. It is the ONE place where "may this contact move the page?" is
+  //          answered, so the recogniser holds no second copy of the palm rule and cannot drift from
+  //          the one the pen and the eraser are routed by.
+  // INPUTS: kind вЂ” the engine's pointer kind. width вЂ” the contact width in logical pixels, as the
+  //         framework reports it. time вЂ” the contact's own timestamp, in the same base the strokes
+  //         use, because the stylus window is measured in that base.
+  // OUTPUTS: Null when the contact may join the gesture, otherwise a stable reason token: the palm
+  //          rule's own [InkPalmRule.reasonPalmLikeWidth], [viewRefusalInkContactOpen],
+  //          [viewRefusalStylusInPlay] or [viewRefusalNotATouch].
+  //
+  //          THE ORDER OF THE TESTS IS THE ORDER OF THE REASONS, and the palm first: a palm that
+  //          lands while a pen is writing is refused FOR BEING A PALM, which is the fact the musician
+  //          can act on, rather than as a side effect of the pen being down.
+  //
+  //          WHAT "A PEN IS IN PLAY" MEANS HERE, AND WHAT IT CANNOT MEAN. Two facts about a pen are
+  //          observable in this application, and this rule uses both: the pen is a contact whose KIND
+  //          the platform calls a stylus, and the pen is something that was SEEN recently вЂ” a hover or
+  //          a contact, either of which sets the same window the palm rule already reads. The first
+  //          is the strongest and is asked first, because a pen that is on the glass drawing is a pen
+  //          in play by any reading. The second covers the gaps a hand makes while writing: a palm
+  //          that lands between two strokes sees no open contact, and is refused on the window.
+  //
+  //          The rule deliberately does NOT refuse merely because SOME stroke is open, and the
+  //          first version of it did. With the ink mode on, a touch draws (A61's decision for this
+  //          panel), so D34's own two fingers open a stroke on the first finger and the gesture
+  //          exists exactly to take the page over from it; a gate on "any open stroke" forbade
+  //          two-finger panning in the one mode where a writing musician wants it, and the file's own
+  //          test caught it. A STYLUS contact is different in kind, not in degree: the recogniser
+  //          never counts a stylus, so refusing on it can never forbid the gesture to its own finger.
+  //
+  //          WHAT REMAINS UNPROTECTED, AND WHY IT IS NAMED RATHER THAN HIDDEN. On a platform whose
+  //          stylus fusion reports the pen's contacts as touches AND reports no contact width, none
+  //          of these three signals separates a pen from a finger: the pen sets no window, opens a
+  //          stroke that looks like a finger's, and the palm's width arrives as zero. That is the
+  //          same limitation `docs/sdd.md` A61 recorded, and it is not something this rule can close
+  //          from here. On the owner's own tablet it is not the situation: his pen arrives as a
+  //          stylus and is refused by the first two tests below.
+  //
+  //          THE WIDTH IS ARBITRATED BY THE SAME FUNCTION THE INK RULE USES, framework value first
+  //          and the raw browser's only when the framework reported none, so the pixels a palm is
+  //          judged by here are the pixels it is judged by there.
+  // KEYWORDS: view-gesture-admission, palm-rule-reuse, pen-in-play, stylus-contact, proximity-window,
+  //           single-authority, instrumented-refusal, measured-limit
+  /// Returns the reason [kind]/[width] may not join the view gesture, or null when it may.
+  String? refuseViewGestureTouch({
+    required PointerDeviceKind kind,
+    required double width,
+    required double time,
+  }) {
+    if (kind != PointerDeviceKind.touch) {
+      _viewGestureRefused++;
+      return viewRefusalNotATouch;
+    }
+    final double decidingWidth = contactWidthFor(
+      time: time,
+      frameworkWidth: width,
+    );
+    if (InkPalmRule.isPalmLikeWidth(decidingWidth)) {
+      _viewGestureRefused++;
+      return InkPalmRule.reasonPalmLikeWidth;
+    }
+    if (_openStylusPointers.isNotEmpty) {
+      _viewGestureRefused++;
+      return viewRefusalInkContactOpen;
+    }
+    if (_mode != InkMode.off && stylusInPlay(time)) {
+      _viewGestureRefused++;
+      return viewRefusalStylusInPlay;
+    }
+    return null;
+  }
+
   // PURPOSE: Begin drawing a contact that the rule admitted.
-  // INPUTS: pointer — the engine's pointer id, which is the identity of this contact. page — the
-  //         layout being drawn on. kind — the pointer kind. position — where the contact landed, in
-  //         the widget's pixels. pressure and time — the first sample's values.
+  // INPUTS: pointer вЂ” the engine's pointer id, which is the identity of this contact. page вЂ” the
+  //         layout being drawn on. kind вЂ” the pointer kind. position вЂ” where the contact landed, in
+  //         the widget's pixels. pressure and time вЂ” the first sample's values.
   // OUTPUTS: True when a stroke was opened. False in one of two cases, and the log names which:
   //          the page carries no bar to anchor to, in which case the contact is tracked as refused
   //          and no stroke will be committed; or the two-finger view gesture owns the contacts, in
@@ -608,7 +735,7 @@ class InkCaptureLayer {
     final InkCaptureKind captureKind =
         InkInputMapper.kindOf(kind) ?? InkCaptureKind.unknown;
     // TWO FINGERS CANNOT WRITE (owner decision D34). While the view gesture owns the contacts a
-    // contact must not open a stroke — including the FIRST of the two fingers, if the recognizer
+    // contact must not open a stroke вЂ” including the FIRST of the two fingers, if the recognizer
     // awarded itself the gesture before this event was routed. The refusal is logged with its own
     // reason and is deliberately NOT counted in [_dropped]: that counter means "the page had no bar
     // to anchor to", and folding a second meaning into it would make both unreadable. See
@@ -643,6 +770,9 @@ class InkCaptureLayer {
       return false;
     }
     _assemblers[pointer] = assembler;
+    if (captureKind.isStylus) {
+      _openStylusPointers.add(pointer);
+    }
     _lastPointWasInk = true;
     _refreshLive(page);
     // THE PAGE POINT IS PRINTED BESIDE THE SURFACE POINT AND THE VIEW, because that pair is the
@@ -666,8 +796,8 @@ class InkCaptureLayer {
   }
 
   // PURPOSE: Record one more sample of a contact that is drawing.
-  // INPUTS: pointer — the contact. page — the layout being drawn on, needed for its scale only.
-  //         position, pressure, time — the sample.
+  // INPUTS: pointer вЂ” the contact. page вЂ” the layout being drawn on, needed for its scale only.
+  //         position, pressure, time вЂ” the sample.
   // OUTPUTS: Nothing. A sample for a contact that is not drawing is dropped, which is the ordinary
   //          case for the first move of a contact the rule refused.
   // KEYWORDS: add-sample, live-preview, silent-when-absent
@@ -688,7 +818,7 @@ class InkCaptureLayer {
   }
 
   // PURPOSE: Finish a drawing contact and commit what it drew.
-  // INPUTS: pointer — the contact. page — the layout, needed to convert the samples back into page
+  // INPUTS: pointer вЂ” the contact. page вЂ” the layout, needed to convert the samples back into page
   //         coordinates.
   // OUTPUTS: The committed [InkStroke], or null when the contact was not drawing or its anchor had
   //          gone. The stroke is appended as an [InkStrokeAddEvent] at the END of the document's
@@ -702,6 +832,7 @@ class InkCaptureLayer {
   /// Finishes a drawing contact and commits what it drew.
   InkStroke? endStroke({required int pointer, required PageLayout page}) {
     final InkStrokeAssembler? assembler = _assemblers.remove(pointer);
+    _openStylusPointers.remove(pointer);
     if (assembler == null) {
       return null;
     }
@@ -736,12 +867,13 @@ class InkCaptureLayer {
 
   // PURPOSE: Abandon a drawing contact without committing anything, which is what the platform
   //          means when it cancels a pointer: the contact was taken away rather than finished.
-  // INPUTS: pointer — the contact.
+  // INPUTS: pointer вЂ” the contact.
   // OUTPUTS: Nothing.
   // KEYWORDS: cancel, discard, pointer-cancel, repaint-tick
   /// Abandons a drawing contact without committing anything.
   void cancelStroke(int pointer) {
     final InkStrokeAssembler? assembler = _assemblers.remove(pointer);
+    _openStylusPointers.remove(pointer);
     assembler?.cancel();
     _live.clear();
     _liveRevision.value++;
@@ -749,10 +881,10 @@ class InkCaptureLayer {
   }
 
   // PURPOSE: Arm the eraser for one contact, which is the down half of the tap-on-stroke gesture:
-  //          from here the contact either lifts where it started — and erases — or travels far
+  //          from here the contact either lifts where it started вЂ” and erases вЂ” or travels far
   //          enough to be a drag, and then erases nothing. Nothing is removed at the touch, because
   //          a page swipe reaches this method before it can be told apart from a tap.
-  // INPUTS: pointer — the contact the rule admitted. position — where it landed, in the surface
+  // INPUTS: pointer вЂ” the contact the rule admitted. position вЂ” where it landed, in the surface
   //         logical pixels the hit test speaks.
   // OUTPUTS: Nothing. [lastPointWasInk] becomes true, so the widget that routes a lift does not also
   //          treat this contact as a selection. A second contact with the same pointer id replaces
@@ -782,7 +914,7 @@ class InkCaptureLayer {
 
   // PURPOSE: Notice that an armed erase contact has stopped being a tap, so that the page swipe the
   //          musician actually meant is not also an erasure.
-  // INPUTS: pointer — the contact. position — where it is now, in surface logical pixels.
+  // INPUTS: pointer вЂ” the contact. position вЂ” where it is now, in surface logical pixels.
   // OUTPUTS: Nothing. Once armed, the contact erases nothing on its lift; a move for a contact that
   //          was not armed, or was refused by the rule, is dropped silently.
   // KEYWORDS: erase-disarm, tap-slop, drag-not-erase, page-swap-safety
@@ -806,12 +938,12 @@ class InkCaptureLayer {
   //          the aim point is on is deleted through the operation log, so undo restores it exactly.
   //          It is the erase counterpart of [endStroke] and the last place the eraser touches the
   //          document.
-  // INPUTS: pointer — the contact that is lifting. page — the layout on screen, which resolves every
+  // INPUTS: pointer вЂ” the contact that is lifting. page вЂ” the layout on screen, which resolves every
   //         stroke's anchor and carries the scale between the touch and the engraved page.
   // OUTPUTS: The [InkEraseHit] that was removed, or null when nothing was removed: the pointer was
   //          not armed, the contact had travelled too far, no stroke was within the aim band, or
   //          the document no longer held the stroke the hit named. All four are ordinary outcomes
-  //          and none of them appends an event — a deletion of something that is not there would be
+  //          and none of them appends an event вЂ” a deletion of something that is not there would be
   //          a log row that changes nothing. The [record] of the last erase is kept for a log line
   //          and for the published state.
   // KEYWORDS: erase-commit, hit-test, op-log-delete, whole-stroke, null-when-nothing, undoable
@@ -871,7 +1003,7 @@ class InkCaptureLayer {
   // PURPOSE: Drop an armed erase contact without deleting anything, which is what a platform
   //          pointer-cancel means and what a mode change does to a contact that was armed under the
   //          old mode.
-  // INPUTS: pointer — the contact that was cancelled.
+  // INPUTS: pointer вЂ” the contact that was cancelled.
   // OUTPUTS: Nothing. The aim and the travel flag are cleared, and the last-erase record is left as
   //          it was, because a cancelled contact did not erase anything and overwriting the record
   //          would describe a removal that never happened.
@@ -894,7 +1026,7 @@ class InkCaptureLayer {
 
   // PURPOSE: Rebuild the live preview from the open assemblers, so the stroke under the pen is
   //          visible before it is committed.
-  // INPUTS: page — the layout, used to resolve each open stroke's anchor rectangle.
+  // INPUTS: page вЂ” the layout, used to resolve each open stroke's anchor rectangle.
   // OUTPUTS: Nothing. The list is rebuilt rather than mutated so a painter holding the previous list
   //          keeps a value rather than seeing it change underneath it. The repaint tick is raised
   //          here and nowhere else on this path, so the screen's listener is called exactly when the
@@ -932,7 +1064,7 @@ class InkCaptureLayer {
   }
 
   // PURPOSE: Name the colour a stroke is stored with, per tool.
-  // INPUTS: kind — the capture kind, which selects the tool.
+  // INPUTS: kind вЂ” the capture kind, which selects the tool.
   // OUTPUTS: A `#rrggbb` string. The pen is the chart's own ink colour and the eraser's other end
   //          draws as a pen, because the eraser is an operation on the stroke list and not ink.
   // KEYWORDS: colour, tool, pen, hex-string
@@ -948,9 +1080,9 @@ class InkCaptureLayer {
   double _nibFor(InkCaptureKind kind) => kind.isStylus ? 3 : 4;
 
   // PURPOSE: Give a committed stroke an identity that is unique in its document.
-  // INPUTS: assembler — the stroke being committed, read for its anchor and the time it began.
+  // INPUTS: assembler вЂ” the stroke being committed, read for its anchor and the time it began.
   // OUTPUTS: A string id built from the anchor and the stroke's own start time, so it is unique
-  //          across two runs of the application — an id that counted from one would collide with a
+  //          across two runs of the application вЂ” an id that counted from one would collide with a
   //          stroke an opened file already carried, and the reducer refuses a duplicate. Readable
   //          rather than random because the identity is written to a file and a support log is
   //          diagnosable when it can be read.

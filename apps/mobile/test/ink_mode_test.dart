@@ -328,11 +328,20 @@ void main() {
     // It said: `touch parity means a finger feature, and this feature is selection` — a finger must
     // select and must never draw, even with ink mode ON, so that the pen alone writes.
     //
-    // **THE PREMISE IS SOUND AND THIS DEVICE DOES NOT HONOUR IT.** On the owner's tablet the S Pen's
-    // contacts arrive as `PointerDeviceKind.touch` — Samsung's stylus fusion merges them into the
-    // touch stream — so "a finger selects" became "THE PEN SELECTS", and drawing worked only when the
-    // pen's width happened to be reported. He reported it as "рисует сейчас через раз", then as "на
-    // всём экране". No signal that remains separates his pen from his finger.
+    // **THE PREMISE IS SOUND AND THIS DEVICE DOES NOT HONOUR IT.** This comment used to assert that
+    // on the owner's tablet the S Pen's contacts arrive as `PointerDeviceKind.touch`, because
+    // Samsung's stylus fusion merges them into the touch stream — and the whole mode decision below
+    // rests on that. **THE TABLET CONTRADICTS THE COMMENT, AND THE TABLET IS THE INSTRUMENT**: a
+    // stylus contact injected with `adb shell input stylus swipe` logs
+    // `ink.contact.down ... ink reason=stylus-tool kind=stylus width=0.0 ... stylus_in_play=true
+    // ink_on=true`, so on this build the pen IS its own kind and is NOT merged into the touch
+    // stream. The claim is left standing beside its refutation rather than deleted, because the mode
+    // decision it justified has not been revisited: with the pen arriving as a stylus, "a touch
+    // draws" is no longer needed for THIS tablet, and that is a question for the owner rather than a
+    // silent reversal here. The width half of the sentence — palms at 71 and 87 logical pixels
+    // against a threshold of 40 — came from the WEB spike's raw browser width and has never been
+    // observed on Android at all: every contact this application has logged on the tablet, stylus or
+    // finger, reported `width=0.0`.
     //
     // SO THE MODE CARRIES THE MEANING INSTEAD OF THE DEVICE KIND, in the owner's own words:
     // **"рисование должно быть свободным"**. With ink mode ON the musician has DECLARED that he is
@@ -340,7 +349,9 @@ void main() {
     // touch parity is a real choice rather than a guess about hardware.
     //
     // AND THE PALM IS STILL CAUGHT BY WIDTH, which is the half that never needed the device kind:
-    // palms on this tablet measure 71 and 87 logical pixels against a threshold of 40.
+    // palms on this tablet measure 71 and 87 logical pixels against a threshold of 40. That is the
+    // WEB half of the rule; on Android the width is not reported and the palm is refused by the ink
+    // layer's own view-gesture rule instead — see `docs/sdd.md` A64.
     //
     // A TEST THAT PASSES BECAUSE IT MATCHES THE CODE CANNOT TELL A CONTRACT FROM A DEFECT. This one
     // was written to match the code, and the hardware said otherwise.

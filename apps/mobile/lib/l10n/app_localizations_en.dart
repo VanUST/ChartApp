@@ -1275,4 +1275,15 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get melodyTapStaffHint =>
       'Touch a beat of the staff to write its note.';
+
+  @override
+  String get tooltipChromeHide =>
+      'Hide the list and the panels: more room for the chart';
+
+  @override
+  String get tooltipChromeShow => 'Show the list and the panels';
+
+  @override
+  String get eraserActiveHint =>
+      'Eraser on: touch a stroke and the whole stroke goes';
 }

@@ -13,6 +13,16 @@
 //          touch stream, may also be his pen — that platform limitation is named in `docs/sdd.md`
 //          A63 rather than papered over here.
 //
+//          WHY A REFUSED TOUCH IS NOT SIMPLY A TOUCH THIS RECOGNISER DOES NOT WANT, AND WHY THE
+//          SCREEN DECIDES IT. The owner reported that a palm resting on the glass while he wrote was
+//          read as a two-finger gesture, so the chart panned under his hand. A finger count is not
+//          enough to tell that apart from two fingers: a palm plus the pen, or a palm plus a stray
+//          touch, is exactly two contacts. The recogniser therefore asks [refuseTouch] before it
+//          counts a touch, and that callback is answered by the ink layer — the one object that knows
+//          the contact's width and whether a pen is in play — so this file holds no second copy of
+//          the palm rule. A refused touch is not tracked and the base class is not told about it, so
+//          `touchCount` and the framework's own pointer count stay the same number.
+//
 //          WHY IT COMPUTES ITS OWN FOCAL POINT AND SPAN INSTEAD OF READING `ScaleUpdateDetails`.
 //          The base class's `scale` is relative to a baseline it resets whenever the pointer
 //          configuration changes, and it tracks every pointer the framework offers it; a handler
@@ -21,12 +31,13 @@
 //          the centroid and the mean radius are computed here, and the callback carries those two
 //          numbers. That makes the arithmetic checkable without a device.
 // INPUTS: A `RawGestureDetector` feeds it the pointer stream. [callbacks] is set by the screen that
-//         owns the view state.
+//         owns the view state, and [refuseTouch] by the screen that owns the ink rule.
 // OUTPUTS: [TwoFingerViewSample] values through [TwoFingerViewCallbacks]: one `onStart` when the
 //          second touch lands, an `onUpdate` per move while two or more are down, and one `onEnd`
 //          when the last touch lifts or the arena rejects the gesture. Nothing is emitted for a
 //          single touch, so a one-finger drag is left entirely to whatever else wants it.
-// KEYWORDS: two-finger-pan, pinch-zoom, gesture-recognizer, gesture-arena, d34, stylus-excluded
+// KEYWORDS: two-finger-pan, pinch-zoom, gesture-recognizer, gesture-arena, d34, stylus-excluded,
+//           palm-refusal, admission-callback
 import 'package:flutter/gestures.dart';
 
 /// One observation of the two-finger gesture: where its middle is and how far apart the fingers are.
@@ -84,12 +95,17 @@ class TwoFingerViewCallbacks {
 }
 
 // PURPOSE: Track the touch pointers a view gesture is made of and win the arena as soon as there are
-//          two of them, so that the two-finger gesture is never handed to the pager underneath.
+//          two of them, so that the two-finger gesture is never handed to the pager underneath. It
+//          counts only the touches the ink layer admits, so a palm — or any contact that lands while
+//          a pen is in play — is not one of the fingers.
 // INPUTS: Pointer events from a `RawGestureDetector`. [callbacks] must be set by the owner before
-//         the first touch, and `scale` behaviour of the base class is deliberately unused.
+//         the first touch, [refuseTouch] by the owner of the ink rule, and `scale` behaviour of the
+//         base class is deliberately unused.
 // OUTPUTS: [TwoFingerViewSample]s through [callbacks]. A stylus, a mouse or any other non-touch kind
-//          is not tracked at all, so it can neither start nor join the gesture.
-// KEYWORDS: gesture-arena, immediate-accept, two-touch, pan-zoom-source, pointer-accounting, d34
+//          is not tracked at all, and neither is a touch the gate refused, so none of them can
+//          start or join the gesture.
+// KEYWORDS: gesture-arena, immediate-accept, two-touch, pan-zoom-source, pointer-accounting, d34,
+//           palm-refusal, admission-gate
 /// The recogniser that owns the two-finger pan and pinch, and nothing else.
 class TwoFingerViewGestureRecognizer extends ScaleGestureRecognizer {
   /// Creates the recognizer. Assign [callbacks] before it receives a pointer.
@@ -101,6 +117,28 @@ class TwoFingerViewGestureRecognizer extends ScaleGestureRecognizer {
   /// `GestureRecognizerFactoryWithHandlers` builds the object before it can be configured, and a
   /// recogniser with no listeners must be harmless rather than throw.
   TwoFingerViewCallbacks? callbacks;
+
+  /// Answers whether one touch may join the gesture, or null when the screen set no gate.
+  ///
+  /// A `String?` rather than a boolean, because the REFUSAL has to be nameable: the owner's report
+  /// is "a palm was read as two fingers", and a bare `false` could not say whether the palm half or
+  /// the pen half of the rule refused the contact. The return is the reason token, or null to admit.
+  ///
+  /// Null means admit, which is the behaviour this recogniser had before the gate existed, so a
+  /// recogniser built without a screen around it — as a unit test may — still tracks touches.
+  String? Function(PointerDownEvent event)? refuseTouch;
+
+  /// Called once for each touch the gate refused, with the reason it gave.
+  ///
+  /// Separate from [refuseTouch] so the rule stays pure and the LOGGING stays the screen's: a
+  /// predicate that printed would put the cost of a log line on the gesture path for every caller,
+  /// and this project has already paid once for a probe that ran on the pen's own thread.
+  void Function(PointerDownEvent event, String reason)? onTouchRefused;
+
+  /// How many touches the gate has refused since this recogniser was built.
+  int get refusedCount => _refused;
+
+  int _refused = 0;
 
   /// The touch pointers currently down, by pointer id, with their latest position.
   ///
@@ -122,6 +160,16 @@ class TwoFingerViewGestureRecognizer extends ScaleGestureRecognizer {
       // Not a finger, so not this gesture. The pointer is not tracked and the base class is not
       // told about it either, which is what keeps `isActive` and the framework's own pointer count
       // the same number.
+      return;
+    }
+    // THE GATE, ASKED BEFORE THE COUNT IS TOUCHED. A palm-like contact, or any contact that lands
+    // while a pen is in play, is not a finger of this gesture: it is not tracked and the base class
+    // is not told, so it can neither start a pan nor join one already running. The chart therefore
+    // cannot move under a hand that is writing — which is the defect the owner reported.
+    final String? refusal = refuseTouch?.call(event);
+    if (refusal != null) {
+      _refused++;
+      onTouchRefused?.call(event, refusal);
       return;
     }
     _touches[event.pointer] = event.localPosition;
