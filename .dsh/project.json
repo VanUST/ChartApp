@@ -183,7 +183,7 @@
       "statement": "A commit that breaks analysis or formatting is rejected before it is made.",
       "statedIn": "lefthook.yml",
       "enforcedBy": null,
-      "pendingReason": "No enforcement point in this checkout. lefthook.yml declares a pre-commit hook, but lefthook is not on PATH and .git/hooks contains only the shipped .sample files, so no pre-commit hook is installed and nothing runs on commit. A core.hooksPath override could not be ruled out, because checking it needs git."
+      "pendingReason": "No enforcement point in this checkout, and that is now MEASURED rather than suspected. `git config --get core.hooksPath` is UNSET, `git rev-parse --git-path hooks` answers `.git/hooks`, and that directory holds nothing but the shipped .sample files, so no hook runs on commit. lefthook is not on PATH either, so `lefthook install` cannot be run as things stand. NOTE: the hook was left uninstalled deliberately rather than repaired — during concurrent work this repository is committed in green slices while another writer's files are mid-edit, and a blocking pre-commit hook would refuse exactly those legitimate partial commits. Making this rule true therefore needs a decision about that workflow, not just a file dropped into .git/hooks."
     }
   ],
   "scopes": [
