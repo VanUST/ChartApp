@@ -622,6 +622,64 @@ class AppLocalizationsEn extends AppLocalizations {
   String get paletteRemoveChord => 'Remove chord';
 
   @override
+  String get melodyGroup => 'MELODY';
+
+  @override
+  String get melodyDuration => 'DURATION';
+
+  @override
+  String get melodyPitch => 'PITCH';
+
+  @override
+  String get melodyAlteration => 'ALTERATION';
+
+  @override
+  String get melodyNewNote => '+ New note';
+
+  @override
+  String get melodyPickCell => 'Tap a beat on the chart to write a note.';
+
+  @override
+  String get melodyBeatEmpty => 'This beat carries no note.';
+
+  @override
+  String melodyNoteLine(int step, String pitch, String value) {
+    return 'Note $step · $pitch $value';
+  }
+
+  @override
+  String get melodyOctaveLower => 'Octave down';
+
+  @override
+  String get melodyOctaveHigher => 'Octave up';
+
+  @override
+  String get melodyValueTooLong =>
+      'Longer than the bar — pick a shorter value.';
+
+  @override
+  String get melodyValueOverflow =>
+      'This bar is already longer than its meter allows.';
+
+  @override
+  String get melodyTie => 'Tie';
+
+  @override
+  String get melodyUntie => 'Untie';
+
+  @override
+  String get melodyRemove => 'Remove note';
+
+  @override
+  String get melodyTapBeatHint => 'Tap the chart to change the beat.';
+
+  @override
+  String get viewerNote => 'Note';
+
+  @override
+  String get viewerChord => 'Chord';
+
+  @override
   String get formGroupBar => 'BAR';
 
   @override
@@ -1072,4 +1130,83 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get setlistMissingChart => '(missing chart)';
+
+  @override
+  String get formGroupMeter => 'METER';
+
+  @override
+  String formMeterLabel(String meter) {
+    return 'Meter: $meter';
+  }
+
+  @override
+  String get formMeterTitle => 'Bar meter M/N';
+
+  @override
+  String get formMeterNumerator => 'Numerator M';
+
+  @override
+  String get formMeterDenominator => 'Denominator N';
+
+  @override
+  String get formMeterHelper => 'Two whole numbers, for example 15/8.';
+
+  @override
+  String get formMeterApply => 'Set';
+
+  @override
+  String formMeterSet(String meter, String range) {
+    return 'Meter $meter set on $range.';
+  }
+
+  @override
+  String get formMeterSame =>
+      'Nothing changed: every bar in the range is already in that meter.';
+
+  @override
+  String get formMeterNone => 'none';
+
+  @override
+  String get formZoneFrom => 'From bar';
+
+  @override
+  String get formZoneTo => 'To bar';
+
+  @override
+  String get formZoneHelper => 'Bars of this section, counted from its first.';
+
+  @override
+  String get formZoneErrorEmpty => 'Type a bar number in both boxes.';
+
+  @override
+  String get formZoneErrorNotAnInteger =>
+      'Bar numbers are whole numbers written in digits.';
+
+  @override
+  String formZoneErrorOutOfRange(int bars) {
+    return 'This section has $bars bar(s).';
+  }
+
+  @override
+  String get formZoneErrorReversed =>
+      'The first bar must not come after the last one.';
+
+  @override
+  String get formZoneErrorNoSection => 'That range is not inside this section.';
+
+  @override
+  String get formMeterErrorEmpty => 'Type a whole number in both boxes.';
+
+  @override
+  String get formMeterErrorNotAnInteger =>
+      'Both figures are whole numbers written in digits.';
+
+  @override
+  String get formMeterErrorNotPositive =>
+      'Both figures must be greater than zero.';
+
+  @override
+  String formMeterErrorTooLarge(int max) {
+    return 'Too large: each figure is at most $max.';
+  }
 }

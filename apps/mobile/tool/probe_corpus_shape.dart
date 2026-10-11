@@ -8,11 +8,22 @@
 //          returns IRealLibrary, which is an application type.
 // INPUTS: The path to an iReal `.html` export, defaulting to the owner's setlist. Read-only.
 // OUTPUTS: One line of totals, then histograms for song length, sections per song, bars per
-//          section, meter, key (by tonic and mode) and style, and the tempo statistics. Nothing is
-//          written and no document is modified.
-// KEYWORDS: probe, ireal, corpus, default-shape, new-chart, sections, bars, meter, key, tempo
+//          section, meter, key (by tonic and mode) and style, the tempo statistics, and — the
+//          figure the per-bar meter requirement is judged on — WHERE the meter changes inside each
+//          song: how many songs change it, what each change is, and on which written bar it lands.
+//          Nothing is written and no document is modified.
+// KEYWORDS: probe, ireal, corpus, default-shape, new-chart, sections, bars, meter, meter-change,
+//           key, tempo
+//
+// WHY THE METER-CHANGE COUNT EXISTS AND WHAT IT DOES NOT DECIDE. Owner decision D22 requires a
+// meter a musician sets by hand on any bar. The count below says how many of the charts he ALREADY
+// has would be rendered wrongly today for want of a meter sign — which is the defect, not the
+// requirement: the requirement is about what he writes next. A count of zero would therefore NOT
+// retire the requirement, and it is reported plainly either way rather than being used to argue
+// the feature down.
 //
 // Run it from apps/mobile:  dart run tool/probe_corpus_shape.dart [path]
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
@@ -47,6 +58,10 @@ void _report<T>(String label, Map<T, int> counts) {
 
 /// Reads the export at [path] and prints the shape of its songs.
 void main(List<String> args) {
+  // The export carries Russian song titles and this host's ANSI code page is windows-1251, so the
+  // report is written in UTF-8 explicitly: without this a redirected run mangles every Cyrillic
+  // title into replacement bytes, which is the trap that has corrupted output here before.
+  stdout.encoding = utf8;
   final String path = args.isNotEmpty
       ? args.first
       : r'C:\Users\1\Downloads\Ракета Русское.html';
@@ -125,6 +140,60 @@ void main(List<String> args) {
   _report<String>('key', _tally<String>(keys));
   _report<String>('style', _tally<String>(styles));
   _report<int>('song bar count', _tally<int>(songBars));
+
+  // --- where the meter changes, per song -------------------------------------------------------
+  //
+  // A "change" is a written bar whose meter differs from the bar before it in reading order, across
+  // section boundaries. The FIRST bar of a song is not a change: there is nothing before it to
+  // change from, and a 3/4 chart that opens in 3/4 is counted separately as an unusual opening,
+  // because that is the case the renderer must still sign at the start of every system.
+  int songsWithChange = 0;
+  int songsOpeningNon44 = 0;
+  int changeBars = 0;
+  final Map<String, int> transitions = <String, int>{};
+  final List<String> meterRows = <String>[];
+  for (final IRealSong entry in library.songs) {
+    final Song song = entry.song;
+    final List<TimeSignature> written = <TimeSignature>[
+      for (final Section section in song.sections)
+        for (final Bar bar in section.bars) bar.timeSignature,
+    ];
+    if (written.isEmpty) {
+      continue;
+    }
+    final List<String> changes = <String>[];
+    for (int index = 1; index < written.length; index++) {
+      if (written[index] == written[index - 1]) {
+        continue;
+      }
+      final String transition = '${written[index - 1]}->${written[index]}';
+      changes.add('$transition@${index + 1}');
+      transitions[transition] = (transitions[transition] ?? 0) + 1;
+      changeBars++;
+    }
+    if (changes.isNotEmpty) {
+      songsWithChange++;
+    }
+    if (written.first != TimeSignature.fourFour) {
+      songsOpeningNon44++;
+    }
+    final Map<TimeSignature, int> counts = _tally<TimeSignature>(written);
+    meterRows.add(
+      '  "${song.title}" bars=${written.length} opens=${written.first} '
+      'meters=${counts.entries.map((MapEntry<TimeSignature, int> e) => '${e.key}x${e.value}').join(' ')} '
+      'changes=${changes.isEmpty ? 'none' : changes.join(',')}',
+    );
+  }
+  stdout.writeln('--- meter changes ---');
+  stdout.writeln(
+    '  songsWithChange=$songsWithChange of ${library.songs.length} '
+    'songsOpeningNon44=$songsOpeningNon44 changeBars=$changeBars '
+    'totalBars=$totalBars',
+  );
+  _report<String>('meter transitions', transitions);
+  for (final String row in meterRows) {
+    stdout.writeln(row);
+  }
 
   // Melody and percussion, counted once more here so the new-chart debt has a number beside it.
   int melodyBars = 0;

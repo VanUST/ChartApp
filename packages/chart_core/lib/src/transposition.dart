@@ -19,20 +19,50 @@
 // unchanged — which is why a chart-level transposition here is the right unit after all, once a
 // caller owns the entry that carries the interval.
 //
-// THE MELODY GAP, carried over rather than invented here. Only the chord line moves. A written
-// pitched note cannot be transposed and returned exactly — spelling runs through the key signature,
-// so F# in C major comes back as Gb — and there is no note transposer that preserves spelling, as
-// the op-log's `key.transpose` event already records. Every imported iReal chart has an empty
-// melody staff, so this is a gap rather than a defect for the reader; a song with a melody keeps
-// its written notes and its chords move.
+// THE MELODY MOVES WITH THE CHORDS, and the reasoning is stated on [transposeSong]. It used to be a
+// gap: `melody: bar.melody` copied the notes untouched, so a transposed chart showed chords in the
+// new key over notes in the old one — the two halves of one chart disagreeing. The written spelling
+// is not lost by that fix, because this function returns the chart that is SHOWN and nothing writes
+// the result back over the written one.
 
 import 'key.dart';
 import 'pitch.dart';
 import 'song/bar.dart';
+import 'song/note.dart';
 import 'song/section.dart';
 import 'song/song.dart';
 import 'spelling_table.dart';
 import 'transposer.dart';
+
+// THE MELODY MOVES WITH THE CHORDS, AND THIS IS THE DECISION THAT CLOSES THE GAP A56 NAMED.
+//
+// The gap, as it stood: only the chord line moved. A transposed chart with a melody therefore
+// CONTRADICTED ITSELF — the chords said E major and the notes still spelled D major — and that is a
+// defect rather than a missing feature, because the two halves of one chart have to agree about the
+// key they are in.
+//
+// WHERE IT IS FIXED, AND WHY IT IS FIXED HERE RATHER THAN IN THE EDITOR.
+//
+// `key.transpose` is an EDITOR operation: it rewrites the chart's own written key and its chords,
+// and it is the event the reducer routes through this same function. A display transposition — what
+// the viewer's key grid does — must move the notes it SHOWS and must not touch the notes the
+// musician WROTE, and the whole architecture already says so: `EditSession` edits the written
+// document, this function returns a new `Song`, and `setlist_scene.dart` documents the difference as
+// "the scene meaning ... returns the shown chart while the written one is returned unchanged".
+// So this function transposes notes for exactly the reason it transposes chords — it produces the
+// chart that is SHOWN — and the written spelling survives because nothing writes it back.
+//
+// WHY THIS IS NOT "DISPLAY-ONLY" IN THE SENSE OF A SECOND RENDERER. There is no second renderer:
+// the notes are moved in the model, in the same pass and by the same rule as the chords, and every
+// consumer of a `Song` — the layout engine, the painter, a page dump, a probe with no Flutter at
+// all — receives a melody that already belongs to the key it is labelled with. A spelling chosen at
+// paint time would have to be chosen again by every consumer that is not the painter.
+//
+// WHAT THE MUSICIAN'S WRITTEN PITCH COSTS AND WHY IT IS WORTH IT. A chart whose melody is written
+// in a key the reader cannot play is shown to them in their own key (D14), and the chart they see
+// has a melody in that key and chords to match. The chart they SAVE is still their own, note for
+// note: the key grid never changes what is written, which is what the owner's instruction — the
+// written pitch must not be destroyed by looking at it in another key — requires.
 
 /// One key a written chart can be shown in, with the interval that reaches it.
 class TranspositionTarget {
@@ -172,12 +202,20 @@ int _shortestInterval(int from, int to) {
 //         taking it as an argument rather than deriving it keeps the spelling choice (A1's
 //         spelling table) at the call site that made it.
 // OUTPUTS: A new Song whose sections, bars, barlines, repeats, voltas, marks and staff text are
-//          copied unchanged and whose every chord root, slash bass and alternate chord is moved
-//          by [semitones], labelled with [toKey]. The input is not mutated. Transposing by 0 and
-//          passing the song's own key returns an equal song, so clearing a transposition is the
-//          same operation as applying one.
-// KEYWORDS: song-transposition, chord-line, display-key, immutable, editor-key
-/// Returns [song] with its chord line moved by [semitones] and its key relabelled [toKey].
+//          copied unchanged and whose every chord root, slash bass and alternate chord is moved by
+//          [semitones], labelled with [toKey]. The MELODY is moved by the same interval and written
+//          in [toKey], so the notes and the chords of the result agree about the key — the defect
+//          A56 named, closed. The input is not mutated, and the input's notes are not re-spelled, so
+//          the written pitch survives on the document the musician saves. Percussion is copied
+//          unchanged and that is not an oversight: a drum is not a pitch and a drum part does not
+//          transpose, which is the rule `StaffKind.percussion` states.
+//
+//          Transposing by 0 and passing the song's own key returns an equal song — the note path
+//          included, because spelling a pitch in the key it is already written in returns the note
+//          that was written (diatonic pitches come back as their own scale degree) — so clearing a
+//          transposition is the same operation as applying one.
+// KEYWORDS: song-transposition, chord-line, melody, display-key, immutable, editor-key
+/// Returns [song] with its chord line and melody moved by [semitones], labelled [toKey].
 Song transposeSong(Song song, int semitones, {required Key toKey}) {
   const Transposer transposer = Transposer();
   final List<Section> sections = <Section>[
@@ -198,7 +236,10 @@ Song transposeSong(Song song, int semitones, {required Key toKey}) {
                     size: placed.size,
                   ),
               ],
-              melody: bar.melody,
+              melody: <BeatNote>[
+                for (final BeatNote note in bar.melody)
+                  _transposedNote(note, transposer, semitones, song.key, toKey),
+              ],
               percussion: bar.percussion,
               openingBarline: bar.openingBarline,
               closingBarline: bar.closingBarline,
@@ -223,3 +264,38 @@ Song transposeSong(Song song, int semitones, {required Key toKey}) {
     staffSet: song.staffSet,
   );
 }
+
+// PURPOSE: Move one note of the melody, keeping everything a transposition has no business changing
+//          — its address in the bar, how long it is written, and its tie — so that only the pitch
+//          moves and the melody stays the melody.
+// INPUTS: note — the note as written. transposer — the shared transposer. semitones — the interval.
+//         writtenKey — the key the note is written in. shownKey — the key the result is written in.
+// OUTPUTS: A [BeatNote] at the same (beat, step) with the same [NoteValue] and the same
+//          [BeatNote.tiedToNext], whose pitch has been moved by [semitones] and rewritten in
+//          [shownKey].
+//
+//          WHY THE ADDRESS AND THE TIE ARE COPIED RATHER THAN TAKEN FROM THE MOVE. A tie points
+//          FORWARD at a note that is moving by the same interval and is still the note that follows
+//          it, and a step within a cell is a place in a dense sequence whose neighbours are all
+//          moving with it. Re-deriving either would be this function deciding a fact that has not
+//          changed, and the only way to decide it wrongly.
+// KEYWORDS: melody-transposition, address-preserved, duration-preserved, tie-preserved
+/// Returns [note] moved by [semitones] into [shownKey], keeping its address, value and tie.
+BeatNote _transposedNote(
+  BeatNote note,
+  Transposer transposer,
+  int semitones,
+  Key writtenKey,
+  Key shownKey,
+) => BeatNote(
+  pitch: transposer.transposeNote(
+    note.pitch,
+    semitones,
+    sourceKey: writtenKey,
+    targetKey: shownKey,
+  ),
+  value: note.value,
+  beat: note.beat,
+  step: note.step,
+  tiedToNext: note.tiedToNext,
+);

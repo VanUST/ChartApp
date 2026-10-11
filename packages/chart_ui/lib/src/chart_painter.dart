@@ -26,6 +26,9 @@
 //     slash repeat              `/`
 //     no chord                  `N.C.`
 //     volta                     `[1.` and `[2.`, or `[` for the unnumbered bracket
+//     meter                     the model's own `M/N` — `3/4`, `15/8` — at the bar where it changes
+//                               and at the start of a system that is not in 4/4 (see
+//                               `chart_core`'s `showsMeterSign`, which decides it)
 //     segno `S` · coda `C` · fermata `^` · player ending `End`
 //
 // Barlines ARE drawn as lines, because the model names them exactly (single, double, repeat start,
@@ -278,6 +281,13 @@ class ChartPainter extends CustomPainter {
       return;
     }
     _paintBarSigns(canvas, bar, placed);
+    // The meter is drawn AFTER the other signs for one reason: a bar that changes meter is a bar
+    // whose three beats a musician would otherwise have to count, and for 15/8 could not recover at
+    // all, so the sign that explains the bar is never the symbol that gets covered. On the rare bar
+    // that carries BOTH a volta and a change — `[1.` is drawn at the same top-left corner — the two
+    // overlap and the meter wins; that is a blemish of this reading renderer, not a lost edit, and
+    // it is stated rather than hidden.
+    _paintMeterSign(canvas, bar, placed, firstInSystem: firstInSystem);
     for (final PlacedChord placedChord in placed.chords) {
       _paintChord(canvas, bar, placedChord);
     }
@@ -561,6 +571,47 @@ class ChartPainter extends CustomPainter {
         metrics.staffTextStyle,
       );
     }
+  }
+
+  // PURPOSE: Draw the meter a bar is counted in, where a musician looks for it: at the bar where the
+  //          meter CHANGES, and at the start of a system whose meter is not the one the reader
+  //          assumes. It is the sign that turns "three chord cells and no explanation" into a chart
+  //          that can be played — owner decision D22's rendering half.
+  // INPUTS: canvas — the target. bar — the bar, read for its meter. placed — the bar's layout, whose
+  //         bounds the sign is placed inside. firstInSystem — whether this bar opens its system,
+  //         which is one of the three things the rule reads.
+  // OUTPUTS: Nothing, and NOTHING AT ALL for a bar the rule does not sign, which is every bar of a
+  //          chart in 4/4 throughout — that is what makes such a chart print byte-for-byte what it
+  //          printed before a meter sign existed.
+  //
+  //          WHERE IT IS DRAWN, AND WHY THERE. In the bar's own top-left corner, in the band the
+  //          stave leaves above its centred chords — the position a printed time signature occupies
+  //          relative to the barline, and the same corner and the same style the volta's `[1.` uses.
+  //          It is drawn INSIDE the bar's published rectangle and derives no geometry of its own, so
+  //          the layout did not have to change for it: the cells the hit test reads, the chord
+  //          positions and every measured width are exactly what they were, which is the property
+  //          requirement 4 of D22's implementation demands.
+  // KEYWORDS: meter, time-signature, meter-sign, drawing, top-left, no-geometry-change, d22
+  void _paintMeterSign(
+    Canvas canvas,
+    Bar bar,
+    PlacedBar placed, {
+    required bool firstInSystem,
+  }) {
+    final TimeSignature meter = bar.timeSignature;
+    if (!showsMeterSign(
+      meter: meter,
+      preceding: precedingMeter(song, placed.sectionId, placed.barIndex),
+      opensSystem: firstInSystem,
+    )) {
+      return;
+    }
+    _paintText(
+      canvas,
+      meter.toString(),
+      Offset(placed.bounds.left + 2, placed.bounds.top + 1),
+      metrics.staffTextStyle,
+    );
   }
 
   // PURPOSE: Name the glyph a [BarMark] is drawn as, keeping the mapping in one switch instead of

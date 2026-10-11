@@ -3,8 +3,11 @@
 //          same code the Save button calls, with two damaged copies derived from it. A browser can
 //          only be handed files that already exist, and the page cannot be asked to produce the one
 //          it is supposed to open before it has opened it; the export and the reordered export come
-//          from the payload `probe_setlist_seam.dart` prints identities for, so the numbers the
-//          browser computes can be compared with the numbers the native run computed.
+//          from the payload defined in `probe_payloads.dart`, for which `probe_setlist_seam.dart`
+//          prints identities, so the numbers the browser computes can be compared with the numbers
+//          the native run computed. The payload lives in that separate Flutter-free file because
+//          `probe_setlist_seam.dart` is a `flutter test` file since A55, and a `dart run` script
+//          cannot import it without inheriting `dart:ui`.
 // INPUTS: argv[0] — the directory to write into. Created when it does not exist.
 // OUTPUTS: `setlist-export.html`, `setlist-export-reordered.html` (iReal export pages, each carrying
 //          one `irealb://` link), `valid.setlist`, `truncated.setlist` and `damaged.setlist`, one
@@ -20,7 +23,7 @@ import 'package:chartapp/ireal_library.dart';
 import 'package:chartapp/setlist_document.dart';
 import 'package:chartapp/setlist_import.dart';
 
-import 'probe_setlist_seam.dart'
+import 'probe_payloads.dart'
     show threeSongPlaylistPayload, threeSongPlaylistReorderedPayload;
 
 void main(List<String> arguments) {

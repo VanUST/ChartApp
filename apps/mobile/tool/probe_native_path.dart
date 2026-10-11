@@ -13,6 +13,16 @@
 //          `ireal_source_io.dart` — the implementations an Android tablet runs — which is exactly
 //          the half the web build never compiles.
 //
+//          **THE CLAIM IN THAT PARAGRAPH — that the `tool/probe_*_seam.dart` probes "exercise the io
+//          FUNCTIONS without Flutter" — IS NO LONGER TRUE, and it is left standing above beside this
+//          correction rather than quietly rewritten, the same form `docs/sdd.md` A30 and A52 use.**
+//          It described those probes as `dart run` instruments, and A55 made that false: they reach
+//          `chart_source.dart` -> `chart_source_io.dart` -> `file_selector` -> `dart:ui`. They are
+//          `flutter test` probes now (`flutter test tool/probe_chart_seam.dart` and its two
+//          siblings). That changes nothing about WHY this file is one: the seam probes exercise the
+//          io functions directly, while the strings here are chosen inside widgets and need the
+//          test binding.
+//
 //          It is an instrument, not part of the suite: it lives in `tool/`, so it is not picked up
 //          by `flutter test`'s default run or by the `melos run verify` gate. It writes one
 //          temporary `.chart` and one `.setlist` file and deletes them. Run it from `apps/mobile`

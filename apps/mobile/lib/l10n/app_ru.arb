@@ -55,9 +55,9 @@
 
   "newChartKeyLabel": "Тональность",
 
-  "newChartMajor": "Мажор",
+  "newChartMajor": "Major",
 
-  "newChartMinor": "Минор",
+  "newChartMinor": "Minor",
 
   "create": "Создать",
 
@@ -145,7 +145,7 @@
 
   "keyBadgeLabel": "{key} · {interval}",
 
-  "semitonesShort": "{signed} пт",
+  "semitonesShort": "{signed} st",
 
   "keyGridTitle": "Транспонирование — написано в {writtenKey}",
 
@@ -153,8 +153,8 @@
 
   "keyGridNotSpellable": "нет написания",
 
-  "keyNameMajor": "{tonic} мажор",
-  "keyNameMinor": "{tonic} минор",
+  "keyNameMajor": "{tonic} major",
+  "keyNameMinor": "{tonic} minor",
 
   "settingsTitle": "Настройки",
 
@@ -289,6 +289,42 @@
   "paletteNow": "Сейчас: {chord}",
 
   "paletteRemoveChord": "Удалить аккорд",
+
+  "melodyGroup": "МЕЛОДИЯ",
+
+  "melodyDuration": "ДЛИТЕЛЬНОСТЬ",
+
+  "melodyPitch": "ВЫСОТА",
+
+  "melodyAlteration": "АЛЬТЕРАЦИЯ",
+
+  "melodyNewNote": "+ Новая нота",
+
+  "melodyPickCell": "Коснитесь доли на ча́рте, чтобы поставить ноту.",
+
+  "melodyBeatEmpty": "На этой доле нот нет.",
+
+  "melodyNoteLine": "Нота {step} · {pitch} {value}",
+
+  "melodyOctaveLower": "Октава ниже",
+
+  "melodyOctaveHigher": "Октава выше",
+
+  "melodyValueTooLong": "Длиннее такта — выберите короче.",
+
+  "melodyValueOverflow": "Этот такт уже длиннее своего размера.",
+
+  "melodyTie": "Связка",
+
+  "melodyUntie": "Снять связку",
+
+  "melodyRemove": "Удалить ноту",
+
+  "melodyTapBeatHint": "Коснитесь ча́рта, чтобы сменить долю.",
+
+  "viewerNote": "Нота",
+
+  "viewerChord": "Аккорд",
 
   "formGroupBar": "ТАКТЫ",
 
@@ -546,5 +582,49 @@
 
   "untitledProgramme": "Программа без названия",
 
-  "setlistMissingChart": "(чарт не найден)"
+  "setlistMissingChart": "(чарт не найден)",
+
+  "formGroupMeter": "РАЗМЕР",
+
+  "formMeterLabel": "Размер: {meter}",
+
+  "formMeterTitle": "Размер такта M/N",
+
+  "formMeterNumerator": "Числитель M",
+
+  "formMeterDenominator": "Знаменатель N",
+
+  "formMeterHelper": "Два целых числа, например 15/8.",
+
+  "formMeterApply": "Поставить",
+
+  "formMeterSet": "Размер {meter} поставлен: {range}.",
+
+  "formMeterSame": "Ничего не изменилось: все такты диапазона уже в этом размере.",
+
+  "formMeterNone": "нет",
+
+  "formZoneFrom": "С такта",
+
+  "formZoneTo": "По такт",
+
+  "formZoneHelper": "Такты этого раздела, считая с первого.",
+
+  "formZoneErrorEmpty": "Введите номер такта в оба поля.",
+
+  "formZoneErrorNotAnInteger": "Номера тактов вводятся цифрами.",
+
+  "formZoneErrorOutOfRange": "В этом разделе тактов: {bars}.",
+
+  "formZoneErrorReversed": "Первый такт не должен быть позже последнего.",
+
+  "formZoneErrorNoSection": "Такой диапазон не попадает в этот раздел.",
+
+  "formMeterErrorEmpty": "Введите целое число в оба поля.",
+
+  "formMeterErrorNotAnInteger": "Оба числа вводятся цифрами, без дробей и точек.",
+
+  "formMeterErrorNotPositive": "Оба числа должны быть больше нуля.",
+
+  "formMeterErrorTooLarge": "Слишком большой размер: каждое число не больше {max}."
 }

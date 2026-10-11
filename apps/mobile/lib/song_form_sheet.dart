@@ -1,8 +1,10 @@
 // PURPOSE: Offer the operations that decide the SHAPE of a tune — put a bar in, take it out, copy
-//          it; mark where it repeats and which ending each pass takes; draw the signs a bar carries
-//          (segno, coda, fermata, player's stop); add, rename, copy, move and remove a section — as
-//          one sheet over the chart, so a musician can build a 32-bar form, a rehearsal-letter form
-//          and a repeated, signed form without a menu search and without a keyboard.
+//          it; set the meter the bar is counted in by typing M/N; mark where it repeats and which
+//          ending each pass takes; draw the signs a bar carries (segno, coda, fermata, player's
+//          stop); add, rename, copy, move and remove a section — as one sheet over the chart, so a
+//          musician can build a 32-bar form, a rehearsal-letter form and a repeated, signed form
+//          without a menu search and with the keyboard only where a value genuinely has to be
+//          typed: a section's name, and a meter's two figures.
 //          It is the form half of the edit loop: `edit_session.dart` decides which event each
 //          operation is, and this file decides where the buttons go and what a tap does.
 // INPUTS: The session being edited, the address of the bar the musician selected (section id and
@@ -40,10 +42,13 @@
 // WHY THE METER TRAVELS WITH A NEW BAR AND THE SIGNS DO NOT.
 //
 // A meter is per bar in this model, because a real chart changes it mid-song, so a new bar that
-// defaulted to 4/4 would put a wrong bar into a 3/4 tune — a musical change nobody asked for. Repeat
-// signs, volta brackets and barlines are signs of a PASSAGE; copying one into a position the
-// musician chose says "repeat from here" or "first ending" about music that may not repeat, which is
-// an invented instruction rather than a copied one. The meter is inherited; the signs are not.
+// defaulted to 4/4 would put a wrong bar into a 3/4 tune — a musical change nobody asked for. The
+// METER group in this sheet is the other half of the same fact (D22): inheriting it is how a
+// musician keeps a form of one meter, and typing M/N on one bar is how he changes it where the tune
+// does. Repeat signs, volta brackets and barlines are signs of a PASSAGE; copying one into a
+// position the musician chose says "repeat from here" or "first ending" about music that may not
+// repeat, which is an invented instruction rather than a copied one. The meter is inherited; the
+// signs are not.
 //
 // WHY SOME OPERATIONS ARE REFUSED.
 //
@@ -555,6 +560,57 @@ class _SongFormSheetState extends State<SongFormSheet> {
     );
   }
 
+  // PURPOSE: Ask for the M/N and the RUN OF BARS it applies to, and set it on every bar of the run,
+  //          because a meter is two NUMBERS a musician types AND a zone he thinks in: D22 requires
+  //          `15/8` to be expressible and anything else a jazz musician writes, and the owner's own
+  //          extension requires the gesture to be "from bar X to bar Y" rather than thirty-two
+  //          separate decisions. A fixed row of buttons — which is what the ending dialog is — would
+  //          refuse the music; a per-bar control would refuse the musician's patience.
+  // INPUTS: None; reads the cursor's bar and section, so the run is described in the bars of the
+  //         section the sheet is already working in and opens on the meter the cursor's bar carries.
+  // OUTPUTS: Nothing. A dismissed dialog changes nothing. A figure that is not a bar number or not a
+  //          meter is refused by the domain readers with the offending FIELD and the KIND of problem,
+  //          shown in the box while it stays open — nothing is applied, clamped or corrected. A run
+  //          where every bar already carries that meter is refused through the session and reported
+  //          with [AppLocalizations.formMeterSame].
+  // KEYWORDS: meter, time-signature, m-over-n, zone, bar-range, dialog, typed-refusal, op-log, d22
+  Future<void> _chooseMeter() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final Bar? bar = _bar;
+    final Section? section = _section;
+    if (bar == null || section == null) {
+      return;
+    }
+    final _MeterZoneChoice? choice = await showDialog<_MeterZoneChoice>(
+      context: context,
+      builder: (BuildContext context) => _MeterZoneDialog(
+        song: _song,
+        sectionId: _sectionId,
+        sectionBarCount: section.bars.length,
+        cursorBar: _barIndex,
+        current: bar.timeSignature,
+      ),
+    );
+    if (!mounted || choice == null) {
+      return;
+    }
+    final int changed = widget.session.setTimeSignatureRange(
+      range: choice.range,
+      meter: choice.meter,
+    );
+    final BarRange range = choice.range;
+    // A run of one bar prints that bar's number rather than `3–3`: the status line names the bars a
+    // musician would point at, and a range of one is a bar and not a range.
+    final String rangeText = range.length == 1
+        ? '${range.firstBar + 1}'
+        : '${range.firstBar + 1}–${range.lastBar + 1}';
+    _report(
+      changed > 0,
+      l10n.formMeterSet(choice.meter.toString(), rangeText),
+      refusal: l10n.formMeterSame,
+    );
+  }
+
   // PURPOSE: Add a new one-bar section on the chosen side of the cursor's section.
   // INPUTS: before — true to put the new section in front of the cursor's, false behind it.
   // OUTPUTS: Nothing. The cursor moves into the new section's first bar, because an operation on a
@@ -725,6 +781,24 @@ class _SongFormSheetState extends State<SongFormSheet> {
                   label: l10n.formDeleteBar,
                   danger: true,
                   onTap: canDeleteBar ? _deleteBar : null,
+                ),
+              ]),
+              const SizedBox(height: 14),
+              // The meter the cursor's bar is counted in. It sits directly under the bar group
+              // because it is a property of the bar — how many cells it has, and therefore how the
+              // musician counts it — and it is the one control here that needs the keyboard: D22
+              // asks for M/N by figures, which no row of buttons can offer without refusing the
+              // meter a jazz musician actually writes.
+              _buildGroup(l10n.formGroupMeter, <Widget>[
+                SheetButton(
+                  buttonKey: 'song-form-meter',
+                  icon: Icons.speed,
+                  label: l10n.formMeterLabel(
+                    bar == null
+                        ? l10n.formMeterNone
+                        : bar.timeSignature.toString(),
+                  ),
+                  onTap: hasBar ? _chooseMeter : null,
                 ),
               ]),
               const SizedBox(height: 14),
@@ -1090,3 +1164,345 @@ class _VoltaDialog extends StatelessWidget {
 /// without depending on the order the buttons happen to be built in.
 String _voltaChoiceKey(Volta? volta) =>
     volta == null ? 'none' : 'n${volta.number}';
+
+/// What the meter box hands back: the RUN OF BARS the musician described and the meter to write on
+/// every bar of it.
+///
+/// A record rather than a bare [TimeSignature] because the zone is half the answer: a dialog that
+/// returned only the meter would leave its caller to invent the range, which is the per-bar decision
+/// the owner asked to be rid of.
+typedef _MeterZoneChoice = ({BarRange range, TimeSignature meter});
+
+// PURPOSE: Ask for a RUN OF BARS — a zone — as two bar numbers a musician types, and hand the run
+//          back. It is deliberately VALUE-NEUTRAL: it knows "from bar X to bar Y" and nothing about
+//          what will be written on those bars, so the same field can describe the zone a meter
+//          covers and, when the model grows a per-bar key, the zone a key covers.
+// INPUTS: first and last — the controllers holding the two typed bar numbers, ONE-BASED as a
+//         musician counts the bars of his section. onChanged — called when either field is edited,
+//         so the dialog that owns it can clear a refusal about text no longer on screen.
+// OUTPUTS: Two bordered number boxes with the catalogue's labels and one hint under them. It
+//          validates nothing on its own, so the single place that decides what a valid run is stays
+//          [readBarRange]: a second opinion here is a second answer about the same bars.
+// KEYWORDS: bar-range, zone, value-neutral, keyboard, reusable, no-validation-here, d22
+class _BarRangeField extends StatelessWidget {
+  /// Creates the two-box range field over [first] and [last].
+  const _BarRangeField({
+    required this.first,
+    required this.last,
+    required this.onChanged,
+  });
+
+  /// The first bar of the run, as typed.
+  final TextEditingController first;
+
+  /// The last bar of the run, as typed.
+  final TextEditingController last;
+
+  /// Called when either box is edited.
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: TextField(
+                key: const ValueKey<String>('form-zone-first'),
+                controller: first,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: l10n.formZoneFrom,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: onChanged,
+                onSubmitted: onChanged,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                key: const ValueKey<String>('form-zone-last'),
+                controller: last,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: l10n.formZoneTo,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: onChanged,
+                onSubmitted: onChanged,
+              ),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6, left: 2),
+          child: Text(
+            l10n.formZoneHelper,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// PURPOSE: Ask for the M/N and the RUN OF BARS it applies to, and hand both back only when the run
+//          exists and the figures read as a meter. This is the zonal surface the owner asked for —
+//          "размер M/N с такта X по такт Y" — rather than thirty-two separate per-bar decisions.
+// INPUTS: song and sectionId — what the run must exist inside. sectionBarCount — how many bars the
+//         section has, named in the refusal that says the range is outside it. cursorBar — the
+//         zero-based bar the sheet is on, which BOTH numbers open on, so the ordinary gesture (a run
+//         beginning at the cursor) is a correction rather than a whole entry. current — the meter
+//         that bar carries now, so the metre half opens on the value being changed.
+// OUTPUTS: A [_MeterZoneChoice] when the run and the meter both read, or null when the dialog is
+//          dismissed. The dialog never edits the document itself: it hands the pair back, so a
+//          dismissed box cannot have half-changed the chart.
+// KEYWORDS: meter, m-over-n, zone, bar-range, dialog, typed-refusal, cancel-is-null, d22
+class _MeterZoneDialog extends StatefulWidget {
+  /// Creates the zonal meter box.
+  const _MeterZoneDialog({
+    required this.song,
+    required this.sectionId,
+    required this.sectionBarCount,
+    required this.cursorBar,
+    required this.current,
+  });
+
+  /// The chart the run must exist in, read by [readBarRange].
+  final Song song;
+
+  /// The section the two bar numbers count in.
+  final String sectionId;
+
+  /// How many bars that section has, named by an out-of-range refusal.
+  final int sectionBarCount;
+
+  /// The zero-based bar both numbers open on.
+  final int cursorBar;
+
+  /// The meter the cursor's bar carries now.
+  final TimeSignature current;
+
+  @override
+  State<_MeterZoneDialog> createState() => _MeterZoneDialogState();
+}
+
+/// The box's state: the four typed values, and why the last attempt was refused.
+class _MeterZoneDialogState extends State<_MeterZoneDialog> {
+  /// The first bar of the run, pre-filled with the cursor's bar in the musician's one-based count.
+  late final TextEditingController _first = TextEditingController(
+    text: '${widget.cursorBar + 1}',
+  );
+
+  /// The last bar of the run, pre-filled with the cursor's bar too: the smallest run is one bar, and
+  /// a musician who means "to the end of the section" changes one figure rather than typing two.
+  late final TextEditingController _last = TextEditingController(
+    text: '${widget.cursorBar + 1}',
+  );
+
+  /// The numerator as typed, pre-filled with the cursor's bar's own.
+  late final TextEditingController _numerator = TextEditingController(
+    text: '${widget.current.numerator}',
+  );
+
+  /// The denominator as typed, pre-filled with the cursor's bar's own.
+  late final TextEditingController _denominator = TextEditingController(
+    text: '${widget.current.denominator}',
+  );
+
+  /// What was wrong with the last attempt, in the musician's language, or null.
+  ///
+  /// It is cleared as soon as any box is touched, because a message about text the musician has
+  /// already changed would be describing something no longer on screen.
+  String? _error;
+
+  @override
+  void dispose() {
+    _first.dispose();
+    _last.dispose();
+    _numerator.dispose();
+    _denominator.dispose();
+    super.dispose();
+  }
+
+  // PURPOSE: Say which box was refused and why, for a refusal about the RUN OF BARS.
+  // INPUTS: l10n — the message catalogue. error — the domain's refusal, carrying which end of the
+  //         run it is about and what was wrong.
+  // OUTPUTS: A sentence naming the box and the reason, with the section's bar count for a figure
+  //          outside it. A refusal about the section rather than about one figure carries no box
+  //          name. Every word comes from the catalogue.
+  // KEYWORDS: refusal, bar-range, field, problem, localized, section-count
+  String _rangeProblemText(AppLocalizations l10n, BarRangeException error) {
+    final String label = switch (error.field) {
+      BarRangeField.first => l10n.formZoneFrom,
+      BarRangeField.last => l10n.formZoneTo,
+      null => '',
+    };
+    final String what = switch (error.problem) {
+      BarRangeProblem.empty => l10n.formZoneErrorEmpty,
+      BarRangeProblem.notAnInteger => l10n.formZoneErrorNotAnInteger,
+      BarRangeProblem.barOutOfRange => l10n.formZoneErrorOutOfRange(
+        widget.sectionBarCount,
+      ),
+      BarRangeProblem.reversed => l10n.formZoneErrorReversed,
+      BarRangeProblem.noSuchSection ||
+      BarRangeProblem.emptySection => l10n.formZoneErrorNoSection,
+    };
+    return label.isEmpty ? what : '$label: $what';
+  }
+
+  // PURPOSE: Say which box was refused and why, for a refusal about the METER.
+  // INPUTS: l10n — the message catalogue. field — which figure. problem — what was wrong with it.
+  // OUTPUTS: A sentence naming the figure and the reason, with the accepted bound for a figure that
+  //          is too large. Every word comes from the catalogue.
+  // KEYWORDS: refusal, meter, field, problem, localized, too-large-bound
+  String _meterProblemText(
+    AppLocalizations l10n,
+    MeterField field,
+    MeterFigureProblem problem,
+  ) {
+    final String label = field == MeterField.numerator
+        ? l10n.formMeterNumerator
+        : l10n.formMeterDenominator;
+    final String what = switch (problem) {
+      MeterFigureProblem.empty => l10n.formMeterErrorEmpty,
+      MeterFigureProblem.notAnInteger => l10n.formMeterErrorNotAnInteger,
+      MeterFigureProblem.notPositive => l10n.formMeterErrorNotPositive,
+      MeterFigureProblem.tooLarge => l10n.formMeterErrorTooLarge(
+        maxMeterFigure,
+      ),
+    };
+    return '$label: $what';
+  }
+
+  // PURPOSE: Read the four boxes and either hand the zone and the meter back or show why not.
+  // INPUTS: None; reads all four controllers.
+  // OUTPUTS: Nothing. The RUN is read first, so a musician whose bar numbers are wrong is told about
+  //          the bars rather than about a meter that may be perfectly fine; the meter is read only
+  //          once the run exists. A refusal is written to [_error] and the box stays open with every
+  //          figure as typed, because correcting the text for the musician would hide which box was
+  //          the problem.
+  // KEYWORDS: submit, validate, range-then-meter, typed-refusal, no-correction, stays-open
+  void _submit() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    try {
+      final BarRange range = readBarRange(
+        song: widget.song,
+        sectionId: widget.sectionId,
+        first: _first.text,
+        last: _last.text,
+      );
+      final TimeSignature meter = parseMeterFigures(
+        numerator: _numerator.text,
+        denominator: _denominator.text,
+      );
+      Navigator.of(context).pop((range: range, meter: meter));
+    } on BarRangeException catch (error) {
+      setState(() => _error = _rangeProblemText(l10n, error));
+    } on MeterInputException catch (error) {
+      setState(
+        () => _error = _meterProblemText(l10n, error.field, error.problem),
+      );
+    }
+  }
+
+  /// Clears a refusal the moment any box is touched, since it describes text that just changed.
+  void _clearError(String _) {
+    if (_error != null) {
+      setState(() => _error = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String? error = _error;
+    return AlertDialog(
+      title: Text(l10n.formMeterTitle),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            // The run first, then the value: the musician names the bars he is talking about before
+            // he says what goes on them, and the same order is what a second value type would keep.
+            _BarRangeField(first: _first, last: _last, onChanged: _clearError),
+            const SizedBox(height: 16),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey<String>('form-zone-numerator'),
+                    controller: _numerator,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: l10n.formMeterNumerator,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: _clearError,
+                    onSubmitted: _clearError,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey<String>('form-zone-denominator'),
+                    controller: _denominator,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: l10n.formMeterDenominator,
+                      // The example is `15/8` on purpose: it is the meter a fixed list would
+                      // refuse, and showing it is how the box says "no list" without a sentence
+                      // about lists.
+                      helperText: l10n.formMeterHelper,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: _clearError,
+                    onSubmitted: _clearError,
+                  ),
+                ),
+              ],
+            ),
+            if (error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  error,
+                  key: const ValueKey<String>('form-zone-error'),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          key: const ValueKey<String>('form-zone-cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          key: const ValueKey<String>('form-zone-apply'),
+          onPressed: _submit,
+          child: Text(l10n.formMeterApply),
+        ),
+      ],
+    );
+  }
+}

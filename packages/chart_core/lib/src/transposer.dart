@@ -10,6 +10,7 @@
 import 'chord.dart';
 import 'key.dart';
 import 'pitch.dart';
+import 'song/note.dart';
 import 'spelling_table.dart';
 
 /// Moves chords and keys by a number of semitones.
@@ -99,4 +100,118 @@ class Transposer {
   /// Returns the written root of [chord] as [targetKey] spells it.
   WrittenNote spellRoot(Chord chord, Key targetKey) =>
       chord.root.spellIn(targetKey, spellingTable);
+
+  // PURPOSE: Move a single written note to another key, preserving its MUSICAL FUNCTION — its scale
+  //          degree — rather than its letter. This is what makes a transposed melody agree with the
+  //          transposed chord beside it: the chord's root is moved by an interval and then spelled
+  //          in the target key by [SpellingTable], and a note moved the same way and spelled the
+  //          same way belongs to the same key as the chord it sounds under.
+  // INPUTS: note — the note as WRITTEN, whose pitch class and octave both matter. semitones — the
+  //         interval, positive upward. sourceKey — the key [note] is written in, which is a
+  //         TIE-BREAK rather than a filter: it decides the direction of an alteration only when the
+  //         two candidate spellings are equally short (see below). targetKey — the key the result is
+  //         written in, which chooses the spelling of every sounding pitch.
+  // OUTPUTS: The note moved by [semitones] and written in [targetKey]. The octave is adjusted when
+  //          the move carries the note across the C boundary, so B3 up a semitone is C4 and not C3:
+  //          the sounding pitch is preserved exactly, which is the one thing a transposition may not
+  //          change.
+  //
+  //          WHAT IS PRESERVED AND WHAT IS NOT, because the two are different claims.
+  //          PRESERVED: the sounding pitch, the octave relationship and the note's scale degree
+  //          wherever the target key contains that pitch class — so E in C major becomes F# in D
+  //          major, which is the same degree raised with the key. NOT PRESERVED: a spelling the
+  //          target key does not contain. F# in C major moves up a semitone to the G-flat pitch
+  //          class, and it is returned as F#, because no key signature writes that pitch as Gb in a
+  //          key on the sharp side. This is what `spellChromatic` documents for chords as well, and
+  //          the alternative — preferring the SOURCE key's accidental direction here — is worse
+  //          rather than merely different: it would make the interval round-trip unstable, since
+  //          `Preference.flat` on the G-flat pitch class spells Ab (alter -1) where the sharp
+  //          direction spells G (alter 0), and a note spelled Ab and moved back down comes out as G.
+  //          The direction is therefore resolved ONCE per call, from the source key, so both
+  //          candidate spellings of one transposition are compared under the same rule.
+  // KEYWORDS: note-transposition, spelling-preservation, scale-degree, octave-adjustment,
+  //           display-key, tie-break-rationale
+  /// Returns [note] moved by [semitones] and written in [targetKey].
+  PitchedNote transposeNote(
+    PitchedNote note,
+    int semitones, {
+    required Key sourceKey,
+    required Key targetKey,
+  }) {
+    final int pitchClass = normalizePitchClass(
+      note.note.pitchClass + semitones,
+    );
+    // The written letter names a pitch CLASS, so a move that crosses C raises (or lowers) the
+    // octave number as well. C is the boundary because the octave number changes there — the same
+    // convention `PitchedNote` documents for scientific pitch notation.
+    final int octave =
+        note.octave + _octaveShift(note.note.pitchClass, semitones);
+    return PitchedNote(
+      note: _spellNotePitch(pitchClass, sourceKey, targetKey),
+      octave: octave,
+    );
+  }
+
+  // PURPOSE: Choose how a sounding pitch is written in the target key without letting the source
+  //          key's accidental direction win over the target key's signature — the rule that keeps
+  //          the result inside the key it is written in.
+  // INPUTS: pitchClass — the sounding pitch class, already normalised. sourceKey — the key the note
+  //         came from, used only to settle a tie. targetKey — the key the result is written in.
+  // OUTPUTS: A [WrittenNote]. A pitch class inside [targetKey]'s own scale returns that scale
+  //          degree, so an accidental appears only where the key signature does not already supply
+  //          it. A pitch class outside it is answered by [SpellingTable.spellChromatic], and the
+  //          two possible directions are tried IN A FIXED ORDER — the source key's, then the
+  //          opposite one — with the first result that needs no more than one accidental winning.
+  //          That rule is what turns the G-flat pitch class into F# rather than into Gb: F# is a
+  //          single sharp, Gb a single flat, so both survive the accidentals test and the source
+  //          key's direction is what settles it. Where neither direction is that cheap the first
+  //          attempt is returned rather than a double accidental being hunted for.
+  // KEYWORDS: spelling-policy, target-key-first, tie-break, one-accidental, determinism
+  WrittenNote _spellNotePitch(int pitchClass, Key sourceKey, Key targetKey) {
+    for (final WrittenNote degree in spellingTable.scaleOf(targetKey)) {
+      if (degree.pitchClass == pitchClass) {
+        return degree;
+      }
+    }
+    final SpellingPreference natural = sourceKey.prefersSharps
+        ? SpellingPreference.sharp
+        : SpellingPreference.flat;
+    final WrittenNote first = spellingTable.spellChromatic(
+      pitchClass,
+      targetKey,
+      natural,
+    );
+    if (first.alter.abs() <= 1) {
+      return first;
+    }
+    final SpellingPreference other = natural == SpellingPreference.sharp
+        ? SpellingPreference.flat
+        : SpellingPreference.sharp;
+    final WrittenNote second = spellingTable.spellChromatic(
+      pitchClass,
+      targetKey,
+      other,
+    );
+    return second.alter.abs() < first.alter.abs() ? second : first;
+  }
+
+  // PURPOSE: Report how many octaves a semitone movement carries with it, so the octave arithmetic
+  //          is stated once instead of being re-derived beside it.
+  // INPUTS: sourcePitchClass — the written letter's sounding pitch class, in `[0, 11]`. semitones —
+  //         the interval.
+  // OUTPUTS: The number of twelve-semitone blocks the move crosses: +1 for B moved up a semitone
+  //          (the C boundary above it), -1 for C moved down one, and the interval's own octaves for
+  //          a move of a twelfth. Both operands are reduced into their own block by a FLOOR division,
+  //          because `PitchedNote.note` is always a member of the twelve and the raw sum is not: with
+  //          truncating division, C moved down a semitone would report no crossing at all, and that
+  //          is the only direction in which the two divisions disagree.
+  // KEYWORDS: octave-boundary, scientific-pitch-notation, crossing-c, floor-division, total-function
+  int _octaveShift(int sourcePitchClass, int semitones) {
+    final int raw = sourcePitchClass + semitones;
+    // A floor division, written out because `~/` truncates toward zero: with truncation, C moved
+    // down a semitone would report no crossing at all.
+    int floorDiv(int value, int divisor) =>
+        value >= 0 ? value ~/ divisor : (value - divisor + 1) ~/ divisor;
+    return floorDiv(raw, 12) - floorDiv(sourcePitchClass, 12);
+  }
 }

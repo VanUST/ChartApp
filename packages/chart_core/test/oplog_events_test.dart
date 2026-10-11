@@ -412,6 +412,17 @@ List<ChartEvent> _chartEvents() => <ChartEvent>[
     from: <BarMark>{},
     to: <BarMark>{BarMark.segno, BarMark.coda},
   ),
+  // A bar in 4/4 taken into 3/4, which is a real meter change on a real bar: the two figures
+  // travel together and both sides carry the whole meter, because the model has no value meaning
+  // "leave the meter alone" — 4/4 is a meter a musician may have chosen, not the absence of one.
+  const MeterSetEvent(
+    docId: 'doc-1',
+    seq: 30,
+    sectionId: 's1',
+    barIndex: 0,
+    from: TimeSignature.fourFour,
+    to: TimeSignature.threeFour,
+  ),
 ];
 
 /// Every setlist event, applied to the setlist above.
@@ -660,6 +671,21 @@ void main() {
           barIndex: 0,
           from: <BarMark>{},
           to: <BarMark>{BarMark.segno, BarMark.coda},
+        ),
+      ),
+      'meter.set': (
+        '{"v":1,"docId":"doc-1","seq":30,"anchor":{"sectionId":"s1","bar":0,'
+            '"beat":null,"step":0},'
+            '"type":"meter.set","payload":{"sectionId":"s1","bar":0,'
+            '"from":{"numerator":4,"denominator":4},'
+            '"to":{"numerator":3,"denominator":4}}}',
+        const MeterSetEvent(
+          docId: 'doc-1',
+          seq: 30,
+          sectionId: 's1',
+          barIndex: 0,
+          from: TimeSignature.fourFour,
+          to: TimeSignature.threeFour,
         ),
       ),
       'ink.stroke.add': (
@@ -936,6 +962,49 @@ void main() {
             (EventFormatException e) => e.message,
             'message',
             contains('dalSegno'),
+          ),
+        ),
+      );
+    });
+
+    test('a meter.set missing a side is reported rather than defaulted', () {
+      // Both sides carry the whole meter, because the inverse is the two meters swapped. A payload
+      // naming only the side that changed would leave the inverse unable to say what the bar was
+      // in, and a default would make a truncated event look like an edit that put the bar into 4/4.
+      final Map<String, Object?> json = _json(
+        '{"v":1,"docId":"doc-1","seq":30,"type":"meter.set",'
+        '"payload":{"sectionId":"s1","bar":0,'
+        '"to":{"numerator":3,"denominator":4}}}',
+      );
+      expect(
+        () => EventCodec.decode(json),
+        throwsA(
+          isA<EventFormatException>().having(
+            (EventFormatException e) => e.message,
+            'message',
+            contains('from'),
+          ),
+        ),
+      );
+    });
+
+    test('a meter.set naming a meter of no beats is reported, not stored', () {
+      // `0/0` is not a meter. Storing it would put the document into a state no surface can repair,
+      // because the form that could set a meter would have to read the zero it would have to
+      // replace, and `parseMeterFigures` refuses to produce one.
+      final Map<String, Object?> json = _json(
+        '{"v":1,"docId":"doc-1","seq":30,"type":"meter.set",'
+        '"payload":{"sectionId":"s1","bar":0,'
+        '"from":{"numerator":4,"denominator":4},'
+        '"to":{"numerator":0,"denominator":0}}}',
+      );
+      expect(
+        () => EventCodec.decode(json),
+        throwsA(
+          isA<EventFormatException>().having(
+            (EventFormatException e) => e.message,
+            'message',
+            allOf(contains('to'), contains('0/0')),
           ),
         ),
       );

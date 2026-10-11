@@ -1,11 +1,18 @@
 // PURPOSE: Decide which loaded chart a programme entry names, in one place, so the sheet's rows, the
-//          play action, the scene meaning, the missing-chart count and a `dart run` probe cannot
+//          play action, the scene meaning, the missing-chart count and a probe cannot
 //          disagree about the answer — and so the rule can be exercised without a window.
 // INPUTS: The loaded [IRealLibrary] and a [SetlistItem].
 // OUTPUTS: The loaded [IRealSong] the entry names, or null when this library holds none, plus the
-//          count of entries that answer null. Flutter-free and `dart:io`-free, so it runs under
-//          plain `dart run` in `apps/mobile/tool/probe_setlist_seam.dart` against the same code the
+//          count of entries that answer null. Flutter-free and `dart:io`-free, so the probe that
+//          exercises it — `apps/mobile/tool/probe_setlist_seam.dart` — runs against the same code the
 //          app uses.
+//          **IT USED TO SAY THAT PROBE RUNS UNDER PLAIN `dart run`. THAT IS NO LONGER TRUE and the
+//          correction is here rather than in a later entry.** This file is still Flutter-free, but the
+//          probe also imports `chart_source.dart`, which reached Flutter when the native file chooser
+//          arrived (A55), so the probe is a `flutter test` file now: `flutter test
+//          tool/probe_setlist_seam.dart`. Its checks did not change — 37, as A51 records — and the
+//          false sentence is quoted above rather than deleted, because a record that quietly rewrites
+//          itself teaches nothing. See A51, A54 and A58.
 // KEYWORDS: setlist, programme, resolution, chart-identity, document-id, missing-chart, flutter-free
 //
 // WHY AN ENTRY IS RESOLVED BY IDENTITY, AND WHAT THE DOCUMENT ID IS STILL FOR.

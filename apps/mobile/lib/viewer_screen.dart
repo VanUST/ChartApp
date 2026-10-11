@@ -164,12 +164,14 @@ import 'ireal_source.dart';
 import 'key_grid.dart';
 import 'l10n/app_localizations.dart';
 import 'new_chart_dialog.dart';
+import 'note_palette_sheet.dart';
 import 'scene_bar.dart';
 import 'setlist_import.dart';
 import 'setlist_resolution.dart';
 import 'setlist_sheet.dart';
 import 'settings_contract.dart';
 import 'settings_sheet.dart';
+import 'sheet_surface.dart';
 import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
 import 'text_cue_sheet.dart';
@@ -2727,6 +2729,51 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
+  // PURPOSE: Open the note palette for the selected cell, which is the third tap of the melodic
+  //          edit: the first named the cell, the second opened what can be written in it, and this
+  //          one writes a note. It is the entry the note staff had none of — the model, the events,
+  //          the codec and the engraving all existed and nothing in the application could append a
+  //          `note.insert`.
+  // INPUTS: context — the build context.
+  // OUTPUTS: Nothing. Does nothing when no cell is selected — a note is placed on a beat, so a
+  //          bar-level selection names nowhere to put one — or when nothing is loaded. Otherwise the
+  //          sheet edits through the session and rebuilds this screen after each applied note.
+  //
+  //          WHY THE PALETTE IS HANDED THE WRITTEN KEY AND NOT THE SHOWN ONE, which is the one place
+  //          this differs from the chord palette beside it. The chord palette writes a SOUNDING root
+  //          and the page spells it later, so it previews in the shown key; a note's written letter
+  //          and alteration ARE the value that is stored, so a palette that offered the shown key
+  //          would store a pitch the musician did not choose and would quietly transpose the chart's
+  //          own melody while the chart is merely being DISPLAYED in another key. The interval is
+  //          therefore not passed at all: the sheet writes the document, and the document is written
+  //          in its own key.
+  // KEYWORDS: note-edit-entry, cell-required, written-key, session, rebuild-on-apply, melody
+  void _editNoteSelection(BuildContext context) {
+    final ChartHit? hit = _selection;
+    final EditSession? session = _currentSession;
+    if (hit == null || hit.cell == null || session == null) {
+      debugPrint(
+        'viewer.note.skipped hit=${hit ?? 'none'} cell=${hit?.beat ?? 'none'}',
+      );
+      return;
+    }
+    debugPrint(
+      'viewer.note.open section=${hit.sectionId} bar=${hit.barIndex} '
+      'beat=${hit.beat} written_key=${session.song.key}',
+    );
+    unawaited(
+      showNotePalette(
+        context,
+        session: session,
+        sectionId: hit.sectionId,
+        barIndex: hit.barIndex,
+        beat: hit.beat!,
+        writtenKey: session.song.key,
+        onChanged: () => setState(() {}),
+      ),
+    );
+  }
+
   // PURPOSE: Reverse the last edit through the session's inverse and show the page it produces.
   // INPUTS: session — the session of the song on screen.
   // OUTPUTS: Nothing. Rebuilds the screen when an edit was reversed. The document afterwards is
@@ -2901,9 +2948,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final ChartHit? hit = _selection;
     final EditSession? session = _currentSession;
     final bool editable = hit != null && hit.cell != null;
-    // A bar-level selection names no cell to write a chord into, but it names exactly what the form
-    // sheet acts on — a section and a bar — so the line is a control in both cases instead of being
-    // dead text whenever the touch landed on a bar's padding rather than on one of its cells.
+    // A bar-level selection names no cell to write a chord or a note into, but it names exactly what
+    // the form sheet acts on — a section and a bar — so the line is a control in both cases instead
+    // of being dead text whenever the touch landed on a bar's padding rather than on one of its
+    // cells.
     final VoidCallback? onTap = hit == null
         ? null
         : (editable
@@ -2947,20 +2995,49 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           ),
       ],
     );
+    // TWO NAMED ACTIONS RATHER THAN A SECOND GESTURE. A cell can now carry a chord AND notes, so
+    // "tap the line" no longer names one thing; a long press for the second surface would be a
+    // gesture nothing on screen mentions, and a mode switch would make a musician discover which
+    // surface is armed by making a mistake. So the line carries the two words for the two surfaces,
+    // and the third tap that writes a note is spent deliberately. The measure of what that costs is
+    // in the decision record: chord editing went from two taps to three on the pane, and both
+    // surfaces are now reachable from one named place.
+    final bool cellSelected = editable && session != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: onTap == null
-            ? label
-            : InkWell(
-                key: const ValueKey<String>('viewer-selection-edit'),
-                onTap: onTap,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: label,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: onTap == null
+                ? label
+                : InkWell(
+                    key: const ValueKey<String>('viewer-selection-edit'),
+                    onTap: onTap,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: label,
+                    ),
+                  ),
+          ),
+          if (cellSelected)
+            Row(
+              children: <Widget>[
+                _SelectionAction(
+                  widgetKey: 'viewer-selection-chord',
+                  label: l10n.viewerChord,
+                  onTap: () => _editSelection(context),
                 ),
-              ),
+                const SizedBox(width: 8),
+                _SelectionAction(
+                  widgetKey: 'viewer-selection-note',
+                  label: l10n.viewerNote,
+                  onTap: () => _editNoteSelection(context),
+                ),
+              ],
+            ),
+        ],
       ),
     );
   }
@@ -3217,4 +3294,46 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       ),
     );
   }
+}
+
+/// One named action beside the selection line, sized for a thumb and worded for the surface it
+/// opens.
+class _SelectionAction extends StatelessWidget {
+  /// Creates an action labelled [label] that runs [onTap].
+  const _SelectionAction({
+    required this.widgetKey,
+    required this.label,
+    required this.onTap,
+  });
+
+  /// The widget key a driver test looks the action up by.
+  final String widgetKey;
+
+  /// The word on the action.
+  final String label;
+
+  /// What a tap does.
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: sheetCellColor,
+    borderRadius: BorderRadius.circular(8),
+    child: InkWell(
+      key: ValueKey<String>(widgetKey),
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: sheetOnPanelColor,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    ),
+  );
 }

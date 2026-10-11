@@ -26,7 +26,7 @@ import 'package:chart_core/chart_core.dart';
 import 'package:chartapp/chart_document.dart';
 import 'package:chartapp/ireal_library.dart';
 
-import 'probe_chart_seam.dart' show syntheticPayload;
+import 'probe_payloads.dart' show syntheticPayload;
 
 void main(List<String> arguments) {
   final Directory directory = Directory(

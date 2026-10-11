@@ -1,0 +1,112 @@
+Resolving dependencies in `C:\projects\ChartApp`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (109.0.0 available)
+  analyzer 13.3.0 (14.5.0 available)
+  build_runner 2.15.1 (2.16.2 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  cupertino_icons 1.0.9 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  package_config 2.2.0 (3.0.0 available)
+  platform 3.1.6 (3.2.0 available)
+  source_gen 4.2.4 (4.3.0 available)
+  test 1.31.1 (1.33.0 available)
+  test_api 0.7.12 (0.7.15 available)
+  test_core 0.6.18 (0.6.21 available)
+Got dependencies in `C:\projects\ChartApp`!
+12 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading C:/projects/ChartApp/apps/mobile/tool/probe_meter_render.dart
+00:00 +0: the meter sign, the cell count it decides, and the identity of a steady chart
+Shell: probe.font path=C:\Windows\Fonts\segoeui.ttf family=ChartMeterProbeFont
+Shell: probe.signs name=steady-4-4 page=0 count=0 bars=16 signs=
+Shell: probe.identity name=steady-4-4 png_bytes=96666 digest=-48793467a744bba
+Shell: probe.signs name=4-4-into-3-4 page=0 count=3 bars=16 signs=A#8=3/4,A#9=3/4,A#13=3/4
+Shell: probe.cells bar=A#4 meter=4/4 cellsPerBar=4 placed_cells=4 bar_width=214.86 hits=cell0:4/0 cell1:4/1 cell2:4/2 cell3:4/3 padding_hit=bar4/none below_hit=null
+Shell: probe.cells bar=A#8 meter=3/4 cellsPerBar=3 placed_cells=3 bar_width=183.13 hits=cell0:8/0 cell1:8/1 cell2:8/2 padding_hit=bar8/none below_hit=null
+Shell: probe.signs name=into-15-8 page=0 count=5 bars=16 signs=A#8=15/8,A#9=15/8,A#11=15/8,A#13=15/8,A#15=15/8
+Shell: probe.cells bar=A#8 meter=15/8 cellsPerBar=5 placed_cells=5 bar_width=278.29 hits=cell0:8/0 cell1:8/1 cell2:8/2 cell3:8/3 cell4:8/4 padding_hit=bar8/none below_hit=null
+Shell: probe.signs name=3-4-throughout page=0 count=4 bars=16 signs=A#0=3/4,A#4=3/4,A#8=3/4,A#12=3/4
+Shell: probe.input "4"/"4" => meter 4/4
+Shell: probe.input "15"/"8" => meter 15/8
+Shell: probe.input "0"/"0" => refused field=numerator problem=notPositive
+Shell: probe.input "-3"/"4" => refused field=numerator problem=notPositive
+Shell: probe.input "4"/"0" => refused field=denominator problem=notPositive
+Shell: probe.input "3.5"/"4" => refused field=numerator problem=notAnInteger
+Shell: probe.input ""/"4" => refused field=numerator problem=empty
+Shell: probe.input "999"/"4" => refused field=numerator problem=tooLarge
+Shell: probe.out dir=C:\projects\ChartApp-acl-reports\render\meter-sign
+00:00 +1: All tests passed!
+Resolving dependencies in `C:\projects\ChartApp`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (109.0.0 available)
+  analyzer 13.3.0 (14.5.0 available)
+  build_runner 2.15.1 (2.16.2 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  cupertino_icons 1.0.9 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  package_config 2.2.0 (3.0.0 available)
+  platform 3.1.6 (3.2.0 available)
+  source_gen 4.2.4 (4.3.0 available)
+  test 1.31.1 (1.33.0 available)
+  test_api 0.7.12 (0.7.15 available)
+  test_core 0.6.18 (0.6.21 available)
+Got dependencies in `C:\projects\ChartApp`!
+12 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading C:/projects/ChartApp/apps/mobile/tool/probe_meter_controls.dart
+00:00 +0: the zonal meter box sets a run of bars and refuses every bad input
+Shell: meter.controls.font path=C:\Windows\Fonts\segoeui.ttf family=ChartMeterControlsFont
+Shell: meter.control.opened first="2" last="2" meter="4/4"
+Shell: meter.control.refused.meter typed="0/0" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Numerator M: Both figures must be greater than zero."
+Shell: meter.control.refused.meter typed="-3/4" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Numerator M: Both figures must be greater than zero."
+Shell: meter.control.refused.meter typed="3.5/4" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Numerator M: Both figures are whole numbers written in digits."
+Shell: meter.control.refused.meter typed="4/0" field=denominator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Denominator N: Both figures must be greater than zero."
+Shell: meter.control.refused.meter typed="999/4" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Numerator M: Too large: each figure is at most 64."
+Shell: meter.control.refused.run case=reversed typed="3..2" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="To bar: The first bar must not come after the last one."
+Shell: meter.control.refused.run case=out-of-range typed="1..9" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="To bar: This section has 4 bar(s)."
+Shell: meter.control.refused.run case=empty-first typed="..2" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="From bar: Type a bar number in both boxes."
+Shell: meter.control.refused.run case=not-a-number typed="x..2" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="From bar: Bar numbers are whole numbers written in digits."
+Shell: meter.control.zone typed="bars 2-3 -> 15/8" box_open=false sheet_open=true meters=4/4 15/8 15/8 4/4 before="4/4 4/4 4/4 4/4" events_appended=2 event_types=meter.set,meter.set page_rebuilt=true
+Shell: meter.control.undo first=true after_one="4/4 15/8 4/4 4/4" second=true restored="4/4 4/4 4/4 4/4" all="4/4 4/4 4/4 4/4" restored_equal_before=true
+Shell: meter.control.redo meters=4/4 15/8 15/8 4/4 reapplied=true
+viewer.form.op "Meter 15/8 set on 2–3." section=A bar=1 sections=1 bars=4 seq=2 undo_depth=2
+Shell: meter.control.page signs={A#1: 15/8, A#3: 4/4} png=C:\projects\ChartApp-acl-reports\render\meter-sign-controls\meter-controls-zone-15-8@2x.png bytes=15077
+Shell: meter.control.done sheet_open=false events=6 undo_depth=2
+00:01 +1: All tests passed!
+Resolving dependencies in `C:\projects\ChartApp`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (109.0.0 available)
+  analyzer 13.3.0 (14.5.0 available)
+  build_runner 2.15.1 (2.16.2 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  cupertino_icons 1.0.9 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  package_config 2.2.0 (3.0.0 available)
+  platform 3.1.6 (3.2.0 available)
+  source_gen 4.2.4 (4.3.0 available)
+  test 1.31.1 (1.33.0 available)
+  test_api 0.7.12 (0.7.15 available)
+  test_core 0.6.18 (0.6.21 available)
+Got dependencies in `C:\projects\ChartApp`!
+12 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading C:/projects/ChartApp/apps/mobile/tool/probe_meter_controls.dart
+00:00 +0: the zonal meter box sets a run of bars and refuses every bad input
+Shell: meter.controls.font path=C:\Windows\Fonts\segoeui.ttf family=ChartMeterControlsFont
+Shell: meter.control.opened first="2" last="2" meter="4/4"
+Shell: meter.control.refused.meter typed="0/0" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Числитель M: Оба числа должны быть больше нуля."
+Shell: meter.control.refused.meter typed="-3/4" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Числитель M: Оба числа должны быть больше нуля."
+Shell: meter.control.refused.meter typed="3.5/4" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Числитель M: Оба числа вводятся цифрами, без дробей и точек."
+Shell: meter.control.refused.meter typed="4/0" field=denominator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Знаменатель N: Оба числа должны быть больше нуля."
+Shell: meter.control.refused.meter typed="999/4" field=numerator box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="Числитель M: Слишком большой размер: каждое число не больше 64."
+Shell: meter.control.refused.run case=reversed typed="3..2" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="По такт: Первый такт не должен быть позже последнего."
+Shell: meter.control.refused.run case=out-of-range typed="1..9" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="По такт: В этом разделе тактов: 4."
+Shell: meter.control.refused.run case=empty-first typed="..2" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="С такта: Введите номер такта в оба поля."
+Shell: meter.control.refused.run case=not-a-number typed="x..2" box_open=true meters=4/4 4/4 4/4 4/4 events_appended=0 text="С такта: Номера тактов вводятся цифрами."
+Shell: meter.control.zone typed="bars 2-3 -> 15/8" box_open=false sheet_open=true meters=4/4 15/8 15/8 4/4 before="4/4 4/4 4/4 4/4" events_appended=2 event_types=meter.set,meter.set page_rebuilt=true
+Shell: meter.control.undo first=true after_one="4/4 15/8 4/4 4/4" second=true restored="4/4 4/4 4/4 4/4" all="4/4 4/4 4/4 4/4" restored_equal_before=true
+Shell: meter.control.redo meters=4/4 15/8 15/8 4/4 reapplied=true
+viewer.form.op "Размер 15/8 поставлен: 2–3." section=A bar=1 sections=1 bars=4 seq=2 undo_depth=2
+Shell: meter.control.page signs={A#1: 15/8, A#3: 4/4} png=C:\projects\ChartApp-acl-reports\render\meter-sign-controls\meter-controls-zone-15-8@2x.png bytes=15077
+Shell: meter.control.done sheet_open=false events=6 undo_depth=2
+00:01 +1: All tests passed!

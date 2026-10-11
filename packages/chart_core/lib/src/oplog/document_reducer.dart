@@ -120,6 +120,11 @@ abstract final class DocumentReducer {
         return bar.copyWith(marks: e.to);
       }),
     ),
+    final MeterSetEvent e => state.copyWith(
+      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+        return bar.copyWith(timeSignature: e.to);
+      }),
+    ),
     final KeyTransposeEvent e => state.copyWith(
       song: _transposedSong(state.song, e.semitones, e.toKey),
     ),

@@ -150,10 +150,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get newChartKeyLabel => 'Тональность';
 
   @override
-  String get newChartMajor => 'Мажор';
+  String get newChartMajor => 'Major';
 
   @override
-  String get newChartMinor => 'Минор';
+  String get newChartMinor => 'Minor';
 
   @override
   String get create => 'Создать';
@@ -317,7 +317,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String semitonesShort(String signed) {
-    return '$signed пт';
+    return '$signed st';
   }
 
   @override
@@ -333,12 +333,12 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String keyNameMajor(String tonic) {
-    return '$tonic мажор';
+    return '$tonic major';
   }
 
   @override
   String keyNameMinor(String tonic) {
-    return '$tonic минор';
+    return '$tonic minor';
   }
 
   @override
@@ -645,6 +645,63 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get paletteRemoveChord => 'Удалить аккорд';
+
+  @override
+  String get melodyGroup => 'МЕЛОДИЯ';
+
+  @override
+  String get melodyDuration => 'ДЛИТЕЛЬНОСТЬ';
+
+  @override
+  String get melodyPitch => 'ВЫСОТА';
+
+  @override
+  String get melodyAlteration => 'АЛЬТЕРАЦИЯ';
+
+  @override
+  String get melodyNewNote => '+ Новая нота';
+
+  @override
+  String get melodyPickCell =>
+      'Коснитесь доли на ча́рте, чтобы поставить ноту.';
+
+  @override
+  String get melodyBeatEmpty => 'На этой доле нот нет.';
+
+  @override
+  String melodyNoteLine(int step, String pitch, String value) {
+    return 'Нота $step · $pitch $value';
+  }
+
+  @override
+  String get melodyOctaveLower => 'Октава ниже';
+
+  @override
+  String get melodyOctaveHigher => 'Октава выше';
+
+  @override
+  String get melodyValueTooLong => 'Длиннее такта — выберите короче.';
+
+  @override
+  String get melodyValueOverflow => 'Этот такт уже длиннее своего размера.';
+
+  @override
+  String get melodyTie => 'Связка';
+
+  @override
+  String get melodyUntie => 'Снять связку';
+
+  @override
+  String get melodyRemove => 'Удалить ноту';
+
+  @override
+  String get melodyTapBeatHint => 'Коснитесь ча́рта, чтобы сменить долю.';
+
+  @override
+  String get viewerNote => 'Нота';
+
+  @override
+  String get viewerChord => 'Аккорд';
 
   @override
   String get formGroupBar => 'ТАКТЫ';
@@ -1102,4 +1159,82 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get setlistMissingChart => '(чарт не найден)';
+
+  @override
+  String get formGroupMeter => 'РАЗМЕР';
+
+  @override
+  String formMeterLabel(String meter) {
+    return 'Размер: $meter';
+  }
+
+  @override
+  String get formMeterTitle => 'Размер такта M/N';
+
+  @override
+  String get formMeterNumerator => 'Числитель M';
+
+  @override
+  String get formMeterDenominator => 'Знаменатель N';
+
+  @override
+  String get formMeterHelper => 'Два целых числа, например 15/8.';
+
+  @override
+  String get formMeterApply => 'Поставить';
+
+  @override
+  String formMeterSet(String meter, String range) {
+    return 'Размер $meter поставлен: $range.';
+  }
+
+  @override
+  String get formMeterSame =>
+      'Ничего не изменилось: все такты диапазона уже в этом размере.';
+
+  @override
+  String get formMeterNone => 'нет';
+
+  @override
+  String get formZoneFrom => 'С такта';
+
+  @override
+  String get formZoneTo => 'По такт';
+
+  @override
+  String get formZoneHelper => 'Такты этого раздела, считая с первого.';
+
+  @override
+  String get formZoneErrorEmpty => 'Введите номер такта в оба поля.';
+
+  @override
+  String get formZoneErrorNotAnInteger => 'Номера тактов вводятся цифрами.';
+
+  @override
+  String formZoneErrorOutOfRange(int bars) {
+    return 'В этом разделе тактов: $bars.';
+  }
+
+  @override
+  String get formZoneErrorReversed =>
+      'Первый такт не должен быть позже последнего.';
+
+  @override
+  String get formZoneErrorNoSection =>
+      'Такой диапазон не попадает в этот раздел.';
+
+  @override
+  String get formMeterErrorEmpty => 'Введите целое число в оба поля.';
+
+  @override
+  String get formMeterErrorNotAnInteger =>
+      'Оба числа вводятся цифрами, без дробей и точек.';
+
+  @override
+  String get formMeterErrorNotPositive => 'Оба числа должны быть больше нуля.';
+
+  @override
+  String formMeterErrorTooLarge(int max) {
+    return 'Слишком большой размер: каждое число не больше $max.';
+  }
 }

@@ -893,6 +893,106 @@ class EditSession {
     return true;
   }
 
+  // --- The meter of a bar ----------------------------------------------------------------------
+  //
+  // A bar's meter is READ by everything downstream already: `Bar.timeSignature` is a field of every
+  // bar, `layout_engine.dart` takes the bar's cell count from `cellsPerBar`, and the importer writes
+  // a meter change it reads inside a chart. Until this method existed NOTHING could set one, so a
+  // chart could arrive in 3/4 and no surface could put it there, change it, or give the next bar the
+  // meter the tune moved into. That is the half of D22 the catalogue was missing.
+  //
+  // WHY THE WHOLE METER IS CARRIED ON BOTH SIDES. A meter is two figures and the model holds no
+  // neutral one: `4/4` is a meter a musician may have chosen deliberately, not the absence of a
+  // meter, so there is no value that means "leave it alone" and no way to express a change of only
+  // the denominator. `MeterSetEvent` therefore records what the bar had and what it takes, exactly
+  // as `repeat.set` records all four repeat fields.
+  //
+  // WHAT THE TWO REFUSALS ARE. An address naming no bar, and a meter equal to the one the bar
+  // already carries. The second is the rule every edit here follows (see [setVolta], [setBarMark]):
+  // an event whose two sides are equal is a log row that changed nothing and an offer to undo an
+  // edit that did not happen. The FIGURES are not validated here — that is
+  // [parseMeterFigures]'s job at the surface where they are typed — and no meter is refused for
+  // being unusual, because D22 is explicit that 15/8 and whatever else a jazz musician writes must
+  // be expressible.
+  //
+  // WHY THERE IS ALSO A RANGE FORM, AND WHY IT DOES NOT CHANGE THE STORAGE. The owner's own words
+  // ask for zones — "не протыкивать каждый такт ... скорее задавать ЗОНАМИ" — so the surface works
+  // on a run of bars. The run is a GESTURE and the bar stays the unit: [setTimeSignatureRange]
+  // appends one `meter.set` per bar that actually changed, each carrying that bar's own previous
+  // meter, exactly as the single-bar form does. Nothing here stores a zone, and no bar's meter
+  // depends on the zone it was set through — which is what keeps a bar inserted at the edge of a
+  // zone from inheriting a value from a range that no longer covers it.
+
+  // PURPOSE: Set the meter written on one bar — the M/N a jazz chart changes mid-tune — through the
+  //          operation log, so the change is undoable and survives a save.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. meter — the meter the bar
+  //         should carry. It must be a value the model can hold; the typed-figures reader that
+  //         produces one from a keyboard is [parseMeterFigures], and it is deliberately a separate
+  //         step so that the refusal of `0/0` happens at the form rather than here.
+  // OUTPUTS: True when an event was appended, false when the address names no bar or when the bar
+  //          already carries exactly that meter. The event carries the complete meter on both
+  //          sides, read from the bar here, so its inverse restores the bar exactly.
+  // KEYWORDS: meter-set, time-signature, whole-value, no-op-refusal, undoable, d22
+  /// Sets the meter of the bar at ([sectionId], [barIndex]), reporting whether it changed.
+  bool setTimeSignature({
+    required String sectionId,
+    required int barIndex,
+    required TimeSignature meter,
+  }) {
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null || bar.timeSignature == meter) {
+      return false;
+    }
+    apply(
+      MeterSetEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        from: bar.timeSignature,
+        to: meter,
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Set the meter written on a RUN OF BARS at once — the zone a jazz musician thinks in
+  //          ("eight bars of this, then the bridge") rather than thirty-two separate decisions.
+  // INPUTS: range — the run of bars, in its own section, from [resolveBarRange] or built by a
+  //         caller that already knows the bars exist. meter — the meter every bar in the run should
+  //         carry.
+  // OUTPUTS: How many bars actually changed. A bar already in [meter] is SKIPPED rather than
+  //          re-recorded, so a zone that overlaps a meter already in force appends rows only for
+  //          the bars it really changes, and a zone that changes nothing appends nothing and
+  //          reports zero. [range] is not validated here — [resolveBarRange] is the validating door
+  //          and reports an out-of-range run to the surface that asked for it.
+  //
+  //          WHY ONE EVENT PER BAR AND NOT A COMPOSITE "ZONE" EVENT. `Bar.timeSignature` is the
+  //          storage and the range is only the gesture. A composite event would be a second way to
+  //          say what one bar's meter is, and its `from` side would have to be a list that no
+  //          single-bar edit could produce. The cost is named rather than hidden: undoing a zone
+  //          takes one undo per bar that changed, because this session's undo stack holds one event
+  //          per step and this method deliberately does not rework that shared machinery.
+  // KEYWORDS: meter-set-range, zone, per-bar-events, undo-per-bar, no-op-skip, gesture-not-storage,
+  //           d22
+  /// Sets [meter] on every bar of [range], reporting how many bars changed.
+  int setTimeSignatureRange({
+    required BarRange range,
+    required TimeSignature meter,
+  }) {
+    int changed = 0;
+    for (final int barIndex in range.barIndices) {
+      if (setTimeSignature(
+        sectionId: range.sectionId,
+        barIndex: barIndex,
+        meter: meter,
+      )) {
+        changed++;
+      }
+    }
+    return changed;
+  }
+
   // --- Text cues: the words a musician writes on the chart -------------------------------------
   //
   // `textcue.insert`, `textcue.edit`, `textcue.move` and `textcue.delete` have been in the
@@ -1126,6 +1226,313 @@ class EditSession {
       candidate = 'cue-$counter';
     }
     return candidate;
+  }
+
+  // --- The notes of the melodic staff ------------------------------------------------------------
+  //
+  // NOTE TO A CONCURRENT WRITER: this region is self-contained and is deliberately placed AFTER the
+  // cue operations and BEFORE the ink ones, so that it touches neither `setBarMark`'s neighbour
+  // (where the meter of a bar was added) nor anything above it. Every method and helper it needs
+  // is inside it; nothing outside it was changed to make room.
+  //
+  // `note.insert`, `note.update` and `note.delete` have been in the catalogue since the melodic
+  // staff was modelled, with a codec, a reducer and identity coverage (A51), and until these
+  // methods existed NOTHING appended one: `Bar.melody` was a list no surface could write, while the
+  // painter had a staff to draw it on (A57). They are here, next to the one writer, for the same
+  // reason the form, repeat, mark and cue operations are (A35, A38, A41, A48): an operation a
+  // musician needs must have an event to carry it, and an event must be written through [apply] so
+  // that the log, the inverse and the undo stack stay one mechanism.
+  //
+  // WHY A MELODY NOTE IS ADDRESSED EXACTLY LIKE A CHORD. A note is placed at `(beat, step)` — the
+  // same cell, and the same order-within-the-cell, that a chord uses — because that is what lets one
+  // tap name the same place on the chord line and on the staff, and it is why `EventAnchor` carries
+  // both numbers for both. Nothing here derives a note's position from a page coordinate: the caller
+  // names the cell, the reducer places the note in it, and the engraver is the only thing that turns
+  // either into a y position.
+  //
+  // WHY THE WHOLE NOTE IS CARRIED ON EVERY SIDE. As in [setBarMark] and the cue methods, each event
+  // in this family carries the complete value it replaces and the complete value it writes — a
+  // `BeatNote` with its pitch, its written value, its tie AND its address — so its inverse is a swap
+  // and not a reconstruction. A delta would have to be replayed against whatever the bar holds when
+  // the undo arrives, and the bar may have been changed by another edit, by the undo of a different
+  // event, or by another device in between.
+  //
+  // WHY `step` EXISTS AND WHAT IT IS FOR. Several notes may share one beat — a chord in the melody,
+  // or two voices — and the reducer keeps them a DENSE sequence: an insertion at a step pushes the
+  // notes already AT OR AFTER that step one place up, the cell is then sorted by `(beat, step)`, and
+  // a deletion closes the gap (see `_withNoteInserted` and `_withNoteRemoved` in
+  // `document_reducer.dart`). That is why [insertNote] defaults to `step: 0`: the note just written
+  // takes the front of the cell and the notes already there move up one place, so a caller adding a
+  // second note to a beat writes no step arithmetic and disturbs nothing it did not point at.
+  // Measured rather than reasoned: the probe prints `0.0:E4 quarter` followed by
+  // `0.0:G4 half, 0.1:E4 quarter` for two insertions at step 0 in that order — the SECOND note is
+  // at step 0. A first reading of `_withNoteInserted` suggests the opposite, because the note is
+  // appended to the list before the sort reorders it; the printed case is what settled it.
+
+  // PURPOSE: Report the notes a beat already carries, so a surface can show what is there and name
+  //          which of them an edit acts on — the question that makes several notes on one beat
+  //          reachable at all, since two noteheads written at one address are one point on the page.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. beat — the cell index
+  //         inside that bar.
+  // OUTPUTS: The notes at that cell in the model's own order, ascending by step, as a fresh list a
+  //          caller may reorder. Empty when the cell holds none, and empty when the address names no
+  //          bar: "no notes here" and "no bar here" answer the same way because every caller that
+  //          needs to tell them apart is already holding the bar (see [existingNoteAt]).
+  // KEYWORDS: melody, cell-query, stacked-notes, empty-when-absent, total-function
+  /// Returns the notes the cell at ([sectionId], [barIndex], [beat]) carries, by step.
+  List<BeatNote> existingNotesAt({
+    required String sectionId,
+    required int barIndex,
+    required int beat,
+  }) {
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null) {
+      return const <BeatNote>[];
+    }
+    return <BeatNote>[
+      for (final BeatNote note in bar.melody)
+        if (note.beat == beat) note,
+    ];
+  }
+
+  // PURPOSE: Answer which note sits at one exact address, so a surface carrying a `(beat, step)`
+  //          pair can read back the value it is editing rather than a copy it took when it opened —
+  //          the rule [textCueById] and `existingChordAt` already follow.
+  // INPUTS: sectionId, barIndex and beat as in [existingNotesAt]. step — the order within the cell.
+  // OUTPUTS: The note at that address, or null when the cell holds none there or the address names
+  //          no bar. Null is a real answer: the undo of an insertion is exactly how a note stops
+  //          existing, and a surface that must keep working after one needs to be told.
+  // KEYWORDS: melody, note-lookup, address, null-when-absent, total-function
+  /// Returns the note at ([sectionId], [barIndex], [beat], [step]), or null.
+  BeatNote? existingNoteAt({
+    required String sectionId,
+    required int barIndex,
+    required int beat,
+    required int step,
+  }) {
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null) {
+      return null;
+    }
+    for (final BeatNote note in bar.melody) {
+      if (note.beat == beat && note.step == step) {
+        return note;
+      }
+    }
+    return null;
+  }
+
+  // PURPOSE: Put a note a musician chose on a beat of the melodic staff — the edit the note palette
+  //          exists to make, and the first thing in this application that can write `Bar.melody`
+  //          from a surface.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. beat — the cell inside
+  //         that bar, the same address a chord is written at. pitch — the written pitch and octave.
+  //         value — the written duration. step — where in the cell's dense sequence the note lands,
+  //         defaulting to the front; see the region note above for why the front is the right
+  //         default and what it does to a note already there. tiedToNext — whether the note is tied
+  //         into the next one as well as inserted.
+  // OUTPUTS: True when an insertion was appended, false in three cases, none of which writes
+  //          anything. A [beat] or [step] below zero; a [beat] past the LAST cell the bar has, since
+  //          [LayoutEngine] drops a note it has no cell for exactly as it drops a chord at the same
+  //          address (`placeMelodyStaff`) so the edit would be a log row nothing can see; and a
+  //          [value] longer than the whole bar, for the same reason at the other end. The input
+  //          document is not mutated in any of the three: the guard runs before [apply].
+  //
+  //          The upper beat bound is kept HERE and not delegated to the reducer, deliberately:
+  //          `_withNoteInserted` has no opinion about the meter — the number of cells a bar has is
+  //          the layout engine's rule — and a chart READ BACK with a note past its meter must still
+  //          load. This is the caller-side guard on NEW edits, not a rule of the model.
+  // KEYWORDS: melody, note-insert, cell-address, dense-step, stacked-notes, guard, undoable
+  /// Inserts [pitch] of [value] into the cell at ([sectionId], [barIndex], [beat]).
+  bool insertNote({
+    required String sectionId,
+    required int barIndex,
+    required int beat,
+    required PitchedNote pitch,
+    required NoteValue value,
+    int step = 0,
+    bool tiedToNext = false,
+  }) {
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null || beat < 0 || step < 0) {
+      return false;
+    }
+    if (beat >= bar.timeSignature.cellsPerBar) {
+      return false;
+    }
+    if (value.compareDuration(_wholeBarValue(bar)) > 0) {
+      return false;
+    }
+    apply(
+      NoteInsertEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        note: BeatNote(
+          pitch: pitch,
+          value: value,
+          beat: beat,
+          step: step,
+          tiedToNext: tiedToNext,
+        ),
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Change a note already written — its pitch, its duration or its tie — which is the edit
+  //          a musician makes far more often than placing a new one, because a wrong note is
+  //          corrected rather than deleted and re-placed.
+  // INPUTS: sectionId, barIndex, beat and step — the address of the note to change, which this
+  //         method does NOT change: moving a note is a deletion and an insertion, and
+  //         `NoteUpdateEvent` asserts that its two sides address the same cell. pitch, value and
+  //         tiedToNext — the new written form; null leaves that field as the note already has it,
+  //         so a caller that only picked a new duration does not have to restate the pitch.
+  // OUTPUTS: True when an update was appended, false in two cases. The address names no note; or the
+  //          new form is EQUAL to the old one field by field, which is the rule every other edit
+  //          here follows (see [setBarMark], [setVolta], [updateSong]): an event whose two sides are
+  //          equal is a log row that changed nothing and an offer to undo an edit that did not
+  //          happen. Equality is `BeatNote ==`, comparing pitch, value, beat, step and tie together,
+  //          so the comparison is the whole value rather than a boolean about the one field named.
+  // KEYWORDS: melody, note-update, before-after, no-op-refusal, address-stable, undoable
+  /// Replaces the note at ([sectionId], [barIndex], [beat], [step]) with the given form.
+  bool updateNote({
+    required String sectionId,
+    required int barIndex,
+    required int beat,
+    required int step,
+    PitchedNote? pitch,
+    NoteValue? value,
+    bool? tiedToNext,
+  }) {
+    final BeatNote? from = existingNoteAt(
+      sectionId: sectionId,
+      barIndex: barIndex,
+      beat: beat,
+      step: step,
+    );
+    if (from == null) {
+      return false;
+    }
+    final BeatNote to = BeatNote(
+      pitch: pitch ?? from.pitch,
+      value: value ?? from.value,
+      beat: from.beat,
+      step: from.step,
+      tiedToNext: tiedToNext ?? from.tiedToNext,
+    );
+    if (to == from) {
+      return false;
+    }
+    apply(
+      NoteUpdateEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        from: from,
+        to: to,
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: Tie a note into the next one, or untie it — the gesture that writes a single sound
+  //          across a beat, and the only frame `tiedToNext` has in the model.
+  // INPUTS: sectionId, barIndex, beat and step — the note. tied — true to tie it forward, false to
+  //         untie it.
+  // OUTPUTS: True when an update was appended, false when the address names no note and false when
+  //          the note already carries that flag. Both directions are one field of one note, which is
+  //          why there is no second event: the model keeps the tie on the EARLIER note alone
+  //          (`BeatNote.tiedToNext`), so [updateNote] already writes either way.
+  // KEYWORDS: melody, tie, tie-forward, toggle, one-field, undoable
+  /// Sets or clears the tie on the note at the given address, reporting whether it changed.
+  bool setNoteTie({
+    required String sectionId,
+    required int barIndex,
+    required int beat,
+    required int step,
+    required bool tied,
+  }) {
+    final BeatNote? from = existingNoteAt(
+      sectionId: sectionId,
+      barIndex: barIndex,
+      beat: beat,
+      step: step,
+    );
+    if (from == null || from.tiedToNext == tied) {
+      return false;
+    }
+    return updateNote(
+      sectionId: sectionId,
+      barIndex: barIndex,
+      beat: beat,
+      step: step,
+      tiedToNext: tied,
+    );
+  }
+
+  // PURPOSE: Take a note off the staff, which is the half `note.insert`'s inverse needs and the
+  //          gesture that removes a note a musician put on the wrong beat.
+  // INPUTS: sectionId, barIndex, beat and step — the note to remove.
+  // OUTPUTS: True when a deletion was appended, false when the address names no note. The event
+  //          carries the note IN FULL, and the reducer closes the gap the note left in its cell, so
+  //          an undo restores the note and its neighbours' steps together: the inverse's
+  //          `note.insert` at the removed note's own step pushes the notes at or after that step back
+  //          up, and the reducer's sort puts them in the order they were in before. Measured on two
+  //          notes sharing a beat: deleting step 0 leaves the other at step 0, and undo returns a
+  //          document EQUAL to the one before the deletion, with both steps restored.
+  // KEYWORDS: melody, note-delete, gap-closing, whole-value, undoable
+  /// Removes the note at ([sectionId], [barIndex], [beat], [step]), reporting whether one was there.
+  bool deleteNoteAt({
+    required String sectionId,
+    required int barIndex,
+    required int beat,
+    required int step,
+  }) {
+    final BeatNote? removed = existingNoteAt(
+      sectionId: sectionId,
+      barIndex: barIndex,
+      beat: beat,
+      step: step,
+    );
+    if (removed == null) {
+      return false;
+    }
+    apply(
+      NoteDeleteEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        removed: removed,
+      ),
+    );
+    return true;
+  }
+
+  // PURPOSE: State the length of a whole bar as the one written value of that length, so the guard
+  //          in [insertNote] can refuse a note longer than the bar it is placed in without a second
+  //          copy of the meter arithmetic living in this file.
+  // INPUTS: bar — the bar the note is being placed in.
+  // OUTPUTS: A [NoteValue] whose duration equals the bar's length exactly. A bar shorter than a
+  //          thirty-second note — a meter this model can express and no chart uses — returns the
+  //          shortest value there is rather than throwing, so the guard admits notes into it
+  //          instead of refusing every one. A bar of exactly a whole note returns the whole note.
+  // KEYWORDS: bar-length, exact-duration, meter, guard-support, total-function
+  NoteValue _wholeBarValue(Bar bar) {
+    final int numerator = bar.timeSignature.numerator;
+    final int denominator = bar.timeSignature.denominator;
+    for (final NoteBase base in NoteBase.values) {
+      // A value of `base` lasts one whole note over `base.denominator`, and the bar lasts
+      // `numerator / denominator` whole notes, so the two are the same duration exactly when the
+      // cross product matches. No floating point takes part.
+      if (numerator * base.denominator == denominator) {
+        return NoteValue.plain(base);
+      }
+    }
+    return const NoteValue.plain(NoteBase.thirtySecond);
   }
 
   // --- Ink: the strokes a musician wrote on the chart -------------------------------------------

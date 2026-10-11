@@ -11,13 +11,28 @@
 //          inserted bar, a deleted bar, a changed tempo and a handwritten stroke could not be
 //          reopened at all. A bar insert applied twice is two bars; a stroke applied twice is
 //          refused; those are the operations this probe now carries.
-// INPUTS: None. The fixture is a synthetic iReal payload built here, so nothing is read from the
-//         owner's machine.
-// OUTPUTS: One block per check on stdout, a summary line and an exit code: 0 when every check held,
-//          1 when one did not. Every expected failure prints the exception TYPE and MESSAGE it
-//          caught. This file imports no Flutter, which is why plain `dart run` can execute it.
+// INPUTS: None. The fixture is a synthetic iReal payload built in `probe_payloads.dart`, so nothing
+//         is read from the owner's machine.
+// OUTPUTS: One block per check on stdout and a summary line, `CHECKS=n FAILURES=m`. Every expected
+//          failure prints the exception TYPE and MESSAGE it caught. This file imports no Flutter,
+//          which is why plain `dart run` can execute it.
+//
+//          **THE LAST SENTENCE OF OUTPUTS IS CORRECTED HERE AND IS LEFT STANDING ABOVE, the same
+//          form `docs/sdd.md` A30 and A52 use for a claim that became false.** "This file imports
+//          no Flutter, which is why plain `dart run` can execute it" was true when it was written
+//          and is false since A55: this file reaches `chart_source.dart` -> `chart_source_io.dart`,
+//          which imports `file_selector` and `flutter/foundation`, so
+//          `dart run tool/probe_chart_seam.dart` now dies with `Dart library 'dart:ui' is not
+//          available on this platform`. The probe is therefore written as a `flutter test` file --
+//          the shape `probe_native_path.dart` proves works -- and it is run from `apps/mobile`:
+//
+//              flutter test tool/probe_chart_seam.dart
+//
+//          `flutter test` runs the engine headless, so the probe opens no window. It no longer calls
+//          `exit()`: the same failures that used to make it exit 1 now fail the test, which is what
+//          makes `flutter test` exit non-zero, and the summary line is still printed.
 // KEYWORDS: probe, chart-file, app-seam, save, open, round-trip, reopen, non-idempotent, dart-io,
-//           evidence
+//           flutter-test, headless, evidence
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -25,11 +40,32 @@ import 'package:chart_core/chart_core.dart';
 import 'package:chartapp/chart_document.dart';
 import 'package:chartapp/chart_source.dart';
 import 'package:chartapp/ireal_library.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'probe_payloads.dart';
 
 int _failures = 0;
 int _checks = 0;
 
-Future<void> main() async {
+void main() {
+  test(
+    'the app save/open seam, on real files, with a tail that is not idempotent',
+    () async {
+      addTearDown(_report);
+      await _proveTheSeam();
+    },
+  );
+}
+
+// PURPOSE: Run every check this probe carries, in the order a musician meets the save/open seam. The
+//          body is kept separate from `main` so the reshape to `flutter test` changed only the frame
+//          around it: every check, and the counters they are reported with, are the ones that were
+//          here when this file was a `dart run` probe.
+// INPUTS: None.
+// OUTPUTS: A future that completes when the last check has been reported. It calls no `exit()`; the
+//          verdict is the assertion `_report` makes when the test tears down.
+// KEYWORDS: probe-body, save, open, round-trip, reopen, no-exit
+Future<void> _proveTheSeam() async {
   stdout.writeln('chartSourceIsFilePath=$chartSourceIsFilePath');
 
   final IRealLibrary library = parseIRealLibrary(syntheticPayload());
@@ -258,10 +294,21 @@ Future<void> main() async {
     'seq=${reopenedSession.seq}',
   );
 
-  directory.deleteSync(recursive: true);
+  // The temporary directory's removal is registered rather than written here so that it happens
+  // even when a check throws. Nothing this probe wrote is left behind for the test run to see.
+  addTearDown(() {
+    if (directory.existsSync()) {
+      directory.deleteSync(recursive: true);
+    }
+  });
+}
+
+/// Prints the check and failure counts, then turns them into the test's verdict, so a probe that
+/// runs but reports a failure cannot be mistaken for a passing one.
+void _report() {
   stdout.writeln('');
   stdout.writeln('CHECKS=$_checks FAILURES=$_failures');
-  exit(_failures == 0 ? 0 : 1);
+  expect(_failures, 0, reason: 'every check in this probe must hold');
 }
 
 /// Reads the file at [path] and decodes it, which is what the Open button does in two steps.
@@ -300,13 +347,8 @@ bool _bytesEqual(List<int> left, List<int> right) {
   return true;
 }
 
-/// The ten-field iReal payload the viewer test uses, so the probe starts from a real import rather
-/// than from a hand-built Song.
-String syntheticPayload() {
-  const String notation = '*AT44C^ |F^ |G7 |C^ Z';
-  final String music = '$irealMusicPrefix${obfuscateIrealMusic(notation)}';
-  return 'Test Tune=Test Composer==Medium Swing=C=0=$music=Medium Swing=120=1';
-}
+// The ten-field iReal payload this probe starts from now lives in `probe_payloads.dart`, because
+// the `dart run` fixture writer has to import it without importing this Flutter-reaching file.
 
 /// Records one expectation, printing both sides when it fails.
 void _same(String what, Object? expected, Object? actual) {

@@ -7,13 +7,28 @@
 //
 //          IT ALSO SAVES AN EDITED PROGRAMME, WITH A TAIL THAT IS NOT IDEMPOTENT, AND REOPENS IT,
 //          and it refuses a damaged file on disk with the typed message the container produced.
-// INPUTS: None. The exports are synthetic payloads built here with the library's own obfuscator, so
-//         nothing is read from the owner's machine.
+// INPUTS: None. The exports are synthetic payloads built in `probe_payloads.dart` with the
+//         library's own obfuscator, so nothing is read from the owner's machine.
 // OUTPUTS: One block per check on stdout, then a summary line and an exit code: 0 when every check
 //          held, 1 when one did not. This file imports no Flutter, which is why plain `dart run` can
 //          execute it.
+//
+//          **THE LAST SENTENCE OF OUTPUTS IS CORRECTED HERE AND IS LEFT STANDING ABOVE, the same
+//          form `docs/sdd.md` A30 and A52 use for a claim that became false.** "This file imports no
+//          Flutter, which is why plain `dart run` can execute it" was true when it was written and
+//          is false since A55: the probe reaches `chart_source.dart` -> `chart_source_io.dart`,
+//          which imports `file_selector` and `flutter/foundation`, so
+//          `dart run tool/probe_setlist_seam.dart` now dies with `Dart library 'dart:ui' is not
+//          available on this platform`. The exit-code half is corrected with it: the probe no
+//          longer calls `exit()`, so the counts are printed as before and the same failures fail
+//          the `flutter test` run. The shared payloads it builds from live in `probe_payloads.dart`,
+//          which the `dart run` fixture writer imports without importing this Flutter-reaching
+//          file. Run it from `apps/mobile`, headless and without a window:
+//
+//              flutter test tool/probe_setlist_seam.dart
+//
 // KEYWORDS: probe, setlist-file, chart-identity, re-import, reorder, rename, missing-chart,
-//           corruption, app-seam, dart-io, evidence
+//           corruption, app-seam, dart-io, flutter-test, headless, evidence
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -23,33 +38,50 @@ import 'package:chartapp/ireal_library.dart';
 import 'package:chartapp/setlist_document.dart';
 import 'package:chartapp/setlist_import.dart';
 import 'package:chartapp/setlist_resolution.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'probe_payloads.dart';
 
 int _failures = 0;
 int _checks = 0;
 
-Future<void> main() async {
-  stdout.writeln('chartSourceIsFilePath=$chartSourceIsFilePath');
-  final Directory directory = Directory.systemTemp.createTempSync(
-    'chartapp-setlist-probe-',
+void main() {
+  test(
+    'the setlist seam: identity survives save, reopen, reorder and rename',
+    () async {
+      addTearDown(_report);
+      stdout.writeln('chartSourceIsFilePath=$chartSourceIsFilePath');
+      final Directory directory = Directory.systemTemp.createTempSync(
+        'chartapp-setlist-probe-',
+      );
+      final String path =
+          '${directory.path}${Platform.pathSeparator}probe.setlist';
+      // The temporary directory's removal is registered rather than written in a `finally` so that
+      // it happens even when a check throws, and so no file this probe wrote is left behind.
+      addTearDown(() {
+        if (directory.existsSync()) {
+          directory.deleteSync(recursive: true);
+        }
+      });
+
+      await _identityProof(directory, path);
+    },
   );
-  final String path = '${directory.path}${Platform.pathSeparator}probe.setlist';
+}
 
-  try {
-    await _identityProof(directory, path);
-  } finally {
-    directory.deleteSync(recursive: true);
-  }
-
+/// Prints the check and failure counts, then turns them into the test's verdict, so a probe that
+/// runs but reports a failure cannot be mistaken for a passing one.
+void _report() {
   stdout.writeln('');
   stdout.writeln('CHECKS=$_checks FAILURES=$_failures');
-  exit(_failures == 0 ? 0 : 1);
+  expect(_failures, 0, reason: 'every check in this probe must hold');
 }
 
 /// The whole proof, in the order a musician meets it.
 Future<void> _identityProof(Directory directory, String path) async {
   // --- A. IMPORT, BUILD, EDIT, SAVE -------------------------------------------------------------
   _section('A. import an export, build a programme, edit it, save it');
-  final IRealLibrary first = parseIRealLibrary(_playlist(_threeSongs));
+  final IRealLibrary first = parseIRealLibrary(threeSongPlaylistPayload());
   _same('the export imported three songs', 3, first.songs.length);
   for (final IRealSong song in first.songs) {
     stdout.writeln(
@@ -98,7 +130,7 @@ Future<void> _identityProof(Directory directory, String path) async {
 
   // --- B. RE-IMPORT THE SAME EXPORT AND REOPEN --------------------------------------------------
   _section('B. import the SAME export again, reopen the programme');
-  final IRealLibrary second = parseIRealLibrary(_playlist(_threeSongs));
+  final IRealLibrary second = parseIRealLibrary(threeSongPlaylistPayload());
   final SetlistFileDecodeResult reopened = await _readAndDecode(path);
   _same('the reopened file is the file that was saved', file, reopened.file);
   _same('no warnings on a clean file', 0, reopened.warnings.length);
@@ -132,7 +164,7 @@ Future<void> _identityProof(Directory directory, String path) async {
   // --- C. RE-IMPORT A REORDERED EXPORT ----------------------------------------------------------
   _section('C. import a REORDERED export, reopen the same programme');
   final IRealLibrary reordered = parseIRealLibrary(
-    _playlist(_threeSongsReversed),
+    threeSongPlaylistReorderedPayload(),
   );
   _same('the reordered export imported three songs', 3, reordered.songs.length);
   _same(
@@ -207,7 +239,7 @@ Future<void> _identityProof(Directory directory, String path) async {
 
   // --- E. A DIFFERENT EXPORT: THE MISSING-CHART DECISION ----------------------------------------
   _section('E. a DIFFERENT export: the entries that find nothing are KEPT');
-  final IRealLibrary other = parseIRealLibrary(_playlist(_otherSongs));
+  final IRealLibrary other = parseIRealLibrary(playlistPayload(_otherSongs));
   final int missing = missingSetlistItemCount(other, programme.items);
   _same(
     'every entry of the programme finds nothing in the other export',
@@ -377,62 +409,15 @@ Future<void> _identityProof(Directory directory, String path) async {
 // Fixtures
 // ---------------------------------------------------------------------------------------------
 
-/// `C^ | F^ | G7 | C^`, the chart the first export leads with.
-const String _charleston = '*AT44C^ |F^ |G7 |C^ Z';
-
-/// `D^ | E7 | D^ | E7`.
-const String _fourBarsInD = '*AT44D^ |E7 |D^ |E7 Z';
-
-/// `F^ | Bb7 | F^ | C7`.
-const String _fourBarsInF = '*AT44F^ |Bb7 |F^ |C7 Z';
-
-/// The export the programme is built from, in this order.
-const List<(String, String)> _threeSongs = <(String, String)>[
-  ('First Tune', _charleston),
-  ('Second Tune', _fourBarsInD),
-  ('Third Tune', _fourBarsInF),
-];
-
-/// The SAME three tunes, in another order, which is what a differently ordered export is.
-const List<(String, String)> _threeSongsReversed = <(String, String)>[
-  ('Third Tune', _fourBarsInF),
-  ('First Tune', _charleston),
-  ('Second Tune', _fourBarsInD),
-];
+// The three-song payloads and the builder that obfuscates them moved to `probe_payloads.dart`,
+// because the `dart run` fixture writer has to share them without importing this Flutter-reaching
+// file. `_otherSongs` stays here: it is used only by the missing-chart section below.
 
 /// A different export entirely: different tunes, so nothing the programme names is in it.
 const List<(String, String)> _otherSongs = <(String, String)>[
   ('Some Other Tune', '*AT44G^ |C^ |D7 |G^ Z'),
   ('Another Tune', '*AT44A-7 |D7 |G^ |C^ Z'),
 ];
-
-// PURPOSE: Build a playlist payload from a list of (title, notation) pairs, through the library's
-//          own obfuscator so the fixture cannot drift from the codec.
-// INPUTS: songs — the titles and notations, in the order the export should carry them.
-// OUTPUTS: A decoded iReal payload whose last `===` segment is the playlist name.
-// KEYWORDS: fixture, playlist, payload, obfuscation, positional-ids
-String _playlist(List<(String, String)> songs) {
-  final List<String> segments = <String>[
-    for (final (String title, String notation) in songs)
-      <String>[
-        '$title=Composer==Swing=C=0=',
-        '$irealMusicPrefix${obfuscateIrealMusic(notation)}=Swing=120=1',
-      ].join(),
-  ];
-  return '${segments.join('===')}===Test Playlist';
-}
-
-// PURPOSE: Hand the export this probe is built around to another harness — the fixture writer a
-//          browser run is driven with — so the identities printed here and the identities the
-//          BROWSER computes are computed from the same bytes.
-// INPUTS: None.
-// OUTPUTS: The decoded payload of a three-song playlist in a fixed order.
-// KEYWORDS: fixture, shared-payload, browser-verification, cross-platform, identity
-/// The three-song export this probe builds its programme from.
-String threeSongPlaylistPayload() => _playlist(_threeSongs);
-
-/// The same three tunes in another order, which is what a re-import is checked against.
-String threeSongPlaylistReorderedPayload() => _playlist(_threeSongsReversed);
 
 // ---------------------------------------------------------------------------------------------
 // Helpers

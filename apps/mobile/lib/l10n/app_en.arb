@@ -110,10 +110,10 @@
   "@newChartKeyLabel": { "description": "The caption above the key a new chart is written in: the mode switch and the twelve tonics under it." },
 
   "newChartMajor": "Major",
-  "@newChartMajor": { "description": "The mode switch's major half in the new-chart dialog." },
+  "@newChartMajor": { "description": "The mode switch's major half in the new-chart dialog. NOT TRANSLATED - `Major` is how the mode is written in any language, and a Russian `Мажор` beside an English `C major` key name would show the same fact two ways. See D27." },
 
   "newChartMinor": "Minor",
-  "@newChartMinor": { "description": "The mode switch's minor half in the new-chart dialog." },
+  "@newChartMinor": { "description": "The mode switch's minor half in the new-chart dialog. NOT TRANSLATED, on the same rule as newChartMajor." },
 
   "create": "Create",
   "@create": { "description": "The button that makes the new chart with the key and meter chosen beside it." },
@@ -276,7 +276,7 @@
 
   "semitonesShort": "{signed} st",
   "@semitonesShort": {
-    "description": "A signed interval in semitones, as a musician abbreviates it.",
+    "description": "A signed interval in semitones, as a musician abbreviates it. NOT TRANSLATED - `st` is the abbreviation in any language; the Russian catalogue carries the same string. See D27.",
     "placeholders": { "signed": { "type": "String" } }
   },
 
@@ -294,13 +294,13 @@
 
   "keyNameMajor": "{tonic} major",
   "@keyNameMajor": {
-    "description": "A major key named for a reader. The tonic letter is the chart's own notation and is not translated; the mode word is.",
+    "description": "A major key named for a reader. NEITHER THE TONIC LETTER NOR THE MODE WORD IS TRANSLATED: a musician writes and reads `A major` in every language, and `A минор` is a chart no other musician would recognise as notation. The Russian catalogue carries the SAME string on purpose - see A53 for the rule and D27 for the owner's decision. Do not translate this row; translating it was the defect.",
     "placeholders": { "tonic": { "type": "String" } }
   },
 
   "keyNameMinor": "{tonic} minor",
   "@keyNameMinor": {
-    "description": "A minor key named for a reader, on the same rule as keyNameMajor.",
+    "description": "A minor key named for a reader, on the same rule as keyNameMajor: the whole name is notation and is NOT translated.",
     "placeholders": { "tonic": { "type": "String" } }
   },
 
@@ -558,6 +558,63 @@
 
   "paletteRemoveChord": "Remove chord",
   "@paletteRemoveChord": { "description": "The chord palette's destructive button that clears the edited cell." },
+
+  "melodyGroup": "MELODY",
+  "@melodyGroup": { "description": "The note palette's caption over the pitch and duration pickers." },
+
+  "melodyDuration": "DURATION",
+  "@melodyDuration": { "description": "The note palette's caption over the note-value chips." },
+
+  "melodyPitch": "PITCH",
+  "@melodyPitch": { "description": "The note palette's caption over the row of scale degrees." },
+
+  "melodyAlteration": "ALTERATION",
+  "@melodyAlteration": { "description": "The note palette's caption over the accidental chips." },
+
+  "melodyNewNote": "+ New note",
+  "@melodyNewNote": { "description": "The note palette's row that clears the note selection so the next pitch tap writes another note on the same beat." },
+
+  "melodyPickCell": "Tap a beat on the chart to write a note.",
+  "@melodyPickCell": { "description": "Shown in the note palette when the selection names a bar but no cell, so there is nowhere to place a note yet." },
+
+  "melodyBeatEmpty": "This beat carries no note.",
+  "@melodyBeatEmpty": { "description": "The note palette's status when the edited beat holds no note. Choosing a pitch inserts the first one." },
+
+  "melodyNoteLine": "Note {step} · {pitch} {value}",
+  "@melodyNoteLine": {
+    "description": "One note of the edited beat, as the note palette lists it. The step is one-based so that the first note of a beat reads as Note 1. The pitch and the value inside it are NOTATION and are Latin in every language (owner decision A53); only the word Note is interface.",
+    "placeholders": { "step": { "type": "int" }, "pitch": { "type": "String" }, "value": { "type": "String" } }
+  },
+
+  "melodyOctaveLower": "Octave down",
+  "@melodyOctaveLower": { "description": "The note palette's control that moves the pitch row one octave lower. An ACTION, not notation, so it is translated; the octave's own name in the row is notation and is not in this catalogue." },
+
+  "melodyOctaveHigher": "Octave up",
+  "@melodyOctaveHigher": { "description": "The note palette's control that moves the pitch row one octave higher. An action, not notation." },
+
+  "melodyValueTooLong": "Longer than the bar — pick a shorter value.",
+  "@melodyValueTooLong": { "description": "Shown when the chosen duration does not fit the edited bar, so the note was not written. A sentence about the interface, so it is translated; the DURATION NAMES the palette offers are notation and are not in this catalogue." },
+
+  "melodyValueOverflow": "This bar is already longer than its meter allows.",
+  "@melodyValueOverflow": { "description": "Shown when the edited bar's existing notes already exceed the bar's length, so the meter and the melody disagree. It reports the state and refuses nothing." },
+
+  "melodyTie": "Tie",
+  "@melodyTie": { "description": "The note palette's action that ties the chosen note into the next one." },
+
+  "melodyUntie": "Untie",
+  "@melodyUntie": { "description": "The note palette's action that clears the tie on the chosen note." },
+
+  "melodyRemove": "Remove note",
+  "@melodyRemove": { "description": "The note palette's destructive button that deletes the chosen note." },
+
+  "melodyTapBeatHint": "Tap the chart to change the beat.",
+  "@melodyTapBeatHint": { "description": "The note palette's footer: the chart behind the sheet is still the way to choose another beat." },
+
+  "viewerNote": "Note",
+  "@viewerNote": { "description": "The selection line's action that opens the note palette for the chosen beat." },
+
+  "viewerChord": "Chord",
+  "@viewerChord": { "description": "The selection line's action that opens the chord palette for the chosen beat, beside the note action." },
 
   "formGroupBar": "BAR",
   "@formGroupBar": { "description": "The form sheet's caption over the operations that add, copy and remove one bar." },
@@ -997,5 +1054,83 @@
   "@untitledProgramme": { "description": "The name shown for a programme whose title is empty. Never data: it is the interface's own fallback." },
 
   "setlistMissingChart": "(missing chart)",
-  "@setlistMissingChart": { "description": "The programme row's name for an entry that names no chart the loaded library holds." }
+  "@setlistMissingChart": { "description": "The programme row's name for an entry that names no chart the loaded library holds." },
+
+  "formGroupMeter": "METER",
+  "@formGroupMeter": { "description": "The form sheet's caption over the bar-meter control." },
+
+  "formMeterLabel": "Meter: {meter}",
+  "@formMeterLabel": {
+    "description": "The form sheet's meter button, naming the meter the cursor's bar carries now.",
+    "placeholders": { "meter": { "type": "String" } }
+  },
+
+  "formMeterTitle": "Bar meter M/N",
+  "@formMeterTitle": { "description": "The title of the box that asks for the two figures of a bar's meter." },
+
+  "formMeterNumerator": "Numerator M",
+  "@formMeterNumerator": { "description": "The label of the upper figure of a meter: how many beats the bar is counted in." },
+
+  "formMeterDenominator": "Denominator N",
+  "@formMeterDenominator": { "description": "The label of the lower figure of a meter: the note value that gets the beat." },
+
+  "formMeterHelper": "Two whole numbers, for example 15/8.",
+  "@formMeterHelper": { "description": "The hint under the two meter fields, showing a meter a fixed list would not offer." },
+
+  "formMeterApply": "Set",
+  "@formMeterApply": { "description": "The button that applies the typed meter." },
+
+  "formMeterSet": "Meter {meter} set on {range}.",
+  "@formMeterSet": {
+    "description": "The form sheet's status after a meter was set, naming the meter and the bars it covers; a zone of one bar prints that one bar's number.",
+    "placeholders": { "meter": { "type": "String" }, "range": { "type": "String" } }
+  },
+
+  "formMeterSame": "Nothing changed: every bar in the range is already in that meter.",
+  "@formMeterSame": { "description": "The refusal shown when the meter is already in force on every bar of the zone." },
+
+  "formMeterNone": "none",
+  "@formMeterNone": { "description": "The meter button's word when the sheet's cursor names no bar, so no meter is in view." },
+
+  "formZoneFrom": "From bar",
+  "@formZoneFrom": { "description": "The label of the first bar of a zone, counted inside the cursor's section." },
+
+  "formZoneTo": "To bar",
+  "@formZoneTo": { "description": "The label of the last bar of a zone, counted inside the cursor's section." },
+
+  "formZoneHelper": "Bars of this section, counted from its first.",
+  "@formZoneHelper": { "description": "The hint under the two bar-number fields of a zone." },
+
+  "formZoneErrorEmpty": "Type a bar number in both boxes.",
+  "@formZoneErrorEmpty": { "description": "The zone box's refusal when one of the two bar numbers is blank." },
+
+  "formZoneErrorNotAnInteger": "Bar numbers are whole numbers written in digits.",
+  "@formZoneErrorNotAnInteger": { "description": "The zone box's refusal when a bar number is not a whole number." },
+
+  "formZoneErrorOutOfRange": "This section has {bars} bar(s).",
+  "@formZoneErrorOutOfRange": {
+    "description": "The zone box's refusal when a bar number is outside the cursor's section, naming how many bars it has.",
+    "placeholders": { "bars": { "type": "int" } }
+  },
+
+  "formZoneErrorReversed": "The first bar must not come after the last one.",
+  "@formZoneErrorReversed": { "description": "The zone box's refusal when the last bar is before the first." },
+
+  "formZoneErrorNoSection": "That range is not inside this section.",
+  "@formZoneErrorNoSection": { "description": "The zone box's refusal when the range names a section the song does not have, or one with no bars." },
+
+  "formMeterErrorEmpty": "Type a whole number in both boxes.",
+  "@formMeterErrorEmpty": { "description": "The meter box's refusal when one of the two figures is blank." },
+
+  "formMeterErrorNotAnInteger": "Both figures are whole numbers written in digits.",
+  "@formMeterErrorNotAnInteger": { "description": "The meter box's refusal when a figure is not a whole number: a fraction, a decimal or letters." },
+
+  "formMeterErrorNotPositive": "Both figures must be greater than zero.",
+  "@formMeterErrorNotPositive": { "description": "The meter box's refusal for a zero or a negative figure. A bar of no beats is not a meter." },
+
+  "formMeterErrorTooLarge": "Too large: each figure is at most {max}.",
+  "@formMeterErrorTooLarge": {
+    "description": "The meter box's refusal for a figure above the accepted bound.",
+    "placeholders": { "max": { "type": "int" } }
+  }
 }

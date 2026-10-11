@@ -243,6 +243,15 @@ abstract final class EventCodec {
           ),
           to: ModelJson.decodeBarMarks(EventJson.array(payload, 'to'), 'to'),
         );
+      case 'meter.set':
+        return MeterSetEvent(
+          docId: docId,
+          seq: seq,
+          sectionId: EventJson.string(payload, 'sectionId'),
+          barIndex: EventJson.integer(payload, 'bar'),
+          from: _meter(EventJson.object(payload, 'from'), 'from'),
+          to: _meter(EventJson.object(payload, 'to'), 'to'),
+        );
       case 'key.transpose':
         return KeyTransposeEvent(
           docId: docId,
@@ -383,4 +392,32 @@ abstract final class EventCodec {
 
   /// Wraps a decoded bracket number back into a [Volta], or null when the bar has none.
   static Volta? _volta(int? number) => number == null ? null : Volta(number);
+
+  // PURPOSE: Read one side of a `meter.set`, refusing a meter the model cannot hold.
+  // INPUTS: json — the `from` or `to` object. side — which side it is, so a failure names it.
+  // OUTPUTS: The decoded [TimeSignature]. The two figures are read with the same strict integer
+  //          reader every other numeric field uses, so a missing figure, a figure of the wrong type
+  //          and a fractional figure are all [EventFormatException]s; on top of that, a figure
+  //          below one is refused here rather than stored.
+  //
+  //          WHY POSITIVITY IS CHECKED HERE AND NOT ONLY AT THE INPUT SURFACE. A bar of zero beats
+  //          is not a state the layout can be asked to draw, and this event is the only path by
+  //          which a meter is written after import. A file carrying one would otherwise put the
+  //          document into a state no surface can repair, because every surface that could set a
+  //          meter would refuse to write the zero it would have to read first.
+  //
+  //          WHY THE UPPER BOUND IS NOT CHECKED HERE. `maxMeterFigure` bounds what a musician can
+  //          TYPE; refusing a figure already written into a saved file would make the file
+  //          unopenable rather than merely odd, which is a worse failure than loading it.
+  // KEYWORDS: meter-decode, strict, positivity, typed-failure, no-silent-default
+  static TimeSignature _meter(Map<String, Object?> json, String side) {
+    final TimeSignature meter = ModelJson.decodeTimeSignature(json);
+    if (meter.numerator < 1 || meter.denominator < 1) {
+      throw EventFormatException(
+        'field "$side" names the meter $meter, whose figures must both be '
+        'positive',
+      );
+    }
+    return meter;
+  }
 }

@@ -260,13 +260,13 @@ abstract class AppLocalizations {
   /// **'Key'**
   String get newChartKeyLabel;
 
-  /// The mode switch's major half in the new-chart dialog.
+  /// The mode switch's major half in the new-chart dialog. NOT TRANSLATED - `Major` is how the mode is written in any language, and a Russian `Мажор` beside an English `C major` key name would show the same fact two ways. See D27.
   ///
   /// In en, this message translates to:
   /// **'Major'**
   String get newChartMajor;
 
-  /// The mode switch's minor half in the new-chart dialog.
+  /// The mode switch's minor half in the new-chart dialog. NOT TRANSLATED, on the same rule as newChartMajor.
   ///
   /// In en, this message translates to:
   /// **'Minor'**
@@ -530,7 +530,7 @@ abstract class AppLocalizations {
   /// **'{key} · {interval}'**
   String keyBadgeLabel(String key, String interval);
 
-  /// A signed interval in semitones, as a musician abbreviates it.
+  /// A signed interval in semitones, as a musician abbreviates it. NOT TRANSLATED - `st` is the abbreviation in any language; the Russian catalogue carries the same string. See D27.
   ///
   /// In en, this message translates to:
   /// **'{signed} st'**
@@ -554,13 +554,13 @@ abstract class AppLocalizations {
   /// **'not spellable'**
   String get keyGridNotSpellable;
 
-  /// A major key named for a reader. The tonic letter is the chart's own notation and is not translated; the mode word is.
+  /// A major key named for a reader. NEITHER THE TONIC LETTER NOR THE MODE WORD IS TRANSLATED: a musician writes and reads `A major` in every language, and `A минор` is a chart no other musician would recognise as notation. The Russian catalogue carries the SAME string on purpose - see A53 for the rule and D27 for the owner's decision. Do not translate this row; translating it was the defect.
   ///
   /// In en, this message translates to:
   /// **'{tonic} major'**
   String keyNameMajor(String tonic);
 
-  /// A minor key named for a reader, on the same rule as keyNameMajor.
+  /// A minor key named for a reader, on the same rule as keyNameMajor: the whole name is notation and is NOT translated.
   ///
   /// In en, this message translates to:
   /// **'{tonic} minor'**
@@ -977,6 +977,114 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Remove chord'**
   String get paletteRemoveChord;
+
+  /// The note palette's caption over the pitch and duration pickers.
+  ///
+  /// In en, this message translates to:
+  /// **'MELODY'**
+  String get melodyGroup;
+
+  /// The note palette's caption over the note-value chips.
+  ///
+  /// In en, this message translates to:
+  /// **'DURATION'**
+  String get melodyDuration;
+
+  /// The note palette's caption over the row of scale degrees.
+  ///
+  /// In en, this message translates to:
+  /// **'PITCH'**
+  String get melodyPitch;
+
+  /// The note palette's caption over the accidental chips.
+  ///
+  /// In en, this message translates to:
+  /// **'ALTERATION'**
+  String get melodyAlteration;
+
+  /// The note palette's row that clears the note selection so the next pitch tap writes another note on the same beat.
+  ///
+  /// In en, this message translates to:
+  /// **'+ New note'**
+  String get melodyNewNote;
+
+  /// Shown in the note palette when the selection names a bar but no cell, so there is nowhere to place a note yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a beat on the chart to write a note.'**
+  String get melodyPickCell;
+
+  /// The note palette's status when the edited beat holds no note. Choosing a pitch inserts the first one.
+  ///
+  /// In en, this message translates to:
+  /// **'This beat carries no note.'**
+  String get melodyBeatEmpty;
+
+  /// One note of the edited beat, as the note palette lists it. The step is one-based so that the first note of a beat reads as Note 1. The pitch and the value inside it are NOTATION and are Latin in every language (owner decision A53); only the word Note is interface.
+  ///
+  /// In en, this message translates to:
+  /// **'Note {step} · {pitch} {value}'**
+  String melodyNoteLine(int step, String pitch, String value);
+
+  /// The note palette's control that moves the pitch row one octave lower. An ACTION, not notation, so it is translated; the octave's own name in the row is notation and is not in this catalogue.
+  ///
+  /// In en, this message translates to:
+  /// **'Octave down'**
+  String get melodyOctaveLower;
+
+  /// The note palette's control that moves the pitch row one octave higher. An action, not notation.
+  ///
+  /// In en, this message translates to:
+  /// **'Octave up'**
+  String get melodyOctaveHigher;
+
+  /// Shown when the chosen duration does not fit the edited bar, so the note was not written. A sentence about the interface, so it is translated; the DURATION NAMES the palette offers are notation and are not in this catalogue.
+  ///
+  /// In en, this message translates to:
+  /// **'Longer than the bar — pick a shorter value.'**
+  String get melodyValueTooLong;
+
+  /// Shown when the edited bar's existing notes already exceed the bar's length, so the meter and the melody disagree. It reports the state and refuses nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'This bar is already longer than its meter allows.'**
+  String get melodyValueOverflow;
+
+  /// The note palette's action that ties the chosen note into the next one.
+  ///
+  /// In en, this message translates to:
+  /// **'Tie'**
+  String get melodyTie;
+
+  /// The note palette's action that clears the tie on the chosen note.
+  ///
+  /// In en, this message translates to:
+  /// **'Untie'**
+  String get melodyUntie;
+
+  /// The note palette's destructive button that deletes the chosen note.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove note'**
+  String get melodyRemove;
+
+  /// The note palette's footer: the chart behind the sheet is still the way to choose another beat.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap the chart to change the beat.'**
+  String get melodyTapBeatHint;
+
+  /// The selection line's action that opens the note palette for the chosen beat.
+  ///
+  /// In en, this message translates to:
+  /// **'Note'**
+  String get viewerNote;
+
+  /// The selection line's action that opens the chord palette for the chosen beat, beside the note action.
+  ///
+  /// In en, this message translates to:
+  /// **'Chord'**
+  String get viewerChord;
 
   /// The form sheet's caption over the operations that add, copy and remove one bar.
   ///
@@ -1751,6 +1859,138 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'(missing chart)'**
   String get setlistMissingChart;
+
+  /// The form sheet's caption over the bar-meter control.
+  ///
+  /// In en, this message translates to:
+  /// **'METER'**
+  String get formGroupMeter;
+
+  /// The form sheet's meter button, naming the meter the cursor's bar carries now.
+  ///
+  /// In en, this message translates to:
+  /// **'Meter: {meter}'**
+  String formMeterLabel(String meter);
+
+  /// The title of the box that asks for the two figures of a bar's meter.
+  ///
+  /// In en, this message translates to:
+  /// **'Bar meter M/N'**
+  String get formMeterTitle;
+
+  /// The label of the upper figure of a meter: how many beats the bar is counted in.
+  ///
+  /// In en, this message translates to:
+  /// **'Numerator M'**
+  String get formMeterNumerator;
+
+  /// The label of the lower figure of a meter: the note value that gets the beat.
+  ///
+  /// In en, this message translates to:
+  /// **'Denominator N'**
+  String get formMeterDenominator;
+
+  /// The hint under the two meter fields, showing a meter a fixed list would not offer.
+  ///
+  /// In en, this message translates to:
+  /// **'Two whole numbers, for example 15/8.'**
+  String get formMeterHelper;
+
+  /// The button that applies the typed meter.
+  ///
+  /// In en, this message translates to:
+  /// **'Set'**
+  String get formMeterApply;
+
+  /// The form sheet's status after a meter was set, naming the meter and the bars it covers; a zone of one bar prints that one bar's number.
+  ///
+  /// In en, this message translates to:
+  /// **'Meter {meter} set on {range}.'**
+  String formMeterSet(String meter, String range);
+
+  /// The refusal shown when the meter is already in force on every bar of the zone.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed: every bar in the range is already in that meter.'**
+  String get formMeterSame;
+
+  /// The meter button's word when the sheet's cursor names no bar, so no meter is in view.
+  ///
+  /// In en, this message translates to:
+  /// **'none'**
+  String get formMeterNone;
+
+  /// The label of the first bar of a zone, counted inside the cursor's section.
+  ///
+  /// In en, this message translates to:
+  /// **'From bar'**
+  String get formZoneFrom;
+
+  /// The label of the last bar of a zone, counted inside the cursor's section.
+  ///
+  /// In en, this message translates to:
+  /// **'To bar'**
+  String get formZoneTo;
+
+  /// The hint under the two bar-number fields of a zone.
+  ///
+  /// In en, this message translates to:
+  /// **'Bars of this section, counted from its first.'**
+  String get formZoneHelper;
+
+  /// The zone box's refusal when one of the two bar numbers is blank.
+  ///
+  /// In en, this message translates to:
+  /// **'Type a bar number in both boxes.'**
+  String get formZoneErrorEmpty;
+
+  /// The zone box's refusal when a bar number is not a whole number.
+  ///
+  /// In en, this message translates to:
+  /// **'Bar numbers are whole numbers written in digits.'**
+  String get formZoneErrorNotAnInteger;
+
+  /// The zone box's refusal when a bar number is outside the cursor's section, naming how many bars it has.
+  ///
+  /// In en, this message translates to:
+  /// **'This section has {bars} bar(s).'**
+  String formZoneErrorOutOfRange(int bars);
+
+  /// The zone box's refusal when the last bar is before the first.
+  ///
+  /// In en, this message translates to:
+  /// **'The first bar must not come after the last one.'**
+  String get formZoneErrorReversed;
+
+  /// The zone box's refusal when the range names a section the song does not have, or one with no bars.
+  ///
+  /// In en, this message translates to:
+  /// **'That range is not inside this section.'**
+  String get formZoneErrorNoSection;
+
+  /// The meter box's refusal when one of the two figures is blank.
+  ///
+  /// In en, this message translates to:
+  /// **'Type a whole number in both boxes.'**
+  String get formMeterErrorEmpty;
+
+  /// The meter box's refusal when a figure is not a whole number: a fraction, a decimal or letters.
+  ///
+  /// In en, this message translates to:
+  /// **'Both figures are whole numbers written in digits.'**
+  String get formMeterErrorNotAnInteger;
+
+  /// The meter box's refusal for a zero or a negative figure. A bar of no beats is not a meter.
+  ///
+  /// In en, this message translates to:
+  /// **'Both figures must be greater than zero.'**
+  String get formMeterErrorNotPositive;
+
+  /// The meter box's refusal for a figure above the accepted bound.
+  ///
+  /// In en, this message translates to:
+  /// **'Too large: each figure is at most {max}.'**
+  String formMeterErrorTooLarge(int max);
 }
 
 class _AppLocalizationsDelegate

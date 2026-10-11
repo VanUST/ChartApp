@@ -19,14 +19,28 @@
 //          a real edited chart could not be reopened. The snapshot written is the session's base
 //          document, and the check that counts is REOPENED_DOCUMENT_EQUAL — a session opened from
 //          the file holds the chart that was saved.
+//
+//          **THE SENTENCE "This file imports no Flutter, which is why plain `dart run` executes it"
+//          IS CORRECTED HERE AND IS LEFT STANDING ABOVE, the same form `docs/sdd.md` A30 and A52 use
+//          for a claim that became false.** It was true when it was written and is false since A55:
+//          the probe reaches `chart_source.dart` -> `chart_source_io.dart`, which imports
+//          `file_selector` and `flutter/foundation`, so `dart run tool/probe_edit_loop.dart` now
+//          dies with `Dart library 'dart:ui' is not available on this platform`. The exit-code half
+//          of OUTPUTS is corrected with it: the probe no longer calls `exit()`, so the counts are
+//          printed as before and the same failures fail the `flutter test` run. Run it from
+//          `apps/mobile`, headless and without a window:
+//
+//              flutter test tool/probe_edit_loop.dart
+//
 // KEYWORDS: probe, edit-loop, chord-palette, op-log, undo, redo, exact-restore, chart-file,
-//           round-trip, reopen, non-idempotent, evidence, dart-io
+//           round-trip, reopen, non-idempotent, evidence, dart-io, flutter-test, headless
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
 import 'package:chartapp/chart_document.dart';
 import 'package:chartapp/chart_source.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 int _failures = 0;
 int _checks = 0;
@@ -40,7 +54,22 @@ const String _section = 'A';
 const int _bar = 0;
 const int _beat = 2;
 
-Future<void> main() async {
+void main() {
+  test('the edit loop: palette, log, undo, redo, a non-idempotent tail and reopening', () async {
+    addTearDown(_report);
+    await _proveTheEditLoop();
+  });
+}
+
+// PURPOSE: Run every check this probe carries, in the order the loop is walked. The body is kept
+//          separate from `main` so the reshape to `flutter test` changed only the frame around it:
+//          every check, and the counters they are reported with, are the ones that were here when
+//          this file was a `dart run` probe.
+// INPUTS: None.
+// OUTPUTS: A future that completes when the last check has been reported. It calls no `exit()`; the
+//          verdict is the assertion `_report` makes when the test tears down.
+// KEYWORDS: probe-body, edit-loop, undo, redo, round-trip, no-exit
+Future<void> _proveTheEditLoop() async {
   final EditSession session = EditSession(
     document: DocumentState(song: probeChart()),
   );
@@ -425,10 +454,21 @@ Future<void> main() async {
     reopenedSession.document == resumedDecoded.reducedDocument,
   );
 
-  directory.deleteSync(recursive: true);
+  // The temporary directory's removal is registered rather than written here so that it happens
+  // even when a check throws. Nothing this probe wrote is left behind for the test run to see.
+  addTearDown(() {
+    if (directory.existsSync()) {
+      directory.deleteSync(recursive: true);
+    }
+  });
+}
+
+/// Prints the check and failure counts, then turns them into the test's verdict, so a probe that
+/// runs but reports a failure cannot be mistaken for a passing one.
+void _report() {
   stdout.writeln('');
   stdout.writeln('CHECKS=$_checks FAILURES=$_failures');
-  exit(_failures == 0 ? 0 : 1);
+  expect(_failures, 0, reason: 'every check in this probe must hold');
 }
 
 /// The synthetic chart this probe edits: two sections, each bar carrying a chord on its first cell
