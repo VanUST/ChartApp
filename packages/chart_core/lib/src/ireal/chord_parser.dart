@@ -8,7 +8,11 @@
 //          rather than an exception or a wrong chord: an invisible root or a suffix this model
 //          cannot hold must be reported, not silently flattened into a chord that sounds wrong
 //          and looks plausible. The caller counts nulls and reports them; it does not drop them.
-// KEYWORDS: ireal, chord-parser, chord-symbol, slash-chord, alternate-chord, unsupported-feature
+//          Every chord that IS returned carries the root and slash bass spelled exactly as the
+//          symbol wrote them (see [_rootOf]): the key is not consulted, and a chart written in
+//          sharps comes back in sharps.
+// KEYWORDS: ireal, chord-parser, chord-symbol, slash-chord, alternate-chord, unsupported-feature,
+//           written-spelling
 //
 // WHY THE SUFFIX IS NOT VALIDATED.
 //
@@ -18,8 +22,15 @@
 // would be total rather than local. The suffix is therefore preserved as an opaque token, which is
 // also what lets a symbol this project has never heard of survive an import and an export
 // unchanged.
+//
+// THE ROOT'S SPELLING IS PRESERVED FOR THE SAME REASON THE SUFFIX IS, and it is the same kind of
+// data: the musician wrote `F#h` and not `Gbh`. Storing only the sounding pitch class and asking
+// the key to spell it later produced exactly that swap on the owner's own export — `F#h` came back
+// `Gbh` and `A/C#` came back `A/Db` in a chart in A minor — because a flat-preferring key answers a
+// chromatic pitch with a flat. The spelling is written into the model at the point it is read.
 import '../chord.dart';
 import '../pitch.dart';
+import '../spelling_table.dart';
 
 /// Parses [text] as an iReal chord symbol.
 ///
@@ -48,7 +59,7 @@ Chord? parseIRealChord(String text) {
   if (rootAlter != 0) {
     i++;
   }
-  final ChordRoot root = ChordRoot(rootNote.naturalPitchClass + rootAlter);
+  final ChordRoot root = _rootOf(rootNote, rootAlter);
 
   // The quality runs to the first `/`, or to a `(` that holds a chord root. A bracket holding
   // anything else is a parenthesised added tone and belongs to the suffix, which is how the
@@ -88,7 +99,7 @@ Chord? parseIRealChord(String text) {
         if (bassAlter != 0) {
           i++;
         }
-        bass = ChordRoot(bassNote.naturalPitchClass + bassAlter);
+        bass = _rootOf(bassNote, bassAlter);
       }
       // A slash followed by something that is not a letter leaves the bass unset and lets the
       // remaining characters be examined as an alternate, which is what a malformed symbol most
@@ -115,6 +126,35 @@ Chord? parseIRealChord(String text) {
 
   return Chord(root: root, quality: quality, bass: bass, alternate: alternate);
 }
+
+// PURPOSE: Build a chord root — or a slash bass — from the letter and the accidental THE SOURCE
+//          WROTE, so the chord remembers how it was spelled instead of handing that decision to a
+//          key a second time. This is the one function in the import that turns a written note into
+//          model data, and it exists so root and bass cannot differ in how they record a spelling.
+// INPUTS: letter — the letter the symbol showed (A to G, never `W`, which is refused above).
+//         alter — the accidental that followed it, in semitones: -1 for `b`, +1 for `#`, 0 for a
+//         bare letter.
+// OUTPUTS: A ChordRoot whose sounding pitch is `letter + alter` reduced to a pitch class, whose
+//          [ChordRoot.written] is exactly that letter-and-alteration pair, and whose preference is
+//          the same direction expressed the way the spelling table understands it — sharp for `#`,
+//          flat for `b`, automatic for a bare letter, where "automatic" asks no key either because
+//          a bare letter IS the written spelling.
+//
+//          WHY BOTH FIELDS AND NOT ONLY THE PREFERENCE. A preference is a DIRECTION and cannot
+//          express a letter: in A minor the pitch class 11 is the key's own B, so the table answers
+//          `B` for it whatever direction it is given, and a written `Cb` would come back wrong. The
+//          written note is therefore the authority and the preference is the fallback a caller
+//          keeps for a root that has no written note at all.
+// KEYWORDS: ireal, chord-root, slash-bass, spelling, written-note, accidental, no-key-consulted
+ChordRoot _rootOf(NoteLetter letter, int alter) => ChordRoot(
+  letter.naturalPitchClass + alter,
+  written: WrittenNote(letter, alter),
+  preference: alter > 0
+      ? SpellingPreference.sharp
+      : alter < 0
+      ? SpellingPreference.flat
+      : SpellingPreference.automatic,
+);
 
 /// Returns the accidental at [index], or 0 when there is none.
 ///

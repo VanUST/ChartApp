@@ -430,13 +430,13 @@ class LayoutEngine {
   //          its box. The first sits [LayoutStyle.staffTextBottomInset] above the bar's bottom and
   //          each later one is stacked above it. An empty input yields an empty list.
   // KEYWORDS: staff-text, placement, stacking, display-form, painter-contract
-  // THE CELL DIVISION IS GONE, AND ITS REMOVAL ATE FOUR FUNCTIONS AT ONCE. `_cellWidths` decided
+  // The CELL DIVISION IS GONE, AND ITS REMOVAL ATE FOUR FUNCTIONS AT ONCE. `_cellWidths` decided
   // how wide each beat's column had to be, `_cellOffsets` turned those columns into x positions
   // inside the bar, `_placeCells` published them as hit targets and `_placeBeatMarkers` drew them.
   // All four existed because the layout divided a bar by its metre. The owner removed that division
   // («Просто надпись»), so there is no column to widen, no offset to distribute, no target to
-  // publish and no number to print: a mark is at its own x (see [_placeChords] and [_placeMelody])
-  // and a touch names the bar and its own coordinate (see `hitTest.dart`).
+  // publish and no number to print: a mark is at its own x (see [_placeChords]) and a touch names
+  // the bar and its own coordinate (see `hitTest.dart`).
   //
   // WHAT WAS LOST WITH THEM, said rather than discovered later. A bar used to reserve at least one
   // minimum column per beat, which is what gave a musician blank room to write into; a bar's width
@@ -756,6 +756,9 @@ class LayoutEngine {
           sectionId: measured.sectionId,
           barIndex: measured.barIndex,
           bounds: bounds,
+          // The chords are placed from the SAME rectangle the bar was given, so the symbol's x and
+          // the width the bar was measured to are one relationship and not two.
+          chords: _placeChords(measured, bounds),
           // A cue carries its own x, so placing it needs the bar's left edge and nothing else.
           textCues: _placeTextCues(
             measured.textCues,
@@ -855,34 +858,86 @@ class LayoutEngine {
     return placed;
   }
 
-  // PURPOSE: Place each of a bar's chords at the coordinate the model stores, so that a symbol is
-  //          engraved where the musician wrote it and nowhere the engraving chose.
-  // INPUTS: measured — the bar with its model, key and address. barBounds — the bar's rectangle,
-  //         which is also its chord band.
-  // OUTPUTS: One placed chord per mark, ordered by its place along the bar, each carrying the mark's
-  //          own [AnchoredPlace] so a caller can match a placement to the model value it came from
-  //          by comparing places rather than by counting indexes.
+  // PURPOSE: Place each of a bar's chords in the bar's chord row, at the x the model stores, so
+  //          that the page shows the symbols the chart was written with and a musician can read the
+  //          bar instead of an empty lane.
+  // INPUTS: measured — the bar with its model, its key and its width. barBounds — the bar's
+  //         rectangle, which is also the band its chord row lives in.
+  // OUTPUTS: One placement per mark, in the model's own order, each carrying the rendered symbol,
+  //          the box it measured to and the size the mark asks for. A bar with no mark yields an
+  //          empty list, and the page then shows nothing in that bar's row: a chord is drawn only
+  //          where the file put one.
   //
-  //          THE VERTICAL PLACE, AND WHY ZERO MEANS THE MIDDLE. A chord's `offsetY` is its own place
-  //          on the chord line, added to the line's centre. Zero therefore means "on the line", which
-  //          is where every chord written before this stage sits — so a chart engraved today draws
-  //          its symbols at exactly the height it drew them at yesterday, and a musician who put one
-  //          higher wrote a different number. The band is the bar's own rectangle: the symbol may not
-  //          escape it, because the owner ruled that above the staff is a chord and below the bar is
-  //          neither («Аккорды надо запретить ниже такта»).
+  //          THE X IS THE MODEL'S OWN NUMBER. `barLeft + mark.offsetX`, read straight off the mark —
+  //          no column, no beat, no rounding — because under the coordinate model a mark's place IS
+  //          its time. The bar's width was measured from the same number (see [_barWidth]), so a bar
+  //          is wide enough for the last symbol it holds by construction.
   //
-  //          WHAT HAPPENS TO A CHORD FROM A FILE THAT SAYS OTHERWISE. It is CLAMPED into the band
-  //          rather than dropped, and [PlacedChord.clampedIntoBand] says so. Dropping it would make a
-  //          chart silently lose a chord; drawing it below the bar would show a place the rule says
-  //          cannot hold one, and the ink reader would then find notes there. Clamping keeps the
-  //          symbol visible, keeps it inside the band, and leaves a fact a probe can print.
+  //          THE VERTICAL ROW, AND WHY IT IS THE TOP ONE. A printed chart writes its chords in a row
+  //          at the head of each bar and leaves the rest of the lane under them, and that is the
+  //          idiom a musician reads. The row therefore begins [LayoutStyle.chordRowTopInset] below
+  //          the band's top rather than being centred in a band that is now [LayoutStyle.barHeight]
+  //          tall and holds nothing else: a symbol floating in the middle of an empty cell reads as
+  //          a table of names, while a symbol at the head of the cell reads as a chart. The inset is
+  //          the room between the symbol and the section heading above the system, which is centred
+  //          in its own band and ends within a few pixels of that band's bottom edge.
   //
-  //          NO PACKING ANY MORE. Two marks may legitimately stand at the same x — the reducer no
-  //          longer separates them, because a place is a coordinate and the musician's pen made it —
-  //          so the engine draws them where they say and lets them overlap. The layout does not
-  //          arbitrate a position the musician chose.
-  // KEYWORDS: chord-placement, coordinate-driven, chord-band, clamping, clampedIntoBand,
-  //           no-packing, drawn-where-written
+  //          A MARK'S OWN `offsetY` IS ADDED TO THAT ROW, and the sum is clamped into the band. Zero
+  //          — the only value the importer writes — leaves the symbol in the row exactly as above.
+  //          A value from a file written by an editor that no longer exists moves it within the band
+  //          and no further: [PlacedChord.clampedIntoBand] then says the stored number was not
+  //          honoured. Dropping such a mark would make a chart silently lose a chord, and drawing it
+  //          outside the band would put it on the heading above or the system below.
+  //
+  //          NOTHING IS PACKED, AND NOTHING IS ARBITRATED. Two marks may legitimately stand at the
+  //          same x, so they are drawn where they say and overlap; the layout does not move a
+  //          position the chart chose. This function is also the ONLY place a chord's drawn text is
+  //          produced, so the string that is measured and the string that is drawn are one value.
+  // KEYWORDS: chord-placement, coordinate-driven, chord-row, top-row, clamping, clampedIntoBand,
+  //           no-packing, measured-once, written-spelling, display-only
+  List<PlacedChord> _placeChords(_MeasuredBar measured, LayoutRect barBounds) {
+    final List<ChordMark> marks = measured.bar.chords;
+    if (marks.isEmpty) {
+      return const <PlacedChord>[];
+    }
+    final List<PlacedChord> placed = <PlacedChord>[];
+    for (final ChordMark mark in marks) {
+      final String text = mark.chord.render(measured.key, spellingTable);
+      final LayoutSize size = style.textMetrics.measure(
+        text,
+        ChartTextRole.chord,
+      );
+      // The band the symbol may occupy, expressed as the range its own box's TOP may take: it may
+      // not rise above the band and may not hang past its bottom edge.
+      final double highest = barBounds.top;
+      final double lowest = barBounds.bottom - size.height;
+      double top = barBounds.top + style.chordRowTopInset + mark.place.offsetY;
+      bool clamped = false;
+      if (top < highest) {
+        top = highest;
+        clamped = true;
+      } else if (top > lowest) {
+        // A band too short to hold the symbol at all keeps it at the band's top, where at least its
+        // ascender is drawn on the page the bar occupies rather than on the neighbour above.
+        top = lowest > highest ? lowest : highest;
+        clamped = true;
+      }
+      placed.add(
+        PlacedChord(
+          text: text,
+          bounds: LayoutRect.fromLTWH(
+            barBounds.left + mark.offsetX,
+            top,
+            size.width,
+            size.height,
+          ),
+          small: mark.size == ChordSize.small,
+          clampedIntoBand: clamped,
+        ),
+      );
+    }
+    return placed;
+  }
 }
 
 /// The result of asking the engine to put a whole song on one page.

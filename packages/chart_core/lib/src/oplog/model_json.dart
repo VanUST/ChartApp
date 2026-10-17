@@ -36,25 +36,47 @@ abstract final class ModelJson {
         EventJson.integer(json, 'alter'),
       );
 
-  /// Writes a [ChordRoot] as its unreduced semitone count and spelling preference.
+  /// Writes a [ChordRoot] as its unreduced semitone count, its spelling preference and the note it
+  /// was written as.
   ///
   /// The semitones are written as stored, not reduced to a pitch class: reducing them would make
   /// a root of 12 indistinguishable from one of 0, and the model deliberately keeps the
   /// transposition arithmetic visible on the value.
-  static Map<String, Object?> chordRoot(ChordRoot root) => <String, Object?>{
-    'semitones': root.semitones,
-    'preference': root.preference.name,
-  };
+  ///
+  /// `written` IS WRITTEN WHEN IT EXISTS, because it is the field that decides the spelling a
+  /// musician reads. A save that dropped it would reopen the chart respelled by the key, which is
+  /// the defect this field exists to close: the document would survive and the notation would not.
+  static Map<String, Object?> chordRoot(ChordRoot root) {
+    final WrittenNote? written = root.written;
+    return <String, Object?>{
+      'semitones': root.semitones,
+      'preference': root.preference.name,
+      'written': written == null ? null : writtenNote(written),
+    };
+  }
 
   /// Rebuilds a [ChordRoot] from [json].
-  static ChordRoot decodeChordRoot(Map<String, Object?> json) => ChordRoot(
-    EventJson.integer(json, 'semitones'),
-    preference: EventJson.enumeration(
-      SpellingPreference.values,
-      EventJson.string(json, 'preference'),
-      'preference',
-    ),
-  );
+  ///
+  /// `written` IS READ TOLERANTLY, for the reason `Bar.size` is: no build before this field existed
+  /// could write one, so its absence names exactly one state — a root whose spelling the key
+  /// decides — rather than an unknown one. Every other field stays required, because a missing
+  /// semitone or preference means a truncated event and a default there would make the damage look
+  /// like an edit.
+  static ChordRoot decodeChordRoot(Map<String, Object?> json) {
+    final Map<String, Object?>? written = EventJson.optionalObject(
+      json,
+      'written',
+    );
+    return ChordRoot(
+      EventJson.integer(json, 'semitones'),
+      preference: EventJson.enumeration(
+        SpellingPreference.values,
+        EventJson.string(json, 'preference'),
+        'preference',
+      ),
+      written: written == null ? null : decodeWrittenNote(written),
+    );
+  }
 
   /// Writes a [Chord] as root, quality token, optional slash bass and optional alternate.
   static Map<String, Object?> chord(Chord chord) {

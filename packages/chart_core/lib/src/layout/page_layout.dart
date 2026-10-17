@@ -1,5 +1,5 @@
 // PURPOSE: Describe where everything landed, in a form that answers the two questions the rest of
-//          the system asks of a layout: where is this chord drawn, and which chord is under this
+//          the system asks of a layout: where is this chord drawn, and which bar is under this
 //          touch. Every element carries both its identity in the song model and its rectangle on
 //          the page, so neither question requires re-running the engine. The page also carries the
 //          whole bridge to the surface it is drawn on — the page mode's `scale` and the musician's
@@ -9,8 +9,8 @@
 // OUTPUTS: Immutable values with value equality, which is what makes a layout comparable — a
 //          cached layout can be recognised as unchanged without re-engraving it. Equality includes
 //          the view, so a pan is a new page value and a painter that compares pages repaints.
-// KEYWORDS: layout-result, placed-chord, hit-testing, value-equality, cache-key, anchor-address,
-//           view-transform, zoom, pan, single-bridge
+// KEYWORDS: layout-result, placed-chord, placed-bar, hit-testing, value-equality, cache-key,
+//           anchor-address, view-transform, zoom, pan, single-bridge
 import 'geometry.dart';
 
 // A bar's cells are GONE, and their absence is the point of this stage. A cell was the grid in the
@@ -83,13 +83,97 @@ class PlacedTextCue {
 // could not be built on them. Beam grouping no longer reads the metre either, so the last thing in
 // the engraving that depended on the metre's division into columns has gone with it.
 
-/// A bar drawn at a position, together with the cues that remark on it.
+// PURPOSE: Say where one chord symbol goes and which words to draw there, so that the painter draws
+//          the string the layout MEASURED instead of measuring the chord a second time and hoping
+//          the two agree.
+// INPUTS: Produced by the layout engine; not constructed by callers. `text` is the chord rendered
+//         in the song's key, `bounds` is the box that string measured to at the mark's own x.
+// OUTPUTS: An immutable value with value equality, carried on [PlacedBar.chords] in the model's
+//          own order, so a caller can pair the i-th placement with the i-th [ChordMark].
+// KEYWORDS: layout-result, placed-chord, chord-row, display-only, measured-once, written-spelling
+//
+// DISPLAY ONLY, AND THAT IS A CONSTRAINT ON THIS VALUE RATHER THAN A COMMENT. A placement is
+// something to DRAW. It carries no hit target and no editing handle, because a chord cannot be
+// added, changed or moved through the interface: the mark that produced it is written by the iReal
+// importer and by nothing else. If a future change wants to select a chord by touching it, it has
+// to add that deliberately, and the absence here is what will make it a decision rather than an
+// accident.
+//
+// THE TEXT IS THE SPELLING. `F#h` is drawn as `F#h` and `Cb` as `Cb`, because the string in [text]
+// came out of `Chord.render`, which returns the written note a mark carries and consults the key
+// only for a root that arrived without one (see `ChordRoot.written`). Nothing in the painter
+// re-spells anything: it is handed a string and draws it.
+
+/// One chord symbol drawn at a position: the words to draw and the box they occupy.
+class PlacedChord {
+  /// Creates a placement of [text] in [bounds], drawn small when [small] is true.
+  const PlacedChord({
+    required this.text,
+    required this.bounds,
+    this.small = false,
+    this.clampedIntoBand = false,
+  });
+
+  /// The symbol to draw, exactly as the chart writes it.
+  ///
+  /// It is the rendered chord and not the [Chord] value, on purpose: the engine measured THIS
+  /// string to reserve the room around it, so handing the painter the string is what makes the
+  /// drawn symbol and the measured box the same value rather than two calls that happen to agree.
+  /// Empty is never produced — a mark always renders to at least its root — so a painter need not
+  /// test it, although drawing an empty string is harmless.
+  final String text;
+
+  /// Where the symbol is drawn, in the page's engraved coordinates.
+  ///
+  /// Its LEFT EDGE is the bar's left edge plus the mark's own stored x, which under the coordinate
+  /// model is simply where the musician wrote it — the chord's time. Its VERTICAL extent is the
+  /// chord row inside the bar's band: the row begins [LayoutStyle.chordRowTopInset] below the
+  /// band's top and follows the mark's own vertical offset from there.
+  final LayoutRect bounds;
+
+  /// Whether the model marks this chord as engraved small (`ChordSize.small`).
+  ///
+  /// A chart writes a small chord to say "this is a passing chord" — iReal spells it with an `s` —
+  /// so it is part of what the file says and is drawn one size down. It is NOT a hit target and
+  /// not a piece of state: the size travels with the mark and nothing in the interface can change
+  /// it.
+  final bool small;
+
+  /// Whether the mark's own vertical offset put this symbol outside its bar's band, so the row was
+  /// pulled back in.
+  ///
+  /// THE ROW NEVER LEAVES THE BAND. Above the bar's band is the section heading's row and below it
+  /// is the next system, so a symbol drawn outside would land on someone else's music; the offset
+  /// is clamped to the band's edge and this flag says the stored number was not honoured. It is
+  /// only reachable from a file written by an editor that no longer exists — the importer writes a
+  /// zero offset — which is why it is a flag on a placement rather than a refusal.
+  final bool clampedIntoBand;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedChord &&
+      other.text == text &&
+      other.bounds == bounds &&
+      other.small == small &&
+      other.clampedIntoBand == clampedIntoBand;
+
+  @override
+  int get hashCode => Object.hash(text, bounds, small, clampedIntoBand);
+
+  @override
+  String toString() =>
+      'placed("$text") at $bounds${small ? ' small' : ''}'
+      '${clampedIntoBand ? ' (clamped into the chord band)' : ''}';
+}
+
+/// A bar drawn at a position, together with the chords written in it and the cues that remark on it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
   const PlacedBar({
     required this.sectionId,
     required this.barIndex,
     required this.bounds,
+    this.chords = const <PlacedChord>[],
     this.textCues = const <PlacedTextCue>[],
   });
 
@@ -106,11 +190,22 @@ class PlacedBar {
   /// Where the bar is drawn, in page coordinates.
   ///
   /// THIS RECTANGLE IS THE CHORD BAND AND THE HIT TARGET, and the two are the same rectangle on
-  /// purpose: a chord is written above the staff, so the bar's own chord line is the only place the
-  /// owner's rule allows one, and a touch that lands on it names this bar. The melody staff is
-  /// placed BELOW this rectangle rather than inside it, which is what keeps a tap on the chord line
-  /// and a tap on the staff two different questions with one answer each.
+  /// purpose: a chord is written in the band above the bar's own lines, and a touch that lands on
+  /// the band names this bar. The chord row is placed INSIDE this rectangle rather than above it,
+  /// which is what keeps a tap on a chord and a tap on the bar one question with one answer: the
+  /// top of the band is the row the symbols hang from, and everything below them is the bar lane.
   final LayoutRect bounds;
+
+  /// The chord symbols written in this bar, in the model's own order.
+  ///
+  /// A bar with no chord has none — and it then shows nothing in its chord row, which is the state
+  /// of most bars of most charts and the reason this is a list rather than a required symbol. The
+  /// order is the order of `Bar.chords`, so the i-th placement came from the i-th mark and a
+  /// verification can compare the two lists positionally.
+  ///
+  /// THEY ARE HERE TO BE DRAWN AND FOR NOTHING ELSE. See [PlacedChord] for why that is a constraint
+  /// and not a description.
+  final List<PlacedChord> chords;
 
   /// The text cues anchored to this bar, in document order.
   ///
@@ -128,8 +223,14 @@ class PlacedBar {
         other.sectionId != sectionId ||
         other.barIndex != barIndex ||
         other.bounds != bounds ||
+        other.chords.length != chords.length ||
         other.textCues.length != textCues.length) {
       return false;
+    }
+    for (int index = 0; index < chords.length; index++) {
+      if (other.chords[index] != chords[index]) {
+        return false;
+      }
     }
     for (int index = 0; index < textCues.length; index++) {
       if (other.textCues[index] != textCues[index]) {
@@ -140,11 +241,18 @@ class PlacedBar {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(sectionId, barIndex, bounds, Object.hashAll(textCues));
+  int get hashCode => Object.hash(
+    sectionId,
+    barIndex,
+    bounds,
+    Object.hashAll(chords),
+    Object.hashAll(textCues),
+  );
 
   @override
-  String toString() => 'PlacedBar($sectionId[$barIndex]) at $bounds';
+  String toString() =>
+      'PlacedBar($sectionId[$barIndex]) at $bounds'
+      '${chords.isEmpty ? '' : ', ${chords.length} chord(s)'}';
 }
 
 /// One line of a page: the bars engraved side by side.

@@ -1573,6 +1573,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         'playlist_chars=${library.playlistName.length} '
         'setlist_entries=${_setlist?.items.length ?? 0}',
       );
+      debugPrint(_spellingLine(library));
     } on IRealFileCancelledException catch (error) {
       if (!mounted) {
         return;
@@ -1594,6 +1595,55 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       });
       debugPrint('viewer.load.error error=$error');
     }
+  }
+
+  // PURPOSE: Say in the log how the application spells the first two bars of the chart it just
+  //          imported, so that the one fact an import can get wrong without any other symptom — an
+  //          `F#` coming back as a `Gb` — can be READ off the device instead of judged by eye from
+  //          a photograph of the screen.
+  //
+  //          WHY IT IS KEPT NOW THAT THE CHORDS ARE DRAWN. It was added when nothing on the glass
+  //          showed a chord at all, and it has a second job that survives that: the log is a
+  //          PARSEABLE statement of what the importer produced, on the same two bars and in the
+  //          same key that `chart_core/tool/probe_ireal.dart` checks positionally, so the device
+  //          and the desktop probe can be compared character by character. A screenshot shows that
+  //          a symbol READS as `F#h`; this line shows that the model holds `F#h`, and the two
+  //          disagreeing would be a defect in one of them. It costs one line per load and no work
+  //          on any path a contact takes.
+  // INPUTS: library — the library the load produced. May be empty, which yields the empty string.
+  // OUTPUTS: One `viewer.load.spelling` line naming the first song, its key and the chord symbols of
+  //          its first two bars separated by `||`, or the empty string when the library holds no
+  //          song or the song has no bars. A bar with no chord contributes nothing rather than an
+  //          invented one, so a chart that genuinely starts with an empty bar says so by showing
+  //          fewer symbols.
+  // KEYWORDS: ireal, import, spelling, device-verification, structured-log, written-notation
+  String _spellingLine(IRealLibrary library) {
+    if (library.songs.isEmpty) {
+      return '';
+    }
+    final Song song = library.songs.first.song;
+    const SpellingTable table = SpellingTable();
+    final List<String> bars = <String>[];
+    for (final Section section in song.sections) {
+      for (final Bar bar in section.bars) {
+        if (bars.length == 2) {
+          break;
+        }
+        bars.add(
+          bar.chords
+              .map((ChordMark mark) => mark.chord.render(song.key, table))
+              .join(' '),
+        );
+      }
+      if (bars.length == 2) {
+        break;
+      }
+    }
+    if (bars.isEmpty) {
+      return '';
+    }
+    return 'viewer.load.spelling song="${song.title}" key="${song.key}" '
+        'bars=${bars.length} chords="${bars.join(' || ')}"';
   }
 
   // PURPOSE: Open the issue list for one song, which is where a requested transposition is

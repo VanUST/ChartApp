@@ -16,12 +16,14 @@
 //   * LOAD AN iReal CHART. `src/ireal/` reads an `irealb://` payload through de-obfuscation, the
 //     tokenizer and the parser into a Song. The parser still produces CHORDS, and the chord model
 //     (`src/chord.dart`, `src/pitch.dart`, `src/key.dart`, `src/spelling_table.dart`) is kept whole
-//     because of it: an import that dropped what the file says would not be an import. Nothing in
-//     the application draws a chord any more, and the model is the only place one is still read.
-//   * DRAW ITS BARS. `src/layout/` turns a Song into positioned pages of bar rectangles, and
-//     `src/layout/hit_test.dart` answers which bar a touch names. A bar's WIDTH still follows the
-//     chords its file gave it, because that is the page the musician recognises; the symbols
-//     themselves are no longer placed or drawn.
+//     because of it: an import that dropped what the file says would not be an import. A chord is
+//     READ and DRAWN and nothing else — the symbols are placed by the layout engine and put on the
+//     page by the renderer, and no code path in the application can add, change or delete one.
+//   * DRAW ITS BARS. `src/layout/` turns a Song into positioned pages of bar rectangles with the
+//     chord symbols in their chord rows, and `src/layout/hit_test.dart` answers which bar a touch
+//     names. A bar's WIDTH follows the chords its file gave it, because that is the page the
+//     musician recognises, and the symbols are placed at the coordinates those chords already
+//     carry.
 //   * HOLD HANDWRITING ON THOSE BARS. `src/ink/` holds the pure decisions a live capture needs —
 //     whether a contact may draw (`InkPalmRule`), which anchor a stroke that begins anywhere on the
 //     page is stored against (`resolveInkAnchor`: the bar under it, or the nearest bar when it began
@@ -43,9 +45,11 @@
 // WHAT IS DELIBERATELY ABSENT, because the owner cut the application back to its basics and asked
 // for the musical editing to be deleted rather than hidden. There is no note model, no melodic or
 // percussion staff, no play-order expansion, no selection or clipboard, no transposition, no
-// chord-symbol entry, no meter or bar insertion, no barline recognition and no chart header. Those
+// chord-symbol ENTRY, no meter or bar insertion, no barline recognition and no chart header. Those
 // files are gone from the tree, and the tests that covered them are gone with them. The history
-// holds them, which is where the owner wants them until the rest is rewritten.
+// holds them, which is where the owner wants them until the rest is rewritten. A chord is still
+// DRAWN, because a reader that cannot show the chords it loaded is not a reader; what is absent is
+// every way to enter, change or delete one.
 //
 // WHAT MUST NEVER LIVE HERE: flutter, storage_drift, ink_native or any platform channel. The
 // package's value rests on `dart test` running every one of its tests on a machine with no device,

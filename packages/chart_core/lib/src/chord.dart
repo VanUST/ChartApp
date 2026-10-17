@@ -90,20 +90,37 @@ String chordQualityLabel(ChordQuality quality) =>
 
 /// The bass note of a chord: its sounding pitch plus an optional spelling override.
 class ChordRoot {
-  /// Creates a root at [semitones] above C, with an optional spelling [preference].
+  /// Creates a root at [semitones] above C, with an optional spelling [preference] and an optional
+  /// exact [written] spelling.
   ///
   /// [semitones] is stored unreduced so that a transposition can be expressed as an addition
   /// without an intermediate normalization; [pitchClass] reduces it on read.
   const ChordRoot(
     this.semitones, {
     this.preference = SpellingPreference.automatic,
+    this.written,
   });
 
   /// Semitones above C. Any integer is accepted.
   final int semitones;
 
   /// Whether this note overrides the key's accidental direction, and which way.
+  ///
+  /// It is the WEAKER of the two spelling fields and it is consulted only when [written] is null.
+  /// A direction cannot say everything a written note says: it picks between `F#` and `Gb`, but it
+  /// cannot pick between `B` and `Cb`, because a spelling table answers a pitch that belongs to the
+  /// key's own scale with the scale degree before it ever looks at a direction.
   final SpellingPreference preference;
+
+  /// The note EXACTLY as it was written, or null when nothing was written and only a pitch exists.
+  ///
+  /// THIS IS DATA, NOT A DISPLAY CHOICE. `F#` and `Gb` sound the same and are different charts, and
+  /// so are `B` and `Cb`: a musician who wrote one of them will correct the other in his head while
+  /// he plays. When this field is set, [spellIn] returns it and the key is not consulted at all —
+  /// that is the whole of its contract. It is null only for a root that was built from a pitch
+  /// alone (an arithmetic construction, or a document written before this field existed), and that
+  /// is the one case where a key legitimately decides.
+  final WrittenNote? written;
 
   /// The sounding pitch class, in `[0, 11]`.
   int get pitchClass => normalizePitchClass(semitones);
@@ -111,29 +128,39 @@ class ChordRoot {
   // PURPOSE: Produce the written form of this root in a key, so that rendering a chord and
   //          testing a transposition both go through exactly one spelling rule.
   // INPUTS: key — the key the chart is written in. table — the spelling rule to apply.
-  // OUTPUTS: The WrittenNote the table chooses for this pitch class and preference.
-  // KEYWORDS: spelling, rendering, key-context
+  // OUTPUTS: [written] unchanged when it is set, so a spelling that arrived from a source survives
+  //          any key. Otherwise the WrittenNote the table chooses for this pitch class and
+  //          preference — the key's own scale degree for a diatonic pitch, and the table's
+  //          documented rule for a chromatic one.
+  // KEYWORDS: spelling, rendering, key-context, written-wins, data-not-choice
   /// Returns this root's written form in [key], spelled by [table].
   WrittenNote spellIn(Key key, SpellingTable table) =>
-      table.spell(pitchClass, key, preference: preference);
+      written ?? table.spell(pitchClass, key, preference: preference);
 
-  // PURPOSE: Compare roots by SOUNDING pitch and spelling override, not by the raw semitone
-  //          count, so that a root of 12 semitones equals one of 0 and a transposition by a full
-  //          octave is recognisable as the identity.
+  // PURPOSE: Compare roots by SOUNDING pitch, spelling override AND written spelling, not by the
+  //          raw semitone count, so that a root of 12 semitones equals one of 0 and a transposition
+  //          by a full octave is recognisable as the identity — while `F#` and `Gb` stay two
+  //          different roots. Including [written] here is what makes "the spelling is data" true
+  //          rather than advisory: a chord whose spelling changed is a chord that changed, so a
+  //          painter repaints, a save writes it, and a comparison reports it.
   // INPUTS: other — any object.
-  // OUTPUTS: True for a ChordRoot with the same pitch class and the same preference.
-  // KEYWORDS: equality, pitch-class, normalization, octave
+  // OUTPUTS: True for a ChordRoot with the same pitch class, the same preference and the same
+  //          written note. A written `F#` never equals a written `Gb`, and a root with no written
+  //          spelling never equals one with a written natural.
+  // KEYWORDS: equality, pitch-class, normalization, octave, spelling-identity
   @override
   bool operator ==(Object other) =>
       other is ChordRoot &&
       other.pitchClass == pitchClass &&
-      other.preference == preference;
+      other.preference == preference &&
+      other.written == written;
 
   @override
-  int get hashCode => Object.hash(pitchClass, preference);
+  int get hashCode => Object.hash(pitchClass, preference, written);
 
   @override
-  String toString() => 'root(pc=$pitchClass, $preference)';
+  String toString() =>
+      'root(pc=$pitchClass, $preference${written == null ? '' : ', written $written'})';
 }
 
 /// A chord as it appears on a chart.
@@ -175,11 +202,17 @@ class Chord {
 
   // PURPOSE: Render the chord as chart text in a given key, which is what a golden test or a
   //          spike log compares and what a musician finally reads.
-  // INPUTS: key — the key in force. table — the spelling rule to apply.
+  // INPUTS: key — the key in force, consulted only for a root that carries no written spelling.
+  //         table — the spelling rule to apply in that case.
   // OUTPUTS: Root, quality and slash bass concatenated in chart order, and then the alternate
   //          chord wrapped in parentheses when there is one. The rendering round-trips: parsing
   //          the output of a chord imported from a chart returns the same chord.
-  // KEYWORDS: rendering, chart-notation, slash-chord, alternate-chord, golden
+  //
+  //          A ROOT THAT ARRIVED SPELLED IS PRINTED AS IT ARRIVED, root and slash bass alike, so a
+  //          chart written in sharps does not come back in flats when its key prefers flats. The
+  //          key therefore decides nothing here for an imported chord, which is the point: the
+  //          written spelling is part of what the musician wrote, like the quality is.
+  // KEYWORDS: rendering, chart-notation, slash-chord, alternate-chord, golden, written-spelling
   /// Returns this chord as the text a chart shows in [key].
   String render(Key key, SpellingTable table) {
     final StringBuffer buffer = StringBuffer();

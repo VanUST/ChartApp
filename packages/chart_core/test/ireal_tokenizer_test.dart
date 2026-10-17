@@ -326,23 +326,41 @@ void main() {
     );
 
     test(
-      'a spelling the key disagrees with still parses to the right pitch',
+      'a written spelling is printed as written, whatever key the chart is in',
       () {
-        // C major spells pitch class 6 as Gb, so F#/C# renders as Gb/Db. The PITCH is what parsing
-        // must preserve; the spelling is the key's business. Asserting both separately is what
-        // keeps a future spelling change from looking like a parsing bug.
+        // C major spells pitch class 6 as Gb and A minor spells 11 as B. The musician wrote `F#/C#`
+        // and `Cb`, and those are what the chart must print: the spelling is data the parser records,
+        // not a choice the key makes afterwards. The PITCH assertions are kept beside the spelling
+        // ones so a spelling change can never move a chord's sound unnoticed.
         final Chord? chord = parseIRealChord('F#/C#');
         expect(chord!.root.pitchClass, 6);
         expect(chord.bass!.pitchClass, 1);
-        expect(chord.render(Key.cMajor, const SpellingTable()), 'Gb/Db');
+        expect(chord.root.written, const WrittenNote(NoteLetter.f, 1));
+        expect(chord.bass!.written, const WrittenNote(NoteLetter.c, 1));
+        expect(chord.render(Key.cMajor, const SpellingTable()), 'F#/C#');
         expect(
           chord.render(
             const Key(tonic: WrittenNote(NoteLetter.d, 0), mode: Mode.major),
             const SpellingTable(),
           ),
           'F#/C#',
-          reason: 'D major spells both notes with sharps',
+          reason: 'D major spells both notes with sharps too, and the key is not consulted',
         );
+        expect(
+          chord.render(Key.aMinor, const SpellingTable()),
+          'F#/C#',
+          reason:
+              'A minor has no sharps and would respell both notes; it must not',
+        );
+
+        // A preference could never express this case: pitch class 11 IS A minor's own B, so a table
+        // asked for it answers the scale degree before it looks at any direction. `Cb` is a
+        // legitimate chord and a different chart from `B`.
+        final Chord? flat = parseIRealChord('Cb');
+        expect(flat!.root.pitchClass, 11);
+        expect(flat.root.written, const WrittenNote(NoteLetter.c, -1));
+        expect(flat.render(Key.aMinor, const SpellingTable()), 'Cb');
+        expect(flat.render(Key.cMajor, const SpellingTable()), 'Cb');
       },
     );
   });

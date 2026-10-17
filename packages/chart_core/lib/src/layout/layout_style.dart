@@ -43,6 +43,7 @@ class LayoutStyle {
     this.barMinWidth = 56,
     this.barPadding = 8,
     this.chordSpacing = 10,
+    this.chordRowTopInset = 10,
     this.minCellWidth = 18,
     this.staffTextInset = 2,
     this.staffTextBottomInset = 2,
@@ -75,6 +76,28 @@ class LayoutStyle {
   /// Gap between two chords that share a cell, and the room reserved after the last chord in a
   /// cell so that neighbouring cells do not touch.
   final double chordSpacing;
+
+  /// The air between the top of a bar's band and the top of its chord row.
+  ///
+  /// THE ROW IS AT THE HEAD OF THE CELL, NOT IN ITS MIDDLE, and this is the number that says how far
+  /// down the head is. A printed chart writes its chord symbols along the top of each bar and leaves
+  /// the rest of the lane under them; a symbol centred in the band would instead read as a table
+  /// cell with a name in it — the band is [LayoutStyle.barHeight] tall and holds nothing else now
+  /// that the melody staff is gone, so the centring that was right when the symbol sat on a line
+  /// above a staff is wrong on its own.
+  ///
+  /// WHY 10, IN THE UNITS THAT DECIDE IT. The chord's line box is about 17.6 logical pixels at the
+  /// application's chord style (15-point type), so at an inset of 10 the symbol's ink begins about a
+  /// quarter of the way down a 52-pixel band and the lane below it keeps roughly half the cell. The
+  /// number is also the room between the symbol and the SECTION HEADING above the system: the
+  /// heading is centred in its own [LayoutStyle.sectionLabelHeight] band and its descenders end a
+  /// few pixels above that band's bottom edge, which is this band's top, so 10 leaves clear white
+  /// between the letter that names a section and the first chord under it rather than letting the
+  /// two touch.
+  ///
+  /// It does not change a bar's WIDTH and therefore does not change how much music fits a page: the
+  /// chord row is placed inside the band the bar already occupies. See `LayoutEngine._placeChords`.
+  final double chordRowTopInset;
 
   /// The narrowest a cell may be drawn.
   ///
