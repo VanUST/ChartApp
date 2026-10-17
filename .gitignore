@@ -83,3 +83,5 @@ key.properties
 *.p12
 
 # Rendered evidence for a report is not source. The repository is public and a screenshot of a\n# third-party chart is not ours to redistribute; artefacts live outside it, in ChartApp-acl-reports.\nshots/
+# docs/specs/ belongs to the HUMAN who owns this project (a spec is authored in the Specs window, never by an
+# agent). Ignored so a stray agent file cannot be committed by accident, which happened once.docs/specs/
