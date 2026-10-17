@@ -171,22 +171,23 @@ Song _chart({
           Bar(
             timeSignature: meter,
             chords: chords
-                ? <BeatChord>[
+                ? <ChordMark>[
                     for (int cell = 0; cell < 4; cell++)
-                      BeatChord(
+                      ChordMark(
+                        place: cellAt(cell),
                         chord: Chord(
                           root: ChordRoot((index + cell) % 12),
                           quality: cell.isEven
                               ? ChordQuality.majorSeventh
                               : ChordQuality.minorSeventh,
                         ),
-                        beat: cell,
                       ),
                   ]
-                : const <BeatChord>[],
+                : const <ChordMark>[],
             melody: withNotes
-                ? <BeatNote>[
-                    BeatNote(
+                ? <NoteMark>[
+                    NoteMark(
+                      place: cellAt(0),
                       pitch: PitchedNote(
                         note: WrittenNote(
                           NoteLetter.values[index % 7],
@@ -195,20 +196,18 @@ Song _chart({
                         octave: 4,
                       ),
                       value: const NoteValue.plain(NoteBase.quarter),
-                      beat: 0,
                     ),
                     if (index == 7)
-                      const BeatNote(
+                      NoteMark(
+                        place: cellAt(0, 1),
                         pitch: PitchedNote(
                           note: WrittenNote(NoteLetter.g, 0),
                           octave: 4,
                         ),
                         value: NoteValue.plain(NoteBase.half),
-                        beat: 0,
-                        step: 1,
                       ),
                   ]
-                : const <BeatNote>[],
+                : const <NoteMark>[],
           ),
       ],
     ),
@@ -475,26 +474,25 @@ void _reportHeader(
 //           slope, flag
 Song _beamChart() {
   /// One melody note at [letter]/[octave] of [value] on ([beat], [step]).
-  BeatNote at(
+  NoteMark at(
     NoteLetter letter,
     int octave,
     NoteBase base,
     int beat,
     int step,
-  ) => BeatNote(
+  ) => NoteMark(
+    place: cellAt(beat, step),
     pitch: PitchedNote(note: WrittenNote(letter, 0), octave: octave),
     value: NoteValue.plain(base),
-    beat: beat,
-    step: step,
   );
 
   /// A stepwise run of [count] notes from [from] up the C major scale, one per [base].
-  List<BeatNote> run(
+  List<NoteMark> run(
     List<NoteLetter> letters,
     int octave,
     NoteBase base,
     int beat,
-  ) => <BeatNote>[
+  ) => <NoteMark>[
     for (int index = 0; index < letters.length; index++)
       at(letters[index], octave, base, beat, index),
   ];
@@ -531,7 +529,7 @@ Song _beamChart() {
           // 0: an eighth pair in beat 1.
           Bar(
             chords: _probeChords(),
-            melody: <BeatNote>[
+            melody: <NoteMark>[
               at(NoteLetter.g, 4, NoteBase.eighth, 0, 0),
               at(NoteLetter.a, 4, NoteBase.eighth, 0, 1),
             ],
@@ -544,7 +542,7 @@ Song _beamChart() {
           // 2: a mixed group in beat 1: eighth, sixteenth, sixteenth.
           Bar(
             chords: _probeChords(),
-            melody: <BeatNote>[
+            melody: <NoteMark>[
               at(NoteLetter.g, 4, NoteBase.eighth, 0, 0),
               at(NoteLetter.a, 4, NoteBase.sixteenth, 0, 1),
               at(NoteLetter.b, 4, NoteBase.sixteenth, 0, 2),
@@ -553,7 +551,7 @@ Song _beamChart() {
           // 3: the same sixteenth run twice, in beats 1 and 3.
           Bar(
             chords: _probeChords(),
-            melody: <BeatNote>[
+            melody: <NoteMark>[
               ...run(efga, 4, NoteBase.sixteenth, 0),
               ...run(efga, 4, NoteBase.sixteenth, 2),
             ],
@@ -587,7 +585,7 @@ Song _beamChart() {
           // 7: one eighth and then a beat of silence: no beam, and the note keeps its flag.
           Bar(
             chords: _probeChords(),
-            melody: <BeatNote>[
+            melody: <NoteMark>[
               at(NoteLetter.g, 4, NoteBase.eighth, 0, 0),
               at(NoteLetter.a, 4, NoteBase.eighth, 2, 0),
             ],
@@ -599,16 +597,16 @@ Song _beamChart() {
 }
 
 /// Four chord symbols for one bar, which is the width a real chart's bar is measured at.
-List<BeatChord> _probeChords() => <BeatChord>[
+List<ChordMark> _probeChords() => <ChordMark>[
   for (int cell = 0; cell < 4; cell++)
-    BeatChord(
+    ChordMark(
+      place: cellAt(cell),
       chord: Chord(
         root: ChordRoot(cell * 3),
         quality: cell.isEven
             ? ChordQuality.majorSeventh
             : ChordQuality.minorSeventh,
       ),
-      beat: cell,
     ),
 ];
 
@@ -625,14 +623,14 @@ void _reportNotes(String label, Song song, PageLayout page) {
     }
     final List<String> described = <String>[];
     for (int index = 0; index < bar.melody.length; index++) {
-      final BeatNote note = bar.melody[index];
+      final NoteMark note = bar.melody[index];
       final int step = melodyStepOf(
         note.pitch.note,
         octave: note.pitch.octave,
         clef: placed.melody.clef ?? 'treble',
       );
       described.add(
-        '${note.pitch}:b${note.beat}.${note.step} step=$step '
+        '${note.pitch}:b${note.pseudoBeat}.${note.pseudoStep} step=$step '
         'ledger=${melodyLedgerLineOffsets(step).length}',
       );
     }
@@ -1117,7 +1115,7 @@ void main() {
   //          noteheads does the arch of a tie hang.
   //
   //          WHY IT IS THE COLUMN AND NOT THE MODEL THAT PUTS IT IN QUESTION. A note's place in time
-  //          inside one beat is its `BeatNote.step` — a dense ordinal, 0 for the first note of the
+  //          inside one beat is its `NoteMark.step` — a dense ordinal, 0 for the first note of the
   //          cell, 1 for the second — and the engraver draws step `k` at `cellX + k * stride`, which
   //          is the same left-to-right order. So the ORDER the model holds and the order the staff
   //          draws are one order, and an insertion that puts a new note at step 0 of a cell that
@@ -1182,8 +1180,8 @@ void main() {
 
     /// The notes of one bar as the MODEL holds them, in the bar's own storage order.
     String modelOf(Song song, int barIndex) => <String>[
-      for (final BeatNote note in song.barsInReadingOrder[barIndex].melody)
-        '${note.beat}.${note.step}:${note.pitch}',
+      for (final NoteMark note in song.barsInReadingOrder[barIndex].melody)
+        '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch}',
     ].join(' ');
 
     final EditSession session = EditSession(
@@ -1359,7 +1357,7 @@ void main() {
     ];
     stdout.writeln(
       'probe.writer.spacing bar=3 gaps=${<String>[for (final double gap in gaps) gap.toStringAsFixed(3)].join(",")} '
-      'values=${song.barsInReadingOrder[3].melody.map((BeatNote n) => '${n.value}').join(",")}',
+      'values=${song.barsInReadingOrder[3].melody.map((NoteMark n) => '${n.value}').join(",")}',
     );
 
     // --- THE PICTURES --------------------------------------------------------------------------

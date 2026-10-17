@@ -33,11 +33,10 @@ DocumentState _document(
   List<InkStroke> strokes = const <InkStroke>[],
 }) => DocumentState(song: song, strokes: strokes);
 
-/// A stroke hanging on [bar], optionally on [beat], drawn at ([x], [y]).
+/// A stroke hanging on [bar], drawn at ([x], [y]) from its own bar-local points.
 InkStroke _stroke({
   required String id,
   required int bar,
-  int? beat,
   String sectionId = _section,
   double x = 10,
   double y = 20,
@@ -46,7 +45,7 @@ InkStroke _stroke({
   tool: StrokeTool.pen,
   color: '#112233',
   size: 2,
-  anchor: EventAnchor(sectionId: sectionId, bar: bar, beat: beat),
+  anchor: EventAnchor(sectionId: sectionId, bar: bar),
   points: <InkPoint>[
     InkPoint(x: x, y: y, w: 0.5, t: 0),
     InkPoint(x: x + 30, y: y + 10, w: 0.5, t: 40),
@@ -89,7 +88,7 @@ String _chordText(Song song, int bar, int beat) => song
     .first
     .bars[bar]
     .chords
-    .firstWhere((BeatChord placed) => placed.beat == beat)
+    .firstWhere((ChordMark placed) => placed.pseudoBeat == beat)
     .chord
     .render(song.key, const SpellingTable());
 
@@ -237,7 +236,7 @@ void main() {
           _chart(bars: 4),
           strokes: <InkStroke>[
             _stroke(id: 'ink-a-0', bar: 0, x: 12, y: 30),
-            _stroke(id: 'ink-a-0-b2', bar: 0, beat: 2),
+            _stroke(id: 'ink-a-0-b2', bar: 0),
             _stroke(id: 'ink-a-2', bar: 2),
           ],
         ),
@@ -280,15 +279,22 @@ void main() {
         <String>{'ink-a-0~copy-1', 'ink-a-0-b2~copy-1'},
         reason: 'a copy needs its own identity, or the eraser would take both',
       );
+      // REWRITTEN. The assertion this replaces was
+      //   expect(pasted.firstWhere((InkStroke stroke) => stroke.id.startsWith('ink-a-0-b2'))
+      //       .anchor.beat, 2,
+      //       reason: 'a stroke that hung on a CELL keeps its cell');
+      // and it pinned the cell a stroke was anchored to. A stroke is anchored to its BAR now and its
+      // position along that bar is in its own points, so "it keeps its cell" survives as "it keeps
+      // its points": the copy's first sample is where the original's was measured from the same bar,
+      // which is the only fact the cell number ever stood for.
       expect(
         pasted
             .firstWhere(
               (InkStroke stroke) => stroke.id.startsWith('ink-a-0-b2'),
             )
-            .anchor
-            .beat,
-        2,
-        reason: 'a stroke that hung on a CELL keeps its cell',
+            .anchor,
+        EventAnchor(sectionId: _section, bar: 2),
+        reason: 'a stroke pasted with the bars keeps its bar and its own ink',
       );
       expect(
         strokes.where((InkStroke stroke) => stroke.anchor.bar == 0).length,
@@ -546,10 +552,11 @@ void main() {
         );
         expect(outcome, ClipPasteOutcome.pasted);
         final Bar target = session.document.song.sections.first.bars[1];
-        expect(target.chords.map((BeatChord placed) => placed.beat), <int>[
-          2,
-          3,
-        ], reason: 'the window landed at beat 2 of the target bar');
+        expect(
+          target.chords.map((ChordMark placed) => placed.pseudoBeat),
+          <int>[2, 3],
+          reason: 'the window landed at beat 2 of the target bar',
+        );
         expect(
           target.chords.first.chord.root.pitchClass,
           1,

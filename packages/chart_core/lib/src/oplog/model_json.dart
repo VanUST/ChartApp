@@ -145,19 +145,24 @@ abstract final class ModelJson {
         octave: EventJson.integer(json, 'octave'),
       );
 
-  /// Writes a [BeatChord] as the chord plus its address and engraving size.
-  static Map<String, Object?> beatChord(BeatChord placed) => <String, Object?>{
+  /// Writes a [ChordMark] as the chord plus its place and engraving size.
+  ///
+  /// THE PLACE CARRIES THE BAR, so this payload has one address and not two: the mark's place is
+  /// where it is, and a reader that finds it in a bar's list can check that the two agree. `beat`
+  /// and `step` are gone with the grid; a file written before this change has no `place` and is
+  /// refused by name rather than being guessed at — which is the owner's "old files do not matter,
+  /// except iReal" taken literally, and a refusal a musician can read instead of a silent
+  /// re-interpretation of his music.
+  static Map<String, Object?> chordMark(ChordMark placed) => <String, Object?>{
+    'place': placed.place.toJson(),
     'chord': chord(placed.chord),
-    'beat': placed.beat,
-    'step': placed.step,
     'size': placed.size.name,
   };
 
-  /// Rebuilds a [BeatChord] from [json].
-  static BeatChord decodeBeatChord(Map<String, Object?> json) => BeatChord(
+  /// Rebuilds a [ChordMark] from [json].
+  static ChordMark decodeChordMark(Map<String, Object?> json) => ChordMark(
+    place: EventJson.anchoredPlace(json, 'place'),
     chord: decodeChord(EventJson.object(json, 'chord')),
-    beat: EventJson.integer(json, 'beat'),
-    step: EventJson.integer(json, 'step'),
     size: EventJson.enumeration(
       ChordSize.values,
       EventJson.string(json, 'size'),
@@ -165,40 +170,36 @@ abstract final class ModelJson {
     ),
   );
 
-  /// Writes a [BeatNote] as its pitch, written duration, address and tie.
-  static Map<String, Object?> beatNote(BeatNote note) => <String, Object?>{
+  /// Writes a [NoteMark] as its pitch, written duration, place and tie.
+  static Map<String, Object?> noteMark(NoteMark note) => <String, Object?>{
     'pitch': pitchedNote(note.pitch),
     'value': noteValue(note.value),
-    'beat': note.beat,
-    'step': note.step,
+    'place': note.place.toJson(),
     'tiedToNext': note.tiedToNext,
   };
 
-  /// Rebuilds a [BeatNote] from [json].
-  static BeatNote decodeBeatNote(Map<String, Object?> json) => BeatNote(
+  /// Rebuilds a [NoteMark] from [json].
+  static NoteMark decodeNoteMark(Map<String, Object?> json) => NoteMark(
     pitch: decodePitchedNote(EventJson.object(json, 'pitch')),
     value: decodeNoteValue(EventJson.object(json, 'value')),
-    beat: EventJson.integer(json, 'beat'),
-    step: EventJson.integer(json, 'step'),
+    place: EventJson.anchoredPlace(json, 'place'),
     tiedToNext: EventJson.boolean(json, 'tiedToNext'),
   );
 
-  /// Writes a [PercussionHit] as its instrument, written duration and address.
-  static Map<String, Object?> percussionHit(PercussionHit hit) =>
+  /// Writes a [PercussionMark] as its instrument, written duration and place.
+  static Map<String, Object?> percussionMark(PercussionMark hit) =>
       <String, Object?>{
         'instrument': hit.instrument,
         'value': noteValue(hit.value),
-        'beat': hit.beat,
-        'step': hit.step,
+        'place': hit.place.toJson(),
       };
 
-  /// Rebuilds a [PercussionHit] from [json].
-  static PercussionHit decodePercussionHit(Map<String, Object?> json) =>
-      PercussionHit(
+  /// Rebuilds a [PercussionMark] from [json].
+  static PercussionMark decodePercussionMark(Map<String, Object?> json) =>
+      PercussionMark(
         instrument: EventJson.integer(json, 'instrument'),
         value: decodeNoteValue(EventJson.object(json, 'value')),
-        beat: EventJson.integer(json, 'beat'),
-        step: EventJson.integer(json, 'step'),
+        place: EventJson.anchoredPlace(json, 'place'),
       );
 
   /// Writes a [Bar] with every field the model carries, including the structural signs.
@@ -211,10 +212,10 @@ abstract final class ModelJson {
   static Map<String, Object?> bar(Bar bar) => <String, Object?>{
     'timeSignature': timeSignature(bar.timeSignature),
     'size': bar.size.factor,
-    'chords': <Object?>[for (final BeatChord c in bar.chords) beatChord(c)],
-    'melody': <Object?>[for (final BeatNote n in bar.melody) beatNote(n)],
+    'chords': <Object?>[for (final ChordMark c in bar.chords) chordMark(c)],
+    'melody': <Object?>[for (final NoteMark n in bar.melody) noteMark(n)],
     'percussion': <Object?>[
-      for (final PercussionHit h in bar.percussion) percussionHit(h),
+      for (final PercussionMark h in bar.percussion) percussionMark(h),
     ],
     'openingBarline': bar.openingBarline.name,
     'closingBarline': bar.closingBarline.name,
@@ -243,17 +244,17 @@ abstract final class ModelJson {
         EventJson.object(json, 'timeSignature'),
       ),
       size: decodeBarSize(EventJson.optionalNumber(json, 'size'), 'size'),
-      chords: <BeatChord>[
+      chords: <ChordMark>[
         for (final Object? entry in EventJson.array(json, 'chords'))
-          decodeBeatChord(_asObject(entry, 'chords')),
+          decodeChordMark(_asObject(entry, 'chords')),
       ],
-      melody: <BeatNote>[
+      melody: <NoteMark>[
         for (final Object? entry in EventJson.array(json, 'melody'))
-          decodeBeatNote(_asObject(entry, 'melody')),
+          decodeNoteMark(_asObject(entry, 'melody')),
       ],
-      percussion: <PercussionHit>[
+      percussion: <PercussionMark>[
         for (final Object? entry in EventJson.array(json, 'percussion'))
-          decodePercussionHit(_asObject(entry, 'percussion')),
+          decodePercussionMark(_asObject(entry, 'percussion')),
       ],
       openingBarline: EventJson.enumeration(
         Barline.values,

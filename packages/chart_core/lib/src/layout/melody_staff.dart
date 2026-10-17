@@ -23,6 +23,7 @@ import '../pitch.dart';
 import '../song/bar.dart';
 import '../song/note.dart';
 import '../song/note_value.dart';
+import '../song/pseudo_grid.dart';
 import '../song/time_signature.dart';
 import 'geometry.dart';
 
@@ -179,7 +180,7 @@ enum MelodyGlyphKind {
   /// A horizontal line through a notehead that lies outside the five staff lines.
   ledgerLine,
 
-  /// The curve joining the sound of one note to the next in [BeatNote.tiedToNext].
+  /// The curve joining the sound of one note to the next in [NoteMark.tiedToNext].
   tie,
 }
 
@@ -694,7 +695,7 @@ List<List<int>> _beamRuns({
 }) {
   final Map<int, List<int>> byBeat = <int, List<int>>{};
   for (int index = 0; index < notes.length; index++) {
-    (byBeat[notes[index].note.beat] ??= <int>[]).add(index);
+    (byBeat[notes[index].note.pseudoBeat] ??= <int>[]).add(index);
   }
   final List<int> beats = byBeat.keys.toList()..sort();
   // THE LENGTH OF ONE BEAT IS THE METER'S FACT AND NOT THE LAYOUT'S. A 4/4 bar is four quarters, so a
@@ -766,7 +767,9 @@ void _addBeamGroup({
   final List<int> ordered = run.toList()
     ..sort((int a, int b) {
       final int byX = notes[a].centerX.compareTo(notes[b].centerX);
-      return byX != 0 ? byX : notes[a].note.step.compareTo(notes[b].note.step);
+      return byX != 0
+          ? byX
+          : notes[a].note.pseudoStep.compareTo(notes[b].note.pseudoStep);
     });
   final bool up = _beamStemUp(<_MelodyNote>[
     for (final int i in ordered) notes[i],
@@ -1134,7 +1137,7 @@ class _MelodyNote {
   final int octave;
 
   /// The model note, which is what the written value and the tie are read from.
-  final BeatNote note;
+  final NoteMark note;
 
   /// The staff step the note sits at, already clamped by [melodyStepOf].
   final int step;
@@ -1190,14 +1193,14 @@ List<_MelodyNote> _notesOf({
   // How many notes each cell holds, counted before anything is placed, because the stride of a beat's
   // run depends on how many notes the run has.
   final Map<int, int> notesPerBeat = <int, int>{};
-  for (final BeatNote note in bar.melody) {
-    if (note.beat < 0 || note.beat >= cellX.length) {
+  for (final NoteMark note in bar.melody) {
+    if (note.pseudoBeat < 0 || note.pseudoBeat >= cellX.length) {
       continue;
     }
-    notesPerBeat[note.beat] = (notesPerBeat[note.beat] ?? 0) + 1;
+    notesPerBeat[note.pseudoBeat] = (notesPerBeat[note.pseudoBeat] ?? 0) + 1;
   }
-  for (final BeatNote note in bar.melody) {
-    if (note.beat < 0 || note.beat >= cellX.length) {
+  for (final NoteMark note in bar.melody) {
+    if (note.pseudoBeat < 0 || note.pseudoBeat >= cellX.length) {
       continue;
     }
     final int step = melodyStepOf(
@@ -1207,7 +1210,7 @@ List<_MelodyNote> _notesOf({
     );
     // WHICH NOTE OF A BEAT CARRIES THE ACCIDENTAL, decided before the position because the position
     // depends on it — see below.
-    final bool firstOfBeat = claimedBeats.add(note.beat);
+    final bool firstOfBeat = claimedBeats.add(note.pseudoBeat);
     final String? accidental = melodyAccidentalOf(note.pitch.note);
     // THE FIRST NOTE OF A BAR IS PUSHED CLEAR OF THE BARLINE BY HALF A NOTEHEAD, so that what lines
     // up with the cell's column is the note's LEFT EDGE — which is what a chord symbol's box also
@@ -1220,7 +1223,7 @@ List<_MelodyNote> _notesOf({
     // and the padding is 8, so the sign would be drawn ACROSS the barline. Only the overflow is
     // added, so an ordinary single sign moves nothing and the note keeps its column.
     double accidentalShift = 0;
-    if (firstOfBeat && accidental != null && note.beat == 0) {
+    if (firstOfBeat && accidental != null && note.pseudoBeat == 0) {
       // The room between the barline and the sign's own right edge is the bar's padding: the head's
       // left edge lies ON the cell's column (the headroom above put it there), and the sign is drawn
       // one gap further left again. Only the overflow moves the note.
@@ -1243,8 +1246,8 @@ List<_MelodyNote> _notesOf({
     // cell's width for its CHORDS and refuses to let a melody widen one — see `_cellWidths`, whose
     // note says a note that is wider than its column overhangs it. A bar spaced for its melody would
     // be the real fix, and it is not this change.
-    final double firstX = cellX[note.beat] + headroom + accidentalShift;
-    final int peers = notesPerBeat[note.beat] ?? 1;
+    final double firstX = cellX[note.pseudoBeat] + headroom + accidentalShift;
+    final int peers = notesPerBeat[note.pseudoBeat] ?? 1;
     // A NOTE'S INK STOPS ONE STROKE SHORT OF THE BARLINE, and that stroke is the beam's own end: the
     // outermost stem sits inside its head by half a stroke and the beam reaches half a stroke past
     // the stem, so exactly one stroke of room is what keeps a beam ENDING at a barline instead of
@@ -1264,7 +1267,7 @@ List<_MelodyNote> _notesOf({
         // Contained in the bar as a hard guarantee, whatever the stride worked out to: the head's own
         // half-width inside the bar's edge, less the stroke, so not even the beam's ink reaches the
         // barline.
-        centerX: (left + firstX + note.step * stride).clamp(
+        centerX: (left + firstX + note.pseudoStep * stride).clamp(
           left + headHalf,
           left + width - inside,
         ),

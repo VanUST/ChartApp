@@ -97,26 +97,20 @@ abstract final class EventCodec {
         return ChordInsertEvent(
           docId: docId,
           seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          chord: ModelJson.decodeBeatChord(EventJson.object(payload, 'chord')),
+          chord: ModelJson.decodeChordMark(EventJson.object(payload, 'chord')),
         );
       case 'chord.update':
         return ChordUpdateEvent(
           docId: docId,
           seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          from: ModelJson.decodeBeatChord(EventJson.object(payload, 'from')),
-          to: ModelJson.decodeBeatChord(EventJson.object(payload, 'to')),
+          from: ModelJson.decodeChordMark(EventJson.object(payload, 'from')),
+          to: ModelJson.decodeChordMark(EventJson.object(payload, 'to')),
         );
       case 'chord.delete':
         return ChordDeleteEvent(
           docId: docId,
           seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          removed: ModelJson.decodeBeatChord(
+          removed: ModelJson.decodeChordMark(
             EventJson.object(payload, 'chord'),
           ),
         );
@@ -124,26 +118,20 @@ abstract final class EventCodec {
         return NoteInsertEvent(
           docId: docId,
           seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          note: ModelJson.decodeBeatNote(EventJson.object(payload, 'note')),
+          note: ModelJson.decodeNoteMark(EventJson.object(payload, 'note')),
         );
       case 'note.update':
         return NoteUpdateEvent(
           docId: docId,
           seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          from: ModelJson.decodeBeatNote(EventJson.object(payload, 'from')),
-          to: ModelJson.decodeBeatNote(EventJson.object(payload, 'to')),
+          from: ModelJson.decodeNoteMark(EventJson.object(payload, 'from')),
+          to: ModelJson.decodeNoteMark(EventJson.object(payload, 'to')),
         );
       case 'note.delete':
         return NoteDeleteEvent(
           docId: docId,
           seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          removed: ModelJson.decodeBeatNote(EventJson.object(payload, 'note')),
+          removed: ModelJson.decodeNoteMark(EventJson.object(payload, 'note')),
         );
       case 'measure.insert':
         return MeasureInsertEvent(
@@ -361,8 +349,8 @@ abstract final class EventCodec {
           docId: docId,
           seq: seq,
           id: EventJson.string(payload, 'id'),
-          from: AnchoredPlace.fromJson(EventJson.object(payload, 'from')),
-          to: AnchoredPlace.fromJson(EventJson.object(payload, 'to')),
+          from: EventJson.anchoredPlace(payload, 'from'),
+          to: EventJson.anchoredPlace(payload, 'to'),
         );
       case 'annotation.duplicate':
         return AnnotationDuplicateEvent(
@@ -401,8 +389,8 @@ abstract final class EventCodec {
           docId: docId,
           seq: seq,
           id: EventJson.string(payload, 'id'),
-          from: AnchoredPlace.fromJson(EventJson.object(payload, 'from')),
-          to: AnchoredPlace.fromJson(EventJson.object(payload, 'to')),
+          from: EventJson.anchoredPlace(payload, 'from'),
+          to: EventJson.anchoredPlace(payload, 'to'),
         );
       case 'setlist.rename':
         return SetlistRenameEvent(

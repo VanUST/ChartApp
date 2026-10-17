@@ -154,20 +154,20 @@ Song formChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 4; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellPlace(section == 0 ? 'A' : 'B', index, 0),
                   chord: Chord(
                     root: ChordRoot(section * 4 + index),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
-                BeatChord(
+                ChordMark(
+                  place: cellPlace(section == 0 ? 'A' : 'B', index, 2),
                   chord: Chord(
                     root: ChordRoot(section * 4 + index),
                     quality: ChordQuality.minorSeventh,
                   ),
-                  beat: 2,
                 ),
               ],
             ),
@@ -320,9 +320,9 @@ String _barText(Song song, Bar bar) => bar.chords.isEmpty
     ? '(blank)'
     : bar.chords
           .map(
-            (BeatChord placed) =>
+            (ChordMark placed) =>
                 '${placed.chord.render(song.key, const SpellingTable())}'
-                '@${placed.beat}',
+                '@${placed.pseudoBeat}',
           )
           .join(',');
 

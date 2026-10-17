@@ -54,6 +54,27 @@ class UndoOp {
   final ChartEvent undoEvent;
 }
 
+// PURPOSE: Give a mark's place the anchor the CALLER's address names, keeping its offsets. It
+//          restates a coordinate's bar and never its position.
+// INPUTS: place — the place as the document holds it. sectionId and barIndex — the address the
+//         caller named and the session found the mark at.
+// OUTPUTS: The same place with an anchor for that bar. The offsets are untouched, because they are
+//         what the musician wrote and the address is only where it was written.
+//
+//         WHY THE CALLER'S ADDRESS WINS. A place's anchor restates which bar holds the mark, and the
+//         document's structure is the authority on that: the session has just found the mark in the
+//         bar it was asked about. An event built from the mark's own anchor instead would name a bar
+//         the caller never mentioned — the failure a fixture anchored by a placeholder produces —
+//         and the reducer rewrites the same field on every mutation for exactly this reason.
+// KEYWORDS: anchor, rebase, caller-address-wins, event-payload, single-address
+/// Returns [place] anchored to ([sectionId], [barIndex]), keeping its offsets.
+AnchoredPlace _placeIn(String sectionId, int barIndex, AnchoredPlace place) =>
+    AnchoredPlace(
+      anchor: EventAnchor(sectionId: sectionId, bar: barIndex),
+      offsetX: place.offsetX,
+      offsetY: place.offsetY,
+    );
+
 /// A chart document being edited, and the log that explains it.
 ///
 /// The sequence counter is private because a session must issue the next number itself:
@@ -215,7 +236,7 @@ class EditSession {
   //          to the log rather than deleting the original, and pushes the original as the next
   //          redo. The document afterwards is EQUAL to the document before the original edit: the
   //          inverse restores the field the event carried, and because the event carried the whole
-  //          previous value — a `BeatChord` in full, not an address — nothing is reconstructed from
+  //          previous value — a `ChordMark` in full, not an address — nothing is reconstructed from
   //          what the document happens to hold now.
   // KEYWORDS: undo, inverse-event, append-only, exact-restore, no-op-when-empty
   /// Reverses the most recent edit, reporting whether there was one.
@@ -289,7 +310,7 @@ class EditSession {
     if (bar == null) {
       return false;
     }
-    final BeatChord? existing = existingChordAt(
+    final ChordMark? existing = existingChordAt(
       sectionId: sectionId,
       barIndex: barIndex,
       beat: beat,
@@ -299,9 +320,11 @@ class EditSession {
         ChordInsertEvent(
           docId: _docId,
           seq: _seq,
-          sectionId: sectionId,
-          barIndex: barIndex,
-          chord: BeatChord(chord: chord, beat: beat, size: size),
+          chord: ChordMark(
+            place: cellPlace(sectionId, barIndex, beat),
+            chord: chord,
+            size: size,
+          ),
         ),
       );
       return true;
@@ -310,14 +333,14 @@ class EditSession {
       ChordUpdateEvent(
         docId: _docId,
         seq: _seq,
-        sectionId: sectionId,
-        barIndex: barIndex,
-        from: existing,
-        to: BeatChord(
+        from: existing.copyWith(
+          place: _placeIn(sectionId, barIndex, existing.place),
+        ),
+        // The replacement keeps the existing chord's own place — including a step above zero, so a
+        // packed pair stays packed — and only the symbol and the engraving size change.
+        to: existing.copyWith(
+          place: _placeIn(sectionId, barIndex, existing.place),
           chord: chord,
-          beat: existing.beat,
-          step: existing.step,
-          size: existing.size,
         ),
       ),
     );
@@ -380,7 +403,7 @@ class EditSession {
     required int barIndex,
     required int beat,
   }) {
-    final BeatChord? existing = existingChordAt(
+    final ChordMark? existing = existingChordAt(
       sectionId: sectionId,
       barIndex: barIndex,
       beat: beat,
@@ -392,9 +415,9 @@ class EditSession {
       ChordDeleteEvent(
         docId: _docId,
         seq: _seq,
-        sectionId: sectionId,
-        barIndex: barIndex,
-        removed: existing,
+        removed: existing.copyWith(
+          place: _placeIn(sectionId, barIndex, existing.place),
+        ),
       ),
     );
     return true;
@@ -410,7 +433,7 @@ class EditSession {
   //          removing the first, which is a gap this class reports rather than hides.
   // KEYWORDS: cell-query, lowest-step, packed-beat, null-when-empty
   /// Returns the chord the cell at ([sectionId], [barIndex], [beat]) holds, or null.
-  BeatChord? existingChordAt({
+  ChordMark? existingChordAt({
     required String sectionId,
     required int barIndex,
     required int beat,
@@ -419,12 +442,12 @@ class EditSession {
     if (bar == null) {
       return null;
     }
-    BeatChord? found;
-    for (final BeatChord placed in bar.chords) {
-      if (placed.beat != beat) {
+    ChordMark? found;
+    for (final ChordMark placed in bar.chords) {
+      if (placed.pseudoBeat != beat) {
         continue;
       }
-      if (found == null || placed.step < found.step) {
+      if (found == null || placed.pseudoStep < found.pseudoStep) {
         found = placed;
       }
     }
@@ -685,11 +708,11 @@ class EditSession {
           tool: stroke.tool,
           color: stroke.color,
           size: stroke.size,
+          // Only the bar is rebased. The stroke's own points are bar-local, so they travel
+          // unchanged and the copy lands in the same place inside its new bar.
           anchor: EventAnchor(
             sectionId: at.sectionId,
             bar: index + stroke.anchor.bar,
-            beat: stroke.anchor.beat,
-            step: stroke.anchor.step,
           ),
           points: stroke.points,
         ),
@@ -750,38 +773,48 @@ class EditSession {
     final Bar source = clip.bars.single;
     final int sourceFrom = clip.source.firstBeat!;
     final int sourceTo = clip.source.lastBeat!;
-    final List<BeatChord> chords = <BeatChord>[
-      for (final BeatChord placed in target.chords)
-        if (placed.beat < targetBeat ||
-            placed.beat >= targetBeat + clip.beatCount)
+    final List<ChordMark> chords = <ChordMark>[
+      for (final ChordMark placed in target.chords)
+        if (placed.pseudoBeat < targetBeat ||
+            placed.pseudoBeat >= targetBeat + clip.beatCount)
           placed,
-      for (final BeatChord placed in source.chords)
-        if (placed.beat >= sourceFrom && placed.beat <= sourceTo)
-          BeatChord(
-            chord: placed.chord,
-            beat: targetBeat + (placed.beat - sourceFrom),
-            step: placed.step,
-            size: placed.size,
+      for (final ChordMark placed in source.chords)
+        if (placed.pseudoBeat >= sourceFrom && placed.pseudoBeat <= sourceTo)
+          placed.copyWith(
+            place: cellPlace(
+              at.sectionId,
+              at.firstBar,
+              targetBeat + (placed.pseudoBeat - sourceFrom),
+              placed.pseudoStep,
+            ),
           ),
     ]..sort(_compareChordAddresses);
-    final List<BeatNote> melody = <BeatNote>[
-      for (final BeatNote note in target.melody)
-        if (note.beat < targetBeat || note.beat >= targetBeat + clip.beatCount)
+    final List<NoteMark> melody = <NoteMark>[
+      for (final NoteMark note in target.melody)
+        if (note.pseudoBeat < targetBeat ||
+            note.pseudoBeat >= targetBeat + clip.beatCount)
           note,
-      for (final BeatNote note in source.melody)
-        if (note.beat >= sourceFrom && note.beat <= sourceTo)
-          BeatNote(
-            pitch: note.pitch,
-            value: note.value,
-            beat: targetBeat + (note.beat - sourceFrom),
-            step: note.step,
-            tiedToNext: note.tiedToNext,
+      for (final NoteMark note in source.melody)
+        if (note.pseudoBeat >= sourceFrom && note.pseudoBeat <= sourceTo)
+          note.copyWith(
+            place: cellPlace(
+              at.sectionId,
+              at.firstBar,
+              targetBeat + (note.pseudoBeat - sourceFrom),
+              note.pseudoStep,
+            ),
           ),
     ]..sort(_compareNoteAddresses);
     final Bar replaced = target.copyWith(chords: chords, melody: melody);
     final Set<String> taken = <String>{
       for (final InkStroke stroke in _document.strokes) stroke.id,
     };
+    // THE INK MOVES BY THE WINDOW'S OWN WIDTH, and by nothing else: a beat-deep clip's strokes are
+    // rebased to their bar, so what places them inside the window is their own points. Writing the
+    // window at another beat therefore translates those points by the columns between the two
+    // windows, which is what the old beat arithmetic on the anchor did when the anchor still had a
+    // beat to move.
+    final double windowShift = (targetBeat - sourceFrom) * PseudoGrid.cellPitch;
     final List<InkStroke> pastedStrokes = <InkStroke>[
       for (final InkStroke stroke in clip.strokes)
         InkStroke(
@@ -789,13 +822,16 @@ class EditSession {
           tool: stroke.tool,
           color: stroke.color,
           size: stroke.size,
-          anchor: EventAnchor(
-            sectionId: at.sectionId,
-            bar: at.firstBar,
-            beat: targetBeat + (stroke.anchor.beat ?? 0),
-            step: stroke.anchor.step,
-          ),
-          points: stroke.points,
+          anchor: EventAnchor(sectionId: at.sectionId, bar: at.firstBar),
+          points: <InkPoint>[
+            for (final InkPoint point in stroke.points)
+              InkPoint(
+                x: point.x + windowShift,
+                y: point.y,
+                w: point.w,
+                t: point.t,
+              ),
+          ],
         ),
     ];
     apply(
@@ -935,8 +971,6 @@ class EditSession {
           to: EventAnchor(
             sectionId: stroke.anchor.sectionId,
             bar: stroke.anchor.bar + count,
-            beat: stroke.anchor.beat,
-            step: stroke.anchor.step,
           ),
         ),
       );
@@ -954,8 +988,6 @@ class EditSession {
           to: EventAnchor(
             sectionId: mark.place.anchor.sectionId,
             bar: mark.place.anchor.bar + count,
-            beat: mark.place.anchor.beat,
-            step: mark.place.anchor.step,
           ),
         ),
       );
@@ -973,8 +1005,6 @@ class EditSession {
           to: EventAnchor(
             sectionId: cue.place.anchor.sectionId,
             bar: cue.place.anchor.bar + count,
-            beat: cue.place.anchor.beat,
-            step: cue.place.anchor.step,
           ),
         ),
       );
@@ -1005,9 +1035,9 @@ class EditSession {
   // INPUTS: left and right — the two placements.
   // OUTPUTS: A negative, zero or positive integer, as a comparator must return.
   // KEYWORDS: chord-address, ordering, deterministic-rebuild
-  int _compareChordAddresses(BeatChord left, BeatChord right) {
-    final int byBeat = left.beat.compareTo(right.beat);
-    return byBeat != 0 ? byBeat : left.step.compareTo(right.step);
+  int _compareChordAddresses(ChordMark left, ChordMark right) {
+    final int byBeat = left.pseudoBeat.compareTo(right.pseudoBeat);
+    return byBeat != 0 ? byBeat : left.pseudoStep.compareTo(right.pseudoStep);
   }
 
   // PURPOSE: Order two melody notes by their address, for the same reason as
@@ -1015,9 +1045,9 @@ class EditSession {
   // INPUTS: left and right — the two placements.
   // OUTPUTS: A negative, zero or positive integer.
   // KEYWORDS: note-address, ordering, deterministic-rebuild
-  int _compareNoteAddresses(BeatNote left, BeatNote right) {
-    final int byBeat = left.beat.compareTo(right.beat);
-    return byBeat != 0 ? byBeat : left.step.compareTo(right.step);
+  int _compareNoteAddresses(NoteMark left, NoteMark right) {
+    final int byBeat = left.pseudoBeat.compareTo(right.pseudoBeat);
+    return byBeat != 0 ? byBeat : left.pseudoStep.compareTo(right.pseudoStep);
   }
 
   // --- Sections: the form a chart is made of -----------------------------------------------
@@ -1605,17 +1635,24 @@ class EditSession {
   // PURPOSE: Put a piece of text a musician wants to read on the chart — `To Coda`, `D.C. al
   //          Fine`, `Solo`, `Vamp`, `4×` — at an address in the music, through the operation log.
   // INPUTS: sectionId and barIndex — the bar to hang it on, in the model's own address. beat — the
-  //         cell inside that bar to hang it on, or null for the bar as a whole, which is what a
-  //         remark about the whole bar (a navigation word at the top of it) wants. offsetX and
-  //         offsetY — where the words sit from the anchor's own top-left corner, in anchor-local
-  //         logical pixels; the defaults place a bar-level cue in the bar's sign band. text — the
-  //         words, empty to insert and then type into (see the section note).
+  //         column inside that bar to hang it on, or null to hang it on the bar itself, which is
+  //         what a remark about the whole bar (a navigation word at the top of it) wants. offsetX
+  //         and offsetY — where the words sit from that point, in bar-local logical pixels; the
+  //         defaults place a bar-level cue in the bar's sign band. text — the words, empty to insert
+  //         and then type into (see the section note).
   // OUTPUTS: The new cue's identity, or null when the address names no bar or [beat] is negative —
   //          in both cases nothing is appended and the document is untouched. The cue is appended
   //          at the END of the cue list, which is the end of the render order: a cue put on a bar
   //          now is drawn over cues that were already there, so the musician sees what they just
   //          wrote rather than the remark it landed on top of.
-  // KEYWORDS: text-cue, insert, anchored, bar-level, cell-level, offset, render-order, undoable
+  //
+  //          THE COLUMN IS FOLDED INTO THE OFFSET HERE, and that is the shim's write direction: a
+  //          cue's place is a coordinate now, so "the third beat, two pixels in" is one number rather
+  //          than an address plus an offset. A caller that has only a column still names it, and the
+  //          stored place is where that column is — which is what keeps the cue on the column it was
+  //          written on when the layout stops having columns at all.
+  // KEYWORDS: text-cue, insert, anchored, bar-level, cell-level, offset, render-order, undoable,
+  //           pseudo-grid
   /// Inserts a text cue at ([sectionId], [barIndex], [beat]) and returns its id, or null.
   String? insertTextCue({
     required String sectionId,
@@ -1634,8 +1671,8 @@ class EditSession {
     final TextCue cue = TextCue(
       id: _freshCueId(),
       place: AnchoredPlace(
-        anchor: EventAnchor(sectionId: sectionId, bar: barIndex, beat: beat),
-        offsetX: offsetX,
+        anchor: EventAnchor(sectionId: sectionId, bar: barIndex),
+        offsetX: beat == null ? offsetX : PseudoGrid.xOf(beat, 0) + offsetX,
         offsetY: offsetY,
       ),
       text: text,
@@ -1677,33 +1714,35 @@ class EditSession {
     return true;
   }
 
-  // PURPOSE: Move a cue to another place in the music — another bar, another cell of the same bar,
-  //          or another offset within the cell it already sits on — which is how a musician
+  // PURPOSE: Move a cue to another place in the music — another bar, another column of the same bar,
+  //          or another offset within the column it already sits on — which is how a musician
   //          separates two remarks that landed on top of each other and how a cue written on the
   //          wrong bar is put right without retyping its words.
-  // INPUTS: id — the cue to move. sectionId and barIndex — the bar to move it to. beat — the cell
-  //         inside that bar, or null for the bar as a whole. offsetX and offsetY — the new
-  //         anchor-local offset.
+  // INPUTS: id — the cue to move. sectionId and barIndex — the bar to move it to. offsetX and
+  //         offsetY — the new position, in bar-local logical pixels.
   // OUTPUTS: True when a move was appended, false when no cue carries [id], when the TARGET names
-  //          no bar, when [beat] is negative, and when the target place equals the one the cue
-  //          already occupies. The target is deliberately not restricted to the cue's own bar or
-  //          section: `textcue.move` carries a whole [AnchoredPlace] on each side and the reducer
-  //          accepts any address, so a cue can be moved anywhere the song has a bar, and a rule
-  //          confining it here would be a second, weaker copy of the model's own address rule. A
-  //          call that moves a cue one bar has the same effect as a drag, which is why the app can
-  //          offer the operation as buttons without a second event type.
+  //          no bar, and when the target place equals the one the cue already occupies. The target
+  //          is deliberately not restricted to the cue's own bar or section: `textcue.move` carries a
+  //          whole [AnchoredPlace] on each side and the reducer accepts any address, so a cue can be
+  //          moved anywhere the song has a bar, and a rule confining it here would be a second,
+  //          weaker copy of the model's own address rule. A call that moves a cue one bar has the
+  //          same effect as a drag, which is why the app can offer the operation as buttons without
+  //          a second event type.
+  //
+  //          THERE IS NO `beat` ARGUMENT ANY MORE. A move names where the words go and not which
+  //          column owns them: the position IS the answer, and a caller that passes the cue's own
+  //          stored offset is describing the move exactly.
   // KEYWORDS: text-cue, move, re-anchor, offset, any-bar, no-op-refusal, undoable
-  /// Moves the cue [id] to ([sectionId], [barIndex], [beat]) with the given offset.
+  /// Moves the cue [id] to ([sectionId], [barIndex]) at the given offset.
   bool moveTextCue(
     String id, {
     required String sectionId,
     required int barIndex,
-    int? beat,
     double offsetX = 0,
     double offsetY = 0,
   }) {
     final int index = _cueIndex(id);
-    if (index < 0 || (beat != null && beat < 0)) {
+    if (index < 0) {
       return false;
     }
     if (_document.song.barAt(sectionId, barIndex) == null) {
@@ -1711,7 +1750,7 @@ class EditSession {
     }
     final AnchoredPlace from = _document.textCues[index].place;
     final AnchoredPlace to = AnchoredPlace(
-      anchor: EventAnchor(sectionId: sectionId, bar: barIndex, beat: beat),
+      anchor: EventAnchor(sectionId: sectionId, bar: barIndex),
       offsetX: offsetX,
       offsetY: offsetY,
     );
@@ -1820,7 +1859,7 @@ class EditSession {
   //
   // WHY THE WHOLE NOTE IS CARRIED ON EVERY SIDE. As in [setBarMark] and the cue methods, each event
   // in this family carries the complete value it replaces and the complete value it writes — a
-  // `BeatNote` with its pitch, its written value, its tie AND its address — so its inverse is a swap
+  // `NoteMark` with its pitch, its written value, its tie AND its address — so its inverse is a swap
   // and not a reconstruction. A delta would have to be replayed against whatever the bar holds when
   // the undo arrives, and the bar may have been changed by another edit, by the undo of a different
   // event, or by another device in between.
@@ -1863,18 +1902,18 @@ class EditSession {
   //          needs to tell them apart is already holding the bar (see [existingNoteAt]).
   // KEYWORDS: melody, cell-query, stacked-notes, empty-when-absent, total-function
   /// Returns the notes the cell at ([sectionId], [barIndex], [beat]) carries, by step.
-  List<BeatNote> existingNotesAt({
+  List<NoteMark> existingNotesAt({
     required String sectionId,
     required int barIndex,
     required int beat,
   }) {
     final Bar? bar = _document.song.barAt(sectionId, barIndex);
     if (bar == null) {
-      return const <BeatNote>[];
+      return const <NoteMark>[];
     }
-    return <BeatNote>[
-      for (final BeatNote note in bar.melody)
-        if (note.beat == beat) note,
+    return <NoteMark>[
+      for (final NoteMark note in bar.melody)
+        if (note.pseudoBeat == beat) note,
     ];
   }
 
@@ -1887,7 +1926,7 @@ class EditSession {
   //          existing, and a surface that must keep working after one needs to be told.
   // KEYWORDS: melody, note-lookup, address, null-when-absent, total-function
   /// Returns the note at ([sectionId], [barIndex], [beat], [step]), or null.
-  BeatNote? existingNoteAt({
+  NoteMark? existingNoteAt({
     required String sectionId,
     required int barIndex,
     required int beat,
@@ -1897,8 +1936,8 @@ class EditSession {
     if (bar == null) {
       return null;
     }
-    for (final BeatNote note in bar.melody) {
-      if (note.beat == beat && note.step == step) {
+    for (final NoteMark note in bar.melody) {
+      if (note.pseudoBeat == beat && note.pseudoStep == step) {
         return note;
       }
     }
@@ -1951,17 +1990,20 @@ class EditSession {
       NoteInsertEvent(
         docId: _docId,
         seq: _seq,
-        sectionId: sectionId,
-        barIndex: barIndex,
-        note: BeatNote(
+        note: NoteMark(
+          // THE NOTE ARRIVES AT THE END OF THE CELL UNLESS THE CALLER NAMED A STEP. A cell's notes
+          // are addressed by their order within it, and that order is one number on a column that
+          // the reducer does not renumber — so a caller that wants a note BEFORE the ones already
+          // written names a step, and omitting it is how a musician's next note goes after the one he
+          // just wrote. See the region note for the measurement behind that.
+          place: cellPlace(
+            sectionId,
+            barIndex,
+            beat,
+            step ?? _stepAfterCell(bar, beat),
+          ),
           pitch: pitch,
           value: value,
-          beat: beat,
-          // THE NOTE ARRIVES AT THE END OF THE CELL UNLESS THE CALLER NAMED A PLACE. The reducer
-          // pushes a cell's later notes up for an insertion in front of them, so naming a step is
-          // how a note is put BEFORE others; omitting it is how a musician's next note goes after
-          // the one he just wrote. See the region note for the measurement behind that.
-          step: step ?? _stepAfterCell(bar, beat),
           tiedToNext: tiedToNext,
         ),
       ),
@@ -1981,7 +2023,7 @@ class EditSession {
   //          new form is EQUAL to the old one field by field, which is the rule every other edit
   //          here follows (see [setBarMark], [setVolta], [updateSong]): an event whose two sides are
   //          equal is a log row that changed nothing and an offer to undo an edit that did not
-  //          happen. Equality is `BeatNote ==`, comparing pitch, value, beat, step and tie together,
+  //          happen. Equality is `NoteMark ==`, comparing pitch, value, beat, step and tie together,
   //          so the comparison is the whole value rather than a boolean about the one field named.
   // KEYWORDS: melody, note-update, before-after, no-op-refusal, address-stable, undoable
   /// Replaces the note at ([sectionId], [barIndex], [beat], [step]) with the given form.
@@ -1994,7 +2036,7 @@ class EditSession {
     NoteValue? value,
     bool? tiedToNext,
   }) {
-    final BeatNote? from = existingNoteAt(
+    final NoteMark? from = existingNoteAt(
       sectionId: sectionId,
       barIndex: barIndex,
       beat: beat,
@@ -2003,26 +2045,17 @@ class EditSession {
     if (from == null) {
       return false;
     }
-    final BeatNote to = BeatNote(
+    // The replacement keeps the note's own place: an update changes the pitch, the duration or the
+    // tie, and the note stays written where it was.
+    final NoteMark to = from.copyWith(
       pitch: pitch ?? from.pitch,
       value: value ?? from.value,
-      beat: from.beat,
-      step: from.step,
       tiedToNext: tiedToNext ?? from.tiedToNext,
     );
     if (to == from) {
       return false;
     }
-    apply(
-      NoteUpdateEvent(
-        docId: _docId,
-        seq: _seq,
-        sectionId: sectionId,
-        barIndex: barIndex,
-        from: from,
-        to: to,
-      ),
-    );
+    apply(NoteUpdateEvent(docId: _docId, seq: _seq, from: from, to: to));
     return true;
   }
 
@@ -2033,7 +2066,7 @@ class EditSession {
   // OUTPUTS: True when an update was appended, false when the address names no note and false when
   //          the note already carries that flag. Both directions are one field of one note, which is
   //          why there is no second event: the model keeps the tie on the EARLIER note alone
-  //          (`BeatNote.tiedToNext`), so [updateNote] already writes either way.
+  //          (`NoteMark.tiedToNext`), so [updateNote] already writes either way.
   // KEYWORDS: melody, tie, tie-forward, toggle, one-field, undoable
   /// Sets or clears the tie on the note at the given address, reporting whether it changed.
   bool setNoteTie({
@@ -2043,7 +2076,7 @@ class EditSession {
     required int step,
     required bool tied,
   }) {
-    final BeatNote? from = existingNoteAt(
+    final NoteMark? from = existingNoteAt(
       sectionId: sectionId,
       barIndex: barIndex,
       beat: beat,
@@ -2079,7 +2112,7 @@ class EditSession {
     required int beat,
     required int step,
   }) {
-    final BeatNote? removed = existingNoteAt(
+    final NoteMark? removed = existingNoteAt(
       sectionId: sectionId,
       barIndex: barIndex,
       beat: beat,
@@ -2088,15 +2121,7 @@ class EditSession {
     if (removed == null) {
       return false;
     }
-    apply(
-      NoteDeleteEvent(
-        docId: _docId,
-        seq: _seq,
-        sectionId: sectionId,
-        barIndex: barIndex,
-        removed: removed,
-      ),
-    );
+    apply(NoteDeleteEvent(docId: _docId, seq: _seq, removed: removed));
     return true;
   }
 
@@ -2137,9 +2162,9 @@ class EditSession {
   // KEYWORDS: melody, step, append, insertion-point, dense-sequence, non-dense-input, total-function
   int _stepAfterCell(Bar bar, int beat) {
     int next = 0;
-    for (final BeatNote note in bar.melody) {
-      if (note.beat == beat && note.step >= next) {
-        next = note.step + 1;
+    for (final NoteMark note in bar.melody) {
+      if (note.pseudoBeat == beat && note.pseudoStep >= next) {
+        next = note.pseudoStep + 1;
       }
     }
     return next;

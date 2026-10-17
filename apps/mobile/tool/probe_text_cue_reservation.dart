@@ -139,20 +139,20 @@ Song _chart(int bars) => Song(
       bars: <Bar>[
         for (int index = 0; index < bars; index++)
           Bar(
-            chords: <BeatChord>[
-              BeatChord(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
-                beat: 0,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellAt(2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,
                 ),
-                beat: 2,
               ),
             ],
           ),

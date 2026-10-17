@@ -1,5 +1,5 @@
 // PURPOSE: Pin the ONE ordering question a cell of the melodic staff has: the notes of one beat are
-//          a sequence IN TIME, `BeatNote.step` is the place in that sequence, and the note a
+//          a sequence IN TIME, `NoteMark.step` is the place in that sequence, and the note a
 //          musician writes arrives at the END of it. That is the fact a run typed left to right
 //          depends on, and it is the fact this project had backwards: `insertNote` defaulted to
 //          `step: 0`, which put every new note in FRONT of the ones already written, so four
@@ -48,12 +48,12 @@ NoteValue get _sixteenth => const NoteValue.plain(NoteBase.sixteenth);
 /// The cell at ([beat]) of the chart's first bar, as the model holds it: `step:pitch` per note, in
 /// storage order.
 String _cell(EditSession session, int beat) => <String>[
-  for (final BeatNote note in session.existingNotesAt(
+  for (final NoteMark note in session.existingNotesAt(
     sectionId: 'A',
     barIndex: 0,
     beat: beat,
   ))
-    '${note.step}:${note.pitch}',
+    '${note.pseudoStep}:${note.pitch}',
 ].join(' ');
 
 void main() {
@@ -97,46 +97,64 @@ void main() {
     expect(
       session
           .existingNotesAt(sectionId: 'A', barIndex: 0, beat: 0)
-          .map((BeatNote note) => note.step),
+          .map((NoteMark note) => note.pseudoStep),
       <int>[0, 1, 2, 3],
       reason: 'a cell of four notes is addressed 0..3 with no gap',
     );
   });
 
-  test(
-    'naming step 0 still writes IN FRONT of the cell, and pushes the rest up',
-    () {
-      // THE OTHER DIRECTION, STATED SO THE APPEND CANNOT BE CONFUSED WITH IGNORING THE ADDRESS. A
-      // caller that names a step means it; the default is what changed, not the reducer.
-      final EditSession session = EditSession(
-        document: DocumentState(song: _chart()),
-      );
-      session.insertNote(
-        sectionId: 'A',
-        barIndex: 0,
-        beat: 0,
-        pitch: _pitch(NoteLetter.e),
-        value: _sixteenth,
-      );
-      session.insertNote(
-        sectionId: 'A',
-        barIndex: 0,
-        beat: 0,
-        pitch: _pitch(NoteLetter.g),
-        value: _sixteenth,
-        step: 0,
-      );
-      final String observed = _cell(session, 0);
-      stdout.writeln('note.order.front cell=$observed');
-      expect(
-        observed,
-        '0:G4 1:E4',
-        reason:
-            'an explicit step 0 puts the note in front and moves the note that was there up one '
-            'place — the reducer keeps the cell dense and the caller asked for the front',
-      );
-    },
-  );
+  test('naming a step writes there, and nothing is pushed aside', () {
+    // REWRITTEN. This test used to be named "naming step 0 still writes IN FRONT of the cell, and
+    // pushes the rest up", and it asserted
+    //   expect(observed, '0:G4 1:E4',
+    //       reason: 'an explicit step 0 puts the note in front and moves the note that was there
+    //                up one place — the reducer keeps the cell dense and the caller asked for the
+    //                front');
+    // — that is, the reducer RENUMBERED the note already in the cell so that the newly named step
+    // stayed free. That renumbering was the grid keeping itself dense, and it is gone: a note is
+    // written where it is written and the reducer does not move its neighbours. What survives, and
+    // what this asserts instead, is the part the musician asked for in the first place: an explicit
+    // step is HONOURED — the note lands at that step and not at the end of the cell.
+    //
+    // THE COST, NAMED RATHER THAN HIDDEN: a caller that names a step already occupied now leaves
+    // two notes at one place, and two notes at one place are indistinguishable to `existingNoteAt`
+    // and to a deletion. The edit session does not create one — a caller that passes no step is
+    // given the next free one — so this is reachable only by naming a collision on purpose.
+    final EditSession session = EditSession(
+      document: DocumentState(song: _chart()),
+    );
+    session.insertNote(
+      sectionId: 'A',
+      barIndex: 0,
+      beat: 0,
+      pitch: _pitch(NoteLetter.e),
+      value: _sixteenth,
+    );
+    session.insertNote(
+      sectionId: 'A',
+      barIndex: 0,
+      beat: 0,
+      pitch: _pitch(NoteLetter.g),
+      value: _sixteenth,
+      step: 2,
+    );
+    session.insertNote(
+      sectionId: 'A',
+      barIndex: 0,
+      beat: 0,
+      pitch: _pitch(NoteLetter.a),
+      value: _sixteenth,
+    );
+    final String observed = _cell(session, 0);
+    stdout.writeln('note.order.front cell=$observed');
+    expect(
+      observed,
+      '0:E4 2:G4 3:A4',
+      reason:
+          'the named step is where the note goes, and the next appended note is given the step '
+          'after the highest one in the cell — nothing is renumbered',
+    );
+  });
 
   test(
     'two notes of one PITCH can share a beat, and they are two addresses',

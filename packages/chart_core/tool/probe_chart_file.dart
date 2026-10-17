@@ -55,12 +55,13 @@ void _roundTripEmpty() {
 void _roundTripOneOperation() {
   _section('one operation');
   final DocumentState before = DocumentState(song: _baseSong());
-  const ChordInsertEvent event = ChordInsertEvent(
+  final ChordInsertEvent event = ChordInsertEvent(
     docId: 'doc-one',
     seq: 1,
-    sectionId: 's1',
-    barIndex: 0,
-    chord: BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+    chord: ChordMark(
+      place: cellPlace('s1', 0, 0),
+      chord: Chord(root: ChordRoot(0)),
+    ),
   );
   final DocumentState after = DocumentReducer.apply(before, event);
   final ChartFile file = ChartFile(
@@ -89,14 +90,17 @@ void _roundTripManyOperations() {
   _section('many mixed operations');
   final DocumentState before = DocumentState(song: _baseSong());
   final List<ChartEvent> events = <ChartEvent>[
-    const MeasureInsertEvent(
+    MeasureInsertEvent(
       docId: 'doc-many',
       seq: 1,
       sectionId: 's1',
       index: 1,
       bar: Bar(
-        chords: <BeatChord>[
-          BeatChord(chord: Chord(root: ChordRoot(7)), beat: 0),
+        chords: <ChordMark>[
+          ChordMark(
+            place: cellAt(0),
+            chord: Chord(root: ChordRoot(7)),
+          ),
         ],
       ),
     ),
@@ -110,32 +114,29 @@ void _roundTripManyOperations() {
         bars: <Bar>[Bar()],
       ),
     ),
-    const ChordInsertEvent(
+    ChordInsertEvent(
       docId: 'doc-many',
       seq: 3,
-      sectionId: 's1',
-      barIndex: 0,
-      chord: BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
-    ),
-    const ChordInsertEvent(
-      docId: 'doc-many',
-      seq: 4,
-      sectionId: 's1',
-      barIndex: 0,
-      chord: BeatChord(
-        chord: Chord(root: ChordRoot(7), quality: ChordQuality.dominantSeventh),
-        beat: 2,
+      chord: ChordMark(
+        place: cellPlace('s1', 0, 0),
+        chord: Chord(root: ChordRoot(0)),
       ),
     ),
-    const NoteInsertEvent(
+    ChordInsertEvent(
+      docId: 'doc-many',
+      seq: 4,
+      chord: ChordMark(
+        place: cellPlace('s1', 0, 2),
+        chord: Chord(root: ChordRoot(7), quality: ChordQuality.dominantSeventh),
+      ),
+    ),
+    NoteInsertEvent(
       docId: 'doc-many',
       seq: 5,
-      sectionId: 's1',
-      barIndex: 0,
-      note: BeatNote(
+      note: NoteMark(
+        place: cellPlace('s1', 0, 0),
         pitch: PitchedNote(note: WrittenNote(NoteLetter.d, 0), octave: 4),
         value: NoteValue.plain(NoteBase.quarter),
-        beat: 0,
       ),
     ),
     const InkStrokeAddEvent(
@@ -147,7 +148,7 @@ void _roundTripManyOperations() {
         tool: StrokeTool.pen,
         color: '#112233',
         size: 2.5,
-        anchor: EventAnchor(sectionId: 's1', bar: 0, beat: 0),
+        anchor: EventAnchor(sectionId: 's1', bar: 0),
         points: <InkPoint>[
           InkPoint(x: 0, y: 0, w: 0.5, t: 0),
           InkPoint(x: 3.5, y: 1.25, w: 0.75, t: 16),
@@ -161,9 +162,7 @@ void _roundTripManyOperations() {
       annotation: Annotation(
         id: 'mark-1',
         kind: AnnotationKind.stamp,
-        place: AnchoredPlace(
-          anchor: EventAnchor(sectionId: 's1', bar: 0, beat: 2),
-        ),
+        place: AnchoredPlace(anchor: EventAnchor(sectionId: 's1', bar: 0)),
         payload: 'cue',
       ),
     ),
@@ -173,9 +172,7 @@ void _roundTripManyOperations() {
       index: 0,
       cue: TextCue(
         id: 'cue-1',
-        place: AnchoredPlace(
-          anchor: EventAnchor(sectionId: 's2', bar: 0, beat: 0),
-        ),
+        place: AnchoredPlace(anchor: EventAnchor(sectionId: 's2', bar: 0)),
         text: 'to the top',
       ),
     ),
@@ -294,12 +291,13 @@ void _corruptionFailures() {
     metadata: const ChartMetadata(docId: 'doc-many'),
     snapshot: DocumentState(song: _baseSong()),
     events: <ChartEvent>[
-      const ChordInsertEvent(
+      ChordInsertEvent(
         docId: 'doc-many',
         seq: 1,
-        sectionId: 's1',
-        barIndex: 0,
-        chord: BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+        chord: ChordMark(
+          place: cellPlace('s1', 0, 0),
+          chord: Chord(root: ChordRoot(0)),
+        ),
       ),
     ],
     attachments: <ChartPdf>[
@@ -368,12 +366,13 @@ void _newerWriter() {
     metadata: const ChartMetadata(docId: 'doc-many'),
     snapshot: DocumentState(song: _baseSong()),
     events: <ChartEvent>[
-      const ChordInsertEvent(
+      ChordInsertEvent(
         docId: 'doc-many',
         seq: 1,
-        sectionId: 's1',
-        barIndex: 0,
-        chord: BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+        chord: ChordMark(
+          place: cellPlace('s1', 0, 0),
+          chord: Chord(root: ChordRoot(0)),
+        ),
       ),
     ],
   );

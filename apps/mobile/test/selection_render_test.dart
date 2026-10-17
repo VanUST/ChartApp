@@ -59,21 +59,21 @@ Song selectionChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 8; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
                 if (index.isEven)
-                  BeatChord(
+                  ChordMark(
+                    place: cellAt(2),
                     chord: Chord(
                       root: ChordRoot(index),
                       quality: ChordQuality.minorSeventh,
                     ),
-                    beat: 2,
                   ),
               ],
             ),

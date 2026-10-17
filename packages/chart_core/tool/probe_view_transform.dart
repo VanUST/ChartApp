@@ -35,13 +35,13 @@ Song probeChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 6; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
               ],
             ),
@@ -72,7 +72,6 @@ void main() {
   final EventAnchor aimed = EventAnchor(
     sectionId: bar.sectionId,
     bar: bar.barIndex,
-    beat: cell.beat,
   );
 
   stdout.writeln(
@@ -184,7 +183,9 @@ void main() {
     stdout.writeln(
       'PROBE hit zoom=${page.zoom} '
       'hit=$hitAddress '
-      'same_cell=${hit != null && hit.sectionId == aimed.sectionId && hit.barIndex == aimed.bar && hit.beat == aimed.beat}',
+      // The hit test still names a CELL, because the layout still divides a bar into columns; the
+      // stroke is anchored to the BAR, so what is compared here is the bar the touch landed on.
+      'same_bar=${hit != null && hit.sectionId == aimed.sectionId && hit.barIndex == aimed.bar}',
     );
   }
 

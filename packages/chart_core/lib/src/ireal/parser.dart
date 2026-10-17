@@ -30,7 +30,7 @@
 // cell. Its only effect is therefore to REMOVE the empty cell a space would have inserted: `A B`
 // puts two chords two cells apart, `A,B` puts them one cell apart, and neither stacks them. The
 // format's only stacking construct is the alternate chord in parentheses, which this model carries
-// as a nested Chord on one BeatChord rather than as a second placement.
+// as a nested Chord on one ChordMark rather than as a second placement.
 //
 // Check the document's cases against that reading. `C7ppF7` gives C7(0) p(1) p(2) F7(3) — four
 // cells. `D- D-/C` gives D-(0) and D-/C(2), because the space took cell 1. `A7,p,p,p,` gives
@@ -74,7 +74,9 @@
 // address `Song.barAt` already takes: the section id plus the bar's zero-based index within that
 // section, which is a counter that restarts at every section and therefore does not change when a
 // bar is inserted into some other section.
+import '../anchored_place.dart';
 import '../chord.dart';
+import '../layout/layout_style.dart';
 import '../song/bar.dart';
 import '../song/section.dart';
 import '../song/song.dart';
@@ -181,6 +183,34 @@ class _SectionBuilder {
   final List<Bar> bars = <Bar>[];
 }
 
+// PURPOSE: Convert one beat of the SOURCE's grid into the x a chord is written at. This is the only
+//          place in the application where a beat becomes a coordinate, and it exists because an
+//          iReal chart REALLY HAS a grid: its bars and its cells are in the source, so the importer
+//          is the one component allowed to translate them.
+// INPUTS: beat — the zero-based cell the source wrote the chord on.
+// OUTPUTS: The horizontal offset from the bar's left edge, in bar-local logical pixels, that the
+//          chord is stored at. Cell 0 is written where the engraver starts a bar's content
+//          (`LayoutStyle.barPadding`), and each further cell is one chord slot further along, the
+//          slot being the narrowest one the engraver ever gives a chord (`LayoutStyle.minCellWidth`).
+//
+//          WHY THE SLOT IS THE MINIMUM AND NOT A MEASURED WIDTH. A chord's own text decides how much
+//          room it needs, and that measurement needs a font, which this parser does not have and must
+//          not have: a chart imported on a device with a different font would store different x
+//          values for the same `.irealb` text, and the same source would produce two different
+//          documents. A fixed slot stores one chart. The cost is named rather than hidden: a bar of
+//          wide chord symbols is engraved slightly tighter than the old cell-per-measured-width
+//          layout drew it, and the bar itself is narrower because its width follows its content.
+//
+//          WHY THIS IS NOT THE TEMPORARY PSEUDO-GRID, ALTHOUGH THE ARITHMETIC COINCIDES TODAY.
+//          `PseudoGrid` in `src/song/pseudo_grid.dart` is an adapter that the next stage deletes; its
+//          numbers match these only because 8-and-18 is the one cell pitch this project has ever
+//          had. An iReal cell is a fact of the SOURCE FORMAT and stays forever, so it is derived
+//          here from the style rather than borrowed from a file that is going away.
+// KEYWORDS: ireal, beat-to-coordinate, grid-conversion, import, cell-pitch, no-quantisation
+/// Returns the x a chord on [beat] of an imported bar is written at.
+double irealChordX(int beat) =>
+    const LayoutStyle().barPadding + beat * const LayoutStyle().minCellWidth;
+
 /// A bar under construction, holding the same facts a [Bar] does plus the cell cursor the
 /// assembler needs while the bar is still being read.
 class _BarBuilder {
@@ -189,7 +219,15 @@ class _BarBuilder {
   TimeSignature timeSignature;
   Barline openingBarline = Barline.single;
   Barline closingBarline = Barline.single;
-  final List<BeatChord> chords = <BeatChord>[];
+
+  /// The chord symbols read so far, each with the BEAT the source wrote it on.
+  ///
+  /// The beat is the SOURCE's own grid and it stops here: the bar is not yet built and does not know
+  /// its section or its index, which an [AnchoredPlace] needs, so the cell is carried until [build]
+  /// can turn it into a coordinate. This is the only place in the application where a beat survives
+  /// the change that removed the grid, and it survives because an iReal chart really has one.
+  final List<({int cell, Chord chord, ChordSize size})> chords =
+      <({int cell, Chord chord, ChordSize size})>[];
   final Set<BarMark> marks = <BarMark>{};
   final List<String> staffText = <String>[];
   Volta? volta;
@@ -209,10 +247,24 @@ class _BarBuilder {
     cell++;
   }
 
-  /// Freezes this builder into an immutable [Bar].
-  Bar build() => Bar(
+  /// Freezes this builder into an immutable [Bar] placed at ([sectionId], [barIndex]).
+  ///
+  /// The two arguments are what turn every beat into a place: a chord at cell k is written k
+  /// cell-pitches from the bar's left edge, and from then on the chart carries a coordinate and no
+  /// grid. See [irealChordX] for the number and why it is this one.
+  Bar build({required String sectionId, required int barIndex}) => Bar(
     timeSignature: timeSignature,
-    chords: List<BeatChord>.unmodifiable(chords),
+    chords: List<ChordMark>.unmodifiable(<ChordMark>[
+      for (final (:int cell, :Chord chord, :ChordSize size) in chords)
+        ChordMark(
+          place: AnchoredPlace(
+            anchor: EventAnchor(sectionId: sectionId, bar: barIndex),
+            offsetX: irealChordX(cell),
+          ),
+          chord: chord,
+          size: size,
+        ),
+    ]),
     openingBarline: openingBarline,
     closingBarline: closingBarline,
     volta: volta,
@@ -364,9 +416,10 @@ class _ChartAssembler {
   /// Places a chord on the cell in force and moves past it.
   ///
   /// The step is always zero. Under the reference cell model no two chords can share a cell — a
-  /// comma removes an empty cell rather than joining two chords — so a non-zero step would only
-  /// ever be produced by a bug. The field stays because [BeatChord] has it and a hand-authored
-  /// chart may legitimately want two chords on one beat, but the importer never creates one.
+  /// comma removes an empty cell rather than joining two chords — so a non-zero step would only ever
+  /// be produced by a bug. What is recorded here is the SOURCE's cell, not a position in this
+  /// project's model: [build] turns it into the x the chord is stored at, in one place, so that the
+  /// importer is the only component that has to know a beat at all.
   void _onChord(ChordToken token) {
     final _BarBuilder bar = _bar();
     bar.receivedContent = true;
@@ -381,9 +434,7 @@ class _ChartAssembler {
         ),
       );
     } else {
-      bar.chords.add(
-        BeatChord(chord: chord, beat: cell, step: 0, size: _chordSize),
-      );
+      bar.chords.add((cell: cell, chord: chord, size: _chordSize));
     }
 
     // The written position is consumed even when the symbol was skipped, so a later chord keeps
@@ -398,7 +449,10 @@ class _ChartAssembler {
     if (bar == null || !bar.receivedContent) {
       return;
     }
-    _section().bars.add(bar.build());
+    final _SectionBuilder section = _section();
+    section.bars.add(
+      bar.build(sectionId: section.id, barIndex: section.bars.length),
+    );
   }
 
   /// Emits the open section unless it ended up with no bars.

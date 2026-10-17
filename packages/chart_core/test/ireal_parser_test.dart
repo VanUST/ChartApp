@@ -15,6 +15,7 @@ import 'package:chart_core/src/chord.dart';
 import 'package:chart_core/src/ireal/obfuscation.dart';
 import 'package:chart_core/src/ireal/parser.dart';
 import 'package:chart_core/src/song/bar.dart';
+import 'package:chart_core/src/song/pseudo_grid.dart';
 import 'package:chart_core/src/song/section.dart';
 import 'package:chart_core/src/song/song.dart';
 import 'package:chart_core/src/song/time_signature.dart';
@@ -27,13 +28,13 @@ import 'package:test/test.dart';
 /// spelling.
 List<String> placementsOf(Bar bar) {
   final List<String> placements = <String>[];
-  for (final BeatChord chord in bar.chords) {
+  for (final ChordMark chord in bar.chords) {
     final String size = chord.size == ChordSize.small ? '[small]' : '';
     final ChordRoot? bass = chord.chord.bass;
     final String slash = bass == null ? '' : '/${bass.pitchClass}';
     placements.add(
       '${chord.chord.root.pitchClass}${chord.chord.quality.token}$slash'
-      '@${chord.beat}.${chord.step}$size',
+      '@${chord.pseudoBeat}.${chord.pseudoStep}$size',
     );
   }
   return placements;
@@ -509,7 +510,7 @@ void main() {
       final bool hasSlashChord = sections
           .expand((Section section) => section.bars)
           .expand((Bar bar) => bar.chords)
-          .any((BeatChord chord) => chord.chord.bass != null);
+          .any((ChordMark chord) => chord.chord.bass != null);
       expect(hasSlashChord, isTrue);
     }, skip: fixture == null ? 'set IREAL_FIXTURE' : null);
   });

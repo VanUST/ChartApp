@@ -50,13 +50,13 @@ Song longChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 16; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index % 12),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
               ],
             ),

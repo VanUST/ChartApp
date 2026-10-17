@@ -133,7 +133,7 @@ Future<void> _proveTheSeam() async {
   _same(
     'the first bar survives chord for chord',
     true,
-    _sameList<BeatChord>(
+    _sameList<ChordMark>(
       entry.song.barsInReadingOrder.first.chords,
       reopened.barsInReadingOrder.first.chords,
     ),
@@ -211,7 +211,7 @@ Future<void> _proveTheSeam() async {
         tool: StrokeTool.pen,
         color: '#102a43',
         size: 3,
-        anchor: EventAnchor(sectionId: sectionId, bar: 1, beat: 0),
+        anchor: EventAnchor(sectionId: sectionId, bar: 1),
         points: const <InkPoint>[
           InkPoint(x: 2.0, y: 3.0, w: 0.4, t: 0),
           InkPoint(x: 9.0, y: 5.0, w: 0.8, t: 12),

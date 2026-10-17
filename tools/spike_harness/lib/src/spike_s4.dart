@@ -42,8 +42,9 @@ Song buildBenchmarkSong() {
     for (int index = 0; index < 8; index++) {
       bars.add(
         Bar(
-          chords: <BeatChord>[
-            BeatChord(
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(index % 4),
               chord: Chord(
                 root: ChordRoot((index + section * 3) % 12),
                 quality: index.isEven
@@ -51,7 +52,6 @@ Song buildBenchmarkSong() {
                     : ChordQuality.dominantSeventh,
                 bass: index % 4 == 0 ? ChordRoot((index + 7) % 12) : null,
               ),
-              beat: index % 4,
             ),
           ],
         ),

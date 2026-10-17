@@ -51,13 +51,19 @@ Song _song({String title = 'Test Tune'}) => Song(
       label: SectionLabel.letter('A'),
       bars: <Bar>[
         Bar(
-          chords: <BeatChord>[
-            BeatChord(chord: Chord(root: ChordRoot(2)), beat: 0),
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(2)),
+            ),
           ],
         ),
         Bar(
-          chords: <BeatChord>[
-            BeatChord(chord: Chord(root: ChordRoot(9)), beat: 0),
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(9)),
+            ),
           ],
         ),
       ],
@@ -260,8 +266,11 @@ Song _songEdited() {
         bars: <Bar>[
           base.sections.first.bars[0],
           Bar(
-            chords: <BeatChord>[
-              BeatChord(chord: Chord(root: ChordRoot(4)), beat: 0),
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
+                chord: Chord(root: ChordRoot(4)),
+              ),
             ],
           ),
         ],

@@ -74,13 +74,13 @@ Song viewChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 6; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
               ],
             ),
@@ -115,13 +115,13 @@ Song longViewChart(int bars) => Song(
       bars: <Bar>[
         for (int index = 0; index < bars; index++)
           Bar(
-            chords: <BeatChord>[
-              BeatChord(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
                 chord: Chord(
                   root: ChordRoot(index % 12),
                   quality: ChordQuality.majorSeventh,
                 ),
-                beat: 0,
               ),
             ],
           ),
@@ -481,9 +481,15 @@ void main() {
     final PlacedBar bar = aimed.bar;
     final PlacedCell cell = aimed.cell!;
     final Offset target = pageCentreOf(plain);
+    // REWRITTEN. This offset used to be measured from the CELL's corner —
+    //   Offset(target.dx - cell.bounds.left, target.dy - cell.bounds.top)
+    // — because a stroke was anchored to the column it was drawn in. A stroke is anchored to its BAR
+    // now, so the origin every stored point is measured from is the bar's corner, and the pen's own
+    // position in the music is that much further along. `cell` is still read above, by the hit test
+    // that decides which bar was aimed at.
     final Offset fromCorner = Offset(
-      target.dx - cell.bounds.left,
-      target.dy - cell.bounds.top,
+      target.dx - bar.bounds.left,
+      target.dy - bar.bounds.top,
     );
 
     Offset? storedAtIdentity;
@@ -534,10 +540,18 @@ void main() {
         reason: 'the stroke must be anchored to the bar under the pen',
       );
       expect(stroke.anchor.bar, bar.barIndex);
+      // REWRITTEN. The old assertion was
+      //   expect(stroke.anchor.beat, cell.beat,
+      //       reason: 'the stroke began inside the cell, so it is anchored to it');
+      // and it pinned the CELL a stroke was anchored to. An anchor names the bar now — the position
+      // inside the bar is in the stroke's own points — so the same fact is checked as the one that
+      // still exists: the stroke hangs on the bar under the pen and its first point is where the pen
+      // touched, which the two comparisons below do in pixels. That is a stronger statement than the
+      // cell index was: it would catch a stroke moved by any distance at all, where the index only
+      // caught a move to another column.
       expect(
-        stroke.anchor.beat,
-        cell.beat,
-        reason: 'the stroke began inside the cell, so it is anchored to it',
+        stroke.anchor,
+        EventAnchor(sectionId: bar.sectionId, bar: bar.barIndex),
       );
       expect(stroke.points.first.x, closeTo(storedAtIdentity.dx, 1e-6));
       expect(stroke.points.first.y, closeTo(storedAtIdentity.dy, 1e-6));

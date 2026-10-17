@@ -11,17 +11,20 @@ import 'package:test/test.dart';
 
 /// A 4/4 bar holding one major triad on beat 0 and nothing else.
 Bar oneChordBar(int rootPitchClass) => Bar(
-  chords: <BeatChord>[
-    BeatChord(chord: Chord(root: ChordRoot(rootPitchClass)), beat: 0),
+  chords: <ChordMark>[
+    ChordMark(
+      place: cellAt(0),
+      chord: Chord(root: ChordRoot(rootPitchClass)),
+    ),
   ],
 );
 
 /// A 4/4 bar holding one chord on the given beat.
 Bar chordOnBeat(int rootPitchClass, int beat) => Bar(
-  chords: <BeatChord>[
-    BeatChord(
+  chords: <ChordMark>[
+    ChordMark(
+      place: cellAt(beat),
       chord: Chord(root: ChordRoot(rootPitchClass)),
-      beat: beat,
     ),
   ],
 );
@@ -68,13 +71,13 @@ void main() {
       // other three cells at the 18 floor, plus 16 padding = 104. (WAS 92, with 42 for the other
       // three cells at the old 14 floor.)
       final Bar bar = Bar(
-        chords: <BeatChord>[
-          BeatChord(
+        chords: <ChordMark>[
+          ChordMark(
+            place: cellAt(0),
             chord: Chord(
               root: ChordRoot(2),
               quality: ChordQuality.minorSeventh,
             ),
-            beat: 0,
           ),
         ],
       );
@@ -84,10 +87,13 @@ void main() {
     test('a three-four bar has three cells, not four', () {
       // 18 + 18 + 18 = 54, plus 16 padding = 70. (WAS 62: 18 + 14 + 14 = 46, plus 16, at the old
       // 14-pixel cell floor.)
-      const Bar bar = Bar(
+      final Bar bar = Bar(
         timeSignature: TimeSignature.threeFour,
-        chords: <BeatChord>[
-          BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+        chords: <ChordMark>[
+          ChordMark(
+            place: cellAt(0),
+            chord: Chord(root: ChordRoot(0)),
+          ),
         ],
       );
       expect(engine.measureBar(bar, Key.cMajor), 70);
@@ -95,10 +101,13 @@ void main() {
 
     test('the minimum bar width is respected', () {
       // A 2/4 bar is only two cells: 18 + 14 = 32, plus 16 = 48, which is below the 56 minimum.
-      const Bar bar = Bar(
+      final Bar bar = Bar(
         timeSignature: TimeSignature.twoFour,
-        chords: <BeatChord>[
-          BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+        chords: <ChordMark>[
+          ChordMark(
+            place: cellAt(0),
+            chord: Chord(root: ChordRoot(0)),
+          ),
         ],
       );
       expect(engine.measureBar(bar, Key.cMajor), 56);
@@ -111,14 +120,23 @@ void main() {
         // silently missing a chord the musician had written: the content vanished and nothing on
         // the page said so. The bar now widens to include it, so a genuine overflow is visible.
         final Bar inMeter = Bar(
-          chords: <BeatChord>[
-            BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(0)),
+            ),
           ],
         );
         final Bar beyond = Bar(
-          chords: <BeatChord>[
-            BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
-            BeatChord(chord: Chord(root: ChordRoot(7)), beat: 7),
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(0)),
+            ),
+            ChordMark(
+              place: cellAt(7),
+              chord: Chord(root: ChordRoot(7)),
+            ),
           ],
         );
         // In the meter: cell 0 holds an 8-wide chord plus a 10 gap, three empty cells at the 18
@@ -134,9 +152,15 @@ void main() {
       // The widening rule stops at the left edge of the bar: a beat before the printed cell 0
       // cannot be reached by adding cells to the right.
       final Bar bar = Bar(
-        chords: <BeatChord>[
-          BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
-          BeatChord(chord: Chord(root: ChordRoot(7)), beat: -3),
+        chords: <ChordMark>[
+          ChordMark(
+            place: cellAt(0),
+            chord: Chord(root: ChordRoot(0)),
+          ),
+          ChordMark(
+            place: cellAt(-3),
+            chord: Chord(root: ChordRoot(7)),
+          ),
         ],
       );
       expect(engine.measureBar(bar, Key.cMajor), 88);
@@ -272,14 +296,14 @@ void main() {
       // overflows rather than being dropped or silently shrunk: a chord that runs off the edge is
       // visible, and a layout that omitted it would look correct while losing music.
       final Bar wide = Bar(
-        chords: <BeatChord>[
+        chords: <ChordMark>[
           for (int beat = 0; beat < 4; beat++)
-            BeatChord(
+            ChordMark(
+              place: cellAt(beat),
               chord: Chord(
                 root: ChordRoot(0),
                 quality: ChordQuality.majorSeventh,
               ),
-              beat: beat,
             ),
         ],
       );
@@ -367,9 +391,15 @@ void main() {
       // The comma-packed case: both are on beat 0, so they differ only by step, and the second
       // starts one chord width plus a gap after the first.
       final Bar packed = Bar(
-        chords: <BeatChord>[
-          BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
-          BeatChord(chord: Chord(root: ChordRoot(7)), beat: 0, step: 1),
+        chords: <ChordMark>[
+          ChordMark(
+            place: cellAt(0),
+            chord: Chord(root: ChordRoot(0)),
+          ),
+          ChordMark(
+            place: cellAt(0, 1),
+            chord: Chord(root: ChordRoot(7)),
+          ),
         ],
       );
       final Song song = Song(
@@ -503,13 +533,13 @@ void main() {
         // strings. A bar measured as Bb and drawn as A# would be a layout that disagrees with
         // itself.
         final Bar flatChord = Bar(
-          chords: <BeatChord>[
-            BeatChord(
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
               chord: Chord(
                 root: ChordRoot(10),
                 quality: ChordQuality.majorSeventh,
               ),
-              beat: 0,
             ),
           ],
         );

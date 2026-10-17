@@ -42,7 +42,7 @@
 // adds a third note is the "New note" button, which clears the selection and makes the next pitch
 // tap an INSERTION; the reducer puts the new note at the front of the cell and pushes the others
 // up, so nothing a musician already wrote moves out from under them. The tie is a single action on
-// the selected note (`BeatNote.tiedToNext` lives on the earlier note alone), and it is offered as
+// the selected note (`NoteMark.tiedToNext` lives on the earlier note alone), and it is offered as
 // the word for the state that a tap produces rather than as a toggle, because a tie's direction is
 // the one thing about it a musician cannot see from the button.
 //
@@ -177,9 +177,9 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     super.initState();
     // The last note of the beat is the one a musician just wrote, so it is the one they are most
     // likely to be looking at; the first is the fallback when the address cannot be reread.
-    final List<BeatNote> existing = _notesHere();
+    final List<NoteMark> existing = _notesHere();
     if (existing.isNotEmpty) {
-      _editingStep = existing.last.step;
+      _editingStep = existing.last.pseudoStep;
       _base = existing.last.value.base;
     }
   }
@@ -189,7 +189,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   // INPUTS: None.
   // OUTPUTS: The notes at this beat, ascending by step. Empty when the beat holds none.
   // KEYWORDS: read-back, live-state, undo-aware, session-query
-  List<BeatNote> _notesHere() => widget.session.existingNotesAt(
+  List<NoteMark> _notesHere() => widget.session.existingNotesAt(
     sectionId: widget.sectionId,
     barIndex: widget.barIndex,
     beat: widget.beat,
@@ -207,7 +207,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       widget.sectionId,
       widget.barIndex,
     );
-    final List<BeatNote> onBeat = _notesHere();
+    final List<NoteMark> onBeat = _notesHere();
     if (onBeat.isNotEmpty) {
       return onBeat.last.pitch.octave;
     }
@@ -215,7 +215,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       return 4;
     }
     int lowest = bar.melody.first.pitch.octave;
-    for (final BeatNote note in bar.melody) {
+    for (final NoteMark note in bar.melody) {
       if (note.pitch.octave < lowest) {
         lowest = note.pitch.octave;
       }
@@ -224,7 +224,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   }
 
   /// The note an edit currently acts on, or null when the next pitch tap inserts one.
-  BeatNote? get _selected {
+  NoteMark? get _selected {
     final int? step = _editingStep;
     if (step == null) {
       return null;
@@ -248,7 +248,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   //          and reports itself in the header, which is what `_status` is for.
   // KEYWORDS: apply, insert-vs-update, sticky-alteration, sticky-duration, haptic, stay-open
   void _applyPitch(PitchedNote note) {
-    final BeatNote? selected = _selected;
+    final NoteMark? selected = _selected;
     if (selected == null) {
       final bool inserted = widget.session.insertNote(
         sectionId: widget.sectionId,
@@ -262,12 +262,14 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
         return;
       }
       HapticFeedback.selectionClick();
-      final List<BeatNote> after = _notesHere();
+      final List<NoteMark> after = _notesHere();
       // THE NOTE JUST WRITTEN IS THE LAST OF THE CELL, because `insertNote` appends unless it is
       // given a step — the oldest note keeps step 0 and the new one takes the highest step. The
       // sheet selects it so a following tap CORRECTS the note he just wrote instead of adding a
       // third one; selecting `first` here would aim the next tap at the note he wrote first.
-      setState(() => _editingStep = after.isEmpty ? null : after.last.step);
+      setState(
+        () => _editingStep = after.isEmpty ? null : after.last.pseudoStep,
+      );
       widget.onChanged?.call();
       return;
     }
@@ -275,7 +277,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
       beat: widget.beat,
-      step: selected.step,
+      step: selected.pseudoStep,
       pitch: note,
     );
     if (!updated) {
@@ -293,7 +295,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   //          of writing an edit nobody asked for.
   // KEYWORDS: duration, sticky, update-selected, undoable
   void _chooseBase(NoteBase base) {
-    final BeatNote? selected = _selected;
+    final NoteMark? selected = _selected;
     if (selected == null) {
       _lastBase = base;
       setState(() => _base = base);
@@ -303,7 +305,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
       beat: widget.beat,
-      step: selected.step,
+      step: selected.pseudoStep,
       value: NoteValue.plain(base),
     );
     if (!updated) {
@@ -323,7 +325,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   //          and there is none to tie yet.
   // KEYWORDS: tie, toggle, selected-only, undoable
   void _toggleTie() {
-    final BeatNote? selected = _selected;
+    final NoteMark? selected = _selected;
     if (selected == null) {
       return;
     }
@@ -331,7 +333,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
       beat: widget.beat,
-      step: selected.step,
+      step: selected.pseudoStep,
       tied: !selected.tiedToNext,
     );
     if (!changed) {
@@ -349,7 +351,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   //          inserts rather than editing a note that is no longer there.
   // KEYWORDS: delete, note-remove, same-sheet, no-mode-switch
   void _remove() {
-    final BeatNote? selected = _selected;
+    final NoteMark? selected = _selected;
     if (selected == null) {
       return;
     }
@@ -357,7 +359,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
       beat: widget.beat,
-      step: selected.step,
+      step: selected.pseudoStep,
     );
     if (!removed) {
       return;
@@ -393,11 +395,11 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     if (_refused) {
       return l10n.melodyValueTooLong;
     }
-    final List<BeatNote> notes = _notesHere();
+    final List<NoteMark> notes = _notesHere();
     if (notes.isEmpty) {
       return l10n.melodyBeatEmpty;
     }
-    final BeatNote? selected = _selected;
+    final NoteMark? selected = _selected;
     if (selected == null) {
       return l10n.melodyBeatEmpty;
     }
@@ -443,7 +445,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     }
     int numerator = 0;
     int denominator = 1;
-    for (final BeatNote note in bar.melody) {
+    for (final NoteMark note in bar.melody) {
       numerator =
           numerator * note.value.wholeDenominator +
           note.value.wholeNumerator * denominator;
@@ -494,7 +496,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
-    final List<BeatNote> notes = _notesHere();
+    final List<NoteMark> notes = _notesHere();
     final bool overflow = _barOverflows();
     return SafeArea(
       child: SingleChildScrollView(
@@ -651,25 +653,25 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   //          rows exist even when the beat is empty — an empty list would leave a musician with no
   //          way to say "insert rather than edit".
   // KEYWORDS: note-list, selection, stacked-notes, new-note, one-based-step, localized
-  Widget _buildNoteList(AppLocalizations l10n, List<BeatNote> notes) => Column(
+  Widget _buildNoteList(AppLocalizations l10n, List<NoteMark> notes) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       _sectionCaption(l10n.melodyGroup),
       const SizedBox(height: 4),
-      for (final BeatNote note in notes)
+      for (final NoteMark note in notes)
         Padding(
           padding: const EdgeInsets.only(bottom: 4),
           child: Material(
-            color: note.step == _editingStep
+            color: note.pseudoStep == _editingStep
                 ? sheetSelectedCellColor
                 : sheetCellColor,
             borderRadius: BorderRadius.circular(8),
             child: InkWell(
-              key: ValueKey<String>('note-palette-note-${note.step}'),
+              key: ValueKey<String>('note-palette-note-${note.pseudoStep}'),
               borderRadius: BorderRadius.circular(8),
               onTap: () => setState(() {
                 _refused = false;
-                _editingStep = note.step;
+                _editingStep = note.pseudoStep;
                 _base = note.value.base;
                 _lastBase = note.value.base;
                 _octave = note.pitch.octave;
@@ -685,7 +687,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
                     Expanded(
                       child: Text(
                         l10n.melodyNoteLine(
-                          note.step + 1,
+                          note.pseudoStep + 1,
                           '${note.pitch}',
                           noteBaseNotation(note.value.base),
                         ),
@@ -884,7 +886,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   //          points.
   // KEYWORDS: tie-action, remove, destructive, disabled-when-unselected, localized
   Widget _buildActions(AppLocalizations l10n) {
-    final BeatNote? selected = _selected;
+    final NoteMark? selected = _selected;
     return Row(
       children: <Widget>[
         Expanded(
@@ -968,7 +970,7 @@ class _NotePreview extends StatelessWidget {
   final String clef;
 
   /// The notes this beat already carries, which are drawn as real notes.
-  final List<BeatNote> notes;
+  final List<NoteMark> notes;
 
   /// The step of the note an edit acts on, or null when the next tap inserts.
   final int? selectedStep;
@@ -1030,7 +1032,7 @@ class _NotePreviewPainter extends CustomPainter {
   final String clef;
 
   /// The beat's notes.
-  final List<BeatNote> notes;
+  final List<NoteMark> notes;
 
   /// The step of the selected note, for the accent colour.
   final int? selectedStep;
@@ -1090,8 +1092,8 @@ class _NotePreviewPainter extends CustomPainter {
 
     // THEN THE BEAT'S NOTES, drawn the way the staff draws them: ledger lines under the head, a stem,
     // and a filled head unless the value is a half or a whole.
-    for (final BeatNote note in notes) {
-      final bool selected = note.step == selectedStep;
+    for (final NoteMark note in notes) {
+      final bool selected = note.pseudoStep == selectedStep;
       final Color colour = selected ? sheetAccentColor : _ink;
       final int step = melodyStepOf(
         note.pitch.note,
@@ -1192,7 +1194,7 @@ class _NotePreviewPainter extends CustomPainter {
       !_samePitches(old.armedPitches, armedPitches);
 
   /// Whether two note lists say the same thing, which is what makes a repaint a change of music.
-  static bool _sameNotes(List<BeatNote> a, List<BeatNote> b) {
+  static bool _sameNotes(List<NoteMark> a, List<NoteMark> b) {
     if (a.length != b.length) {
       return false;
     }

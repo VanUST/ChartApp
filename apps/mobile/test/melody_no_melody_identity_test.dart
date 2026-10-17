@@ -54,21 +54,27 @@ Song chordOnlySong() => Song(
       label: const SectionLabel.letter('A'),
       bars: <Bar>[
         Bar(
-          chords: <BeatChord>[
-            const BeatChord(
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
               chord: Chord(
                 root: ChordRoot(0),
                 quality: ChordQuality.minorSeventh,
               ),
-              beat: 0,
             ),
-            const BeatChord(chord: Chord(root: ChordRoot(9)), beat: 2),
+            ChordMark(
+              place: cellAt(2),
+              chord: Chord(root: ChordRoot(9)),
+            ),
           ],
         ),
         Bar(
           openingBarline: Barline.repeatStart,
-          chords: <BeatChord>[
-            const BeatChord(chord: Chord(root: ChordRoot(5)), beat: 0),
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(5)),
+            ),
           ],
         ),
         const Bar(noChord: true, marks: <BarMark>{BarMark.segno}),
@@ -85,11 +91,11 @@ Song chordOnlySong() => Song(
       label: const SectionLabel.letter('B'),
       bars: <Bar>[
         Bar(
-          chords: <BeatChord>[
+          chords: <ChordMark>[
             for (int beat = 0; beat < 4; beat++)
-              BeatChord(
+              ChordMark(
+                place: cellAt(beat),
                 chord: Chord(root: ChordRoot(beat)),
-                beat: beat,
               ),
           ],
         ),

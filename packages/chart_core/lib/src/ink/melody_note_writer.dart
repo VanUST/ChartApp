@@ -1,11 +1,11 @@
-// PURPOSE: Turn a [MelodyNoteReading] into the STRUCTURE the model stores — a list of [BeatNote]
+// PURPOSE: Turn a [MelodyNoteReading] into the STRUCTURE the model stores — a list of [NoteMark]
 //          values written into the bar's melody through the operation log, so that a recognised
 //          note is an ordinary note: undoable, addressable, transposable and drawn by the same
 //          engraver as one the palette placed. This is the file that answers "what does a
 //          recognised note BECOME", and the answer is deliberately the smallest one the model
 //          already has rather than a new kind of object.
 //
-//          WHAT A RECOGNISED NOTE IS: a [BeatNote] carrying a beat (which column of the bar it
+//          WHAT A RECOGNISED NOTE IS: a [NoteMark] carrying a beat (which column of the bar it
 //          stands in), a `step` (its position INSIDE that beat, counting from the left, which A75
 //          established as TIME rather than pitch), and a pitch (the letter and octave its staff
 //          step names).
@@ -98,15 +98,15 @@ class MelodyNoteWrite {
 
   /// A write that changed nothing, which is what recognising the same ink twice produces.
   const MelodyNoteWrite.none(this.value)
-    : written = const <BeatNote>[],
-      alreadyPresent = const <BeatNote>[];
+    : written = const <NoteMark>[],
+      alreadyPresent = const <NoteMark>[];
 
   /// The notes this write added, in the bar's address order.
-  final List<BeatNote> written;
+  final List<NoteMark> written;
 
   /// The notes the reading named that the bar already held at those addresses, so they were left
   /// exactly as they were.
-  final List<BeatNote> alreadyPresent;
+  final List<NoteMark> alreadyPresent;
 
   /// The written value every added note carries; see [recognisedNoteValue].
   final NoteValue value;
@@ -136,7 +136,7 @@ class MelodyNoteWrite {
 //
 //          THE EVENT IS `note.insert` AND NOTHING ELSE. Every added note is one row of the log, so
 //          it is undoable by the ordinary undo, it replays identically from a saved `.chart`, and it
-//          produces the same BeatNote as the palette's own insertion would. A note at an address the
+//          produces the same NoteMark as the palette's own insertion would. A note at an address the
 //          bar already holds is SKIPPED rather than rewritten: see the file header for the three
 //          properties that buys and the one undo step it costs.
 //
@@ -162,28 +162,28 @@ MelodyNoteWrite writeRecognisedNotes({
   if (bar == null) {
     return const MelodyNoteWrite.none(recognisedNoteValue);
   }
-  final List<BeatNote> written = <BeatNote>[];
-  final List<BeatNote> present = <BeatNote>[];
+  final List<NoteMark> written = <NoteMark>[];
+  final List<NoteMark> present = <NoteMark>[];
   for (final MelodyNoteHead head in reading.heads) {
-    final BeatNote? existing = _noteAt(bar, head.beat, head.orderInBeat);
+    final NoteMark? existing = _noteAt(bar, head.beat, head.orderInBeat);
     if (existing != null) {
       present.add(existing);
       continue;
     }
-    final BeatNote note = BeatNote(
+    final NoteMark note = NoteMark(
+      // The reader measures a head's column and its order within that column, which is the cell the
+      // musician drew in; the place says where that is on the page.
+      place: cellPlace(
+        reading.sectionId,
+        reading.barIndex,
+        head.beat,
+        head.orderInBeat,
+      ),
       pitch: head.pitch,
       value: value,
-      beat: head.beat,
-      step: head.orderInBeat,
     );
     session.apply(
-      NoteInsertEvent(
-        docId: session.docId,
-        seq: session.seq,
-        sectionId: reading.sectionId,
-        barIndex: reading.barIndex,
-        note: note,
-      ),
+      NoteInsertEvent(docId: session.docId, seq: session.seq, note: note),
     );
     written.add(note);
   }
@@ -200,9 +200,9 @@ MelodyNoteWrite writeRecognisedNotes({
 // OUTPUTS: The note at that address, or null when the address is free. A bar with no melody
 //          answers null for every address, which is the ordinary first-recognition case.
 // KEYWORDS: address-lookup, beat-step, occupied, dense-sequence
-BeatNote? _noteAt(Bar bar, int beat, int step) {
-  for (final BeatNote note in bar.melody) {
-    if (note.beat == beat && note.step == step) {
+NoteMark? _noteAt(Bar bar, int beat, int step) {
+  for (final NoteMark note in bar.melody) {
+    if (note.pseudoBeat == beat && note.pseudoStep == step) {
       return note;
     }
   }

@@ -63,14 +63,13 @@ InkStroke _line({
   double lean = 0,
   int samples = 12,
   int bar = 0,
-  int? beat,
   String sectionId = _section,
 }) => InkStroke(
   id: id,
   tool: StrokeTool.pen,
   color: '#102a43',
   size: 3,
-  anchor: EventAnchor(sectionId: sectionId, bar: bar, beat: beat),
+  anchor: EventAnchor(sectionId: sectionId, bar: bar),
   points: <InkPoint>[
     for (int index = 0; index < samples; index++)
       InkPoint(

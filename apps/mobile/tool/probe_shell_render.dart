@@ -57,94 +57,94 @@ Song notationChart() {
   Bar makeBar(int index) {
     // Four bars of melody: a diatonic line, a raised fourth (an accidental that has to be drawn),
     // an eighth-note pair with a tie, and a whole note.
-    final List<BeatNote> melody = switch (index) {
-      0 => <BeatNote>[
-        const BeatNote(
+    final List<NoteMark> melody = switch (index) {
+      0 => <NoteMark>[
+        NoteMark(
+          place: cellAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 0,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(1),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 1,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(2),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.g, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 2,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(3),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.a, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 3,
         ),
       ],
-      1 => <BeatNote>[
-        const BeatNote(
+      1 => <NoteMark>[
+        NoteMark(
+          place: cellAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.b, 0), octave: 4),
           value: NoteValue.plain(NoteBase.eighth),
-          beat: 0,
           tiedToNext: true,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(1),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.b, 0), octave: 4),
           value: NoteValue.plain(NoteBase.eighth),
-          beat: 1,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(2),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 5),
           value: NoteValue.plain(NoteBase.half),
-          beat: 2,
         ),
       ],
-      2 => <BeatNote>[
-        const BeatNote(
+      2 => <NoteMark>[
+        NoteMark(
+          place: cellAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.b, -1), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 0,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(1),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.a, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 1,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(2),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.g, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 2,
         ),
-        const BeatNote(
+        NoteMark(
+          place: cellAt(3),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.f, 1), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
-          beat: 3,
         ),
       ],
-      _ => <BeatNote>[
-        const BeatNote(
+      _ => <NoteMark>[
+        NoteMark(
+          place: cellAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
           value: NoteValue.plain(NoteBase.whole),
-          beat: 0,
         ),
       ],
     };
     return Bar(
-      chords: <BeatChord>[
-        BeatChord(
+      chords: <ChordMark>[
+        ChordMark(
+          place: cellAt(0),
           chord: Chord(
             root: ChordRoot(index % 12),
             quality: index.isEven
                 ? ChordQuality.minorSeventh
                 : ChordQuality.dominantSeventh,
           ),
-          beat: 0,
         ),
-        BeatChord(
+        ChordMark(
+          place: cellAt(2),
           chord: Chord(
             root: ChordRoot((index + 5) % 12),
             quality: ChordQuality.dominantSeventh,
           ),
-          beat: 2,
         ),
       ],
       melody: melody,

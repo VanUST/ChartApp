@@ -125,7 +125,7 @@ Future<void> _proveTheEditLoop() async {
 
   // --- 2. MUTATION GOES THROUGH THE LOG ------------------------------------------------------
   final DocumentState beforeEdit = session.document;
-  final BeatChord? held = session.existingChordAt(
+  final ChordMark? held = session.existingChordAt(
     sectionId: _section,
     barIndex: _bar,
     beat: _beat,
@@ -152,7 +152,7 @@ Future<void> _proveTheEditLoop() async {
     session.log.map((ChartEvent e) => e.type).join(','),
   );
   _same('apply.seq', 1, session.seq);
-  final BeatChord? changed = session.existingChordAt(
+  final ChordMark? changed = session.existingChordAt(
     sectionId: _section,
     barIndex: _bar,
     beat: _beat,
@@ -306,7 +306,7 @@ Future<void> _proveTheEditLoop() async {
         tool: StrokeTool.pen,
         color: '#102a43',
         size: 3,
-        anchor: EventAnchor(sectionId: _section, bar: 0, beat: 0),
+        anchor: EventAnchor(sectionId: _section, bar: 0),
         points: const <InkPoint>[
           InkPoint(x: 1.5, y: 2.5, w: 0.4, t: 0),
           InkPoint(x: 8.0, y: 4.0, w: 0.8, t: 11),
@@ -486,20 +486,20 @@ Song probeChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 2; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
-                BeatChord(
+                ChordMark(
+                  place: cellAt(2),
                   chord: Chord(
                     root: ChordRoot(index + 2),
                     quality: ChordQuality.minorSeventh,
                   ),
-                  beat: 2,
                 ),
               ],
             ),
@@ -528,9 +528,9 @@ String _addressesOf(
   }
   return bar.chords
       .map(
-        (BeatChord placed) =>
+        (ChordMark placed) =>
             '${placed.chord.render(document.song.key, const SpellingTable())}'
-            '@${placed.beat}.${placed.step}',
+            '@${placed.pseudoBeat}.${placed.pseudoStep}',
       )
       .join(',');
 }

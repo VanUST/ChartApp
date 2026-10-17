@@ -31,16 +31,19 @@ Song _chart(int bars) => Song(
       bars: <Bar>[
         for (int index = 0; index < bars; index++)
           Bar(
-            chords: <BeatChord>[
-              BeatChord(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.minorSeventh,
                 ),
-                beat: 0,
               ),
               if (index.isEven)
-                BeatChord(chord: Chord(root: ChordRoot(index + 2)), beat: 2),
+                ChordMark(
+                  place: cellAt(2),
+                  chord: Chord(root: ChordRoot(index + 2)),
+                ),
             ],
           ),
       ],
@@ -224,7 +227,7 @@ void main() {
     );
     expect(
       shown.sections.first.bars[8].chords
-          .firstWhere((BeatChord placed) => placed.beat == 0)
+          .firstWhere((ChordMark placed) => placed.pseudoBeat == 0)
           .chord
           .root
           .pitchClass,
@@ -234,7 +237,7 @@ void main() {
     );
     expect(
       shown.sections.first.bars[0].chords
-          .firstWhere((BeatChord placed) => placed.beat == 0)
+          .firstWhere((ChordMark placed) => placed.pseudoBeat == 0)
           .chord
           .root
           .pitchClass,

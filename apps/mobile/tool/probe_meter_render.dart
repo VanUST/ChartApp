@@ -147,16 +147,16 @@ Song _chart(List<TimeSignature> meters) => Song(
         for (int index = 0; index < meters.length; index++)
           Bar(
             timeSignature: meters[index],
-            chords: <BeatChord>[
+            chords: <ChordMark>[
               for (int cell = 0; cell < meters[index].cellsPerBar; cell++)
-                BeatChord(
+                ChordMark(
+                  place: cellAt(cell),
                   chord: Chord(
                     root: ChordRoot((index + cell) % 12),
                     quality: cell.isEven
                         ? ChordQuality.majorSeventh
                         : ChordQuality.minorSeventh,
                   ),
-                  beat: cell,
                 ),
             ],
             volta: index == 6 ? const Volta(1) : null,

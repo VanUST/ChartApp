@@ -415,7 +415,6 @@ class _TextCueSheetState extends State<TextCueSheet> {
       cue.id,
       sectionId: target.sectionId,
       barIndex: target.barIndex,
-      beat: cue.place.anchor.beat,
       offsetX: cue.place.offsetX,
       offsetY: cue.place.offsetY,
     );
@@ -446,7 +445,6 @@ class _TextCueSheetState extends State<TextCueSheet> {
       cue.id,
       sectionId: place.anchor.sectionId,
       barIndex: place.anchor.bar,
-      beat: place.anchor.beat,
       offsetX: place.offsetX,
       offsetY: place.offsetY + dy,
     );
@@ -576,16 +574,22 @@ class _TextCueSheetState extends State<TextCueSheet> {
     return -1;
   }
 
-  // PURPOSE: Word the cell a cue is anchored to, so the list on the sheet says WHERE on the bar a
+  // PURPOSE: Word the column a cue is anchored to, so the list on the sheet says WHERE on the bar a
   //          remark sits and not only that it exists.
-  // INPUTS: cue — the cue whose cell to name. l10n — the message catalogue, which carries both
+  // INPUTS: cue — the cue whose column to name. l10n — the message catalogue, which carries both
   //         wordings.
-  // OUTPUTS: The catalogue's word for a bar-level anchor, otherwise `cell N` with N counted as a
-  //          musician counts.
-  // KEYWORDS: cell-label, one-based, bar-level, total-function, localized
+  // OUTPUTS: The catalogue's word for a cue hung on the bar as a whole, otherwise `cell N` with N
+  //          counted as a musician counts.
+  //
+  //          A CUE IS A COORDINATE NOW, so "which cell" is read from its own x through the temporary
+  //          pseudo-grid rather than from a stored beat. A cue placed left of the bar's first column
+  //          is one hung on the BAR — that is where a navigation word at the top of a bar goes, and
+  //          the shim reads that x back as a column before the first one. SHIM: when the cue sheet
+  //          names a position instead of a cell, this function goes with the grid it reads.
+  // KEYWORDS: cell-label, one-based, bar-level, total-function, localized, pseudo-grid
   String _cellLabel(TextCue cue, AppLocalizations l10n) {
-    final int? beat = cue.place.anchor.beat;
-    return beat == null ? l10n.cueWholeBar : l10n.cueCell(beat + 1);
+    final int beat = cue.place.pseudoBeat;
+    return beat < 0 ? l10n.cueWholeBar : l10n.cueCell(beat + 1);
   }
 
   @override

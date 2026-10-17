@@ -745,9 +745,9 @@ class ChartPainter extends CustomPainter {
   }
 
   // PURPOSE: Draw one chord symbol in the box the layout reserved for it.
-  // INPUTS: canvas — the target. bar — the bar the chord belongs to, read for the BeatChord that
+  // INPUTS: canvas — the target. bar — the bar the chord belongs to, read for the ChordMark that
   //         carries the engraved size. placed — the chord and its rectangle.
-  // OUTPUTS: Nothing. A placed chord with no matching BeatChord is drawn at normal size rather
+  // OUTPUTS: Nothing. A placed chord with no matching ChordMark is drawn at normal size rather
   //          than skipped, because losing a chord is worse than losing its size.
   // KEYWORDS: chord, text, small-chord, beat-step-match, fallback
   void _paintChord(Canvas canvas, Bar bar, PlacedChord placed) {
@@ -892,16 +892,17 @@ class ChartPainter extends CustomPainter {
     BarMark.playerEnding => 'End',
   };
 
-  // PURPOSE: Find the BeatChord that produced a placed chord, because the engraved size lives on
+  // PURPOSE: Find the ChordMark that produced a placed chord, because the engraved size lives on
   //          the placement and PageLayout keeps only the chord itself.
   // INPUTS: bar — the bar to search. placed — the placed chord, addressed by beat and step.
-  // OUTPUTS: The matching BeatChord, or null when the bar carries none at that address. Null is
+  // OUTPUTS: The matching ChordMark, or null when the bar carries none at that address. Null is
   //          for a caller, not for a failure: a bar and a page assembled from different states of
   //          the song can disagree, and the caller falls back to normal size.
   // KEYWORDS: lookup, beat, step, identity, null-safe
-  BeatChord? _beatChordOf(Bar bar, PlacedChord placed) {
-    for (final BeatChord beatChord in bar.chords) {
-      if (beatChord.beat == placed.beat && beatChord.step == placed.step) {
+  ChordMark? _beatChordOf(Bar bar, PlacedChord placed) {
+    for (final ChordMark beatChord in bar.chords) {
+      if (beatChord.pseudoBeat == placed.beat &&
+          beatChord.pseudoStep == placed.step) {
         return beatChord;
       }
     }

@@ -8,6 +8,7 @@
 //          previous chord sustains, which is how a chart writes two bars of one chord. Bar
 //          equality compares every part including the chord list in order.
 // KEYWORDS: bar, measure, barline, repeat, volta, ending, segno, coda, staff-text, anchor-address
+import '../anchored_place.dart';
 import '../chord.dart';
 import 'note.dart';
 import 'time_signature.dart';
@@ -193,46 +194,63 @@ class Volta {
   String toString() => number == 0 ? 'volta(unnumbered)' : 'volta($number)';
 }
 
-/// A chord placed on a beat of a bar.
-class BeatChord {
-  /// Creates a placement of [chord] on [beat], at [step] within that beat, engraved [size].
-  const BeatChord({
+/// A chord written at a place in a bar.
+///
+/// ITS HORIZONTAL OFFSET IS ITS TIME. The owner removed the grid as a class — a chord is not "on
+/// beat two", it is "written here" — so this value carries an [AnchoredPlace] instead of a beat
+/// index and a step. The place's anchor names the bar the mark lives in; the bar it is stored in
+/// and the anchor that says so must agree, which the operation log enforces when it inserts,
+/// replaces or deletes one.
+///
+/// WHY THE ANCHOR IS STILL STORED, ALTHOUGH THE BAR ALREADY HOLDS THE MARK. A bar's address is an
+/// INDEX inside its section, so `measure.insert` renumbers every bar after it. A mark that carried
+/// only an offset would have no way to say which bar it was written against when a bar is
+/// duplicated or a section is reordered; with the anchor on the mark, the reducer can rewrite it
+/// from the position the mark was FOUND at (see `DocumentReducer._anchoredBars`), which turns "the
+/// address is right" from a thing to remember into a thing the model enforces. The redundancy is
+/// therefore checkable, and it is checked on every mutation rather than trusted.
+class ChordMark {
+  /// Creates a placement of [chord] at [place], engraved [size].
+  const ChordMark({
+    required this.place,
     required this.chord,
-    required this.beat,
-    this.step = 0,
     this.size = ChordSize.normal,
   });
+
+  /// Where the chord is written: its bar, and its distance along that bar.
+  final AnchoredPlace place;
 
   /// The chord that sounds.
   final Chord chord;
 
-  /// Zero-based cell index inside the bar.
-  final int beat;
-
-  /// Order within [beat] when several chords share it.
-  ///
-  /// A chart writes two chords in one cell with a comma, which packs them without consuming a
-  /// second cell. This is why an anchor needs a step as well as a beat: both chords are on the
-  /// same beat and they are different places in the bar.
-  final int step;
-
   /// The size this chord is engraved at.
   final ChordSize size;
 
+  /// Where the chord sits along its bar, in bar-local logical pixels. This is its time.
+  double get offsetX => place.offsetX;
+
+  /// Returns a copy of this mark with the given fields replaced.
+  ChordMark copyWith({AnchoredPlace? place, Chord? chord, ChordSize? size}) =>
+      ChordMark(
+        place: place ?? this.place,
+        chord: chord ?? this.chord,
+        size: size ?? this.size,
+      );
+
   @override
   bool operator ==(Object other) =>
-      other is BeatChord &&
+      other is ChordMark &&
+      other.place == place &&
       other.chord == chord &&
-      other.beat == beat &&
-      other.step == step &&
       other.size == size;
 
   @override
-  int get hashCode => Object.hash(chord, beat, step, size);
+  int get hashCode => Object.hash(place, chord, size);
 
   @override
   String toString() =>
-      'beat $beat.$step: $chord${size == ChordSize.small ? ' (small)' : ''}';
+      'x${place.offsetX.toStringAsFixed(1)}: $chord'
+      '${size == ChordSize.small ? ' (small)' : ''}';
 }
 
 /// One bar of a chart, as written.
@@ -241,7 +259,7 @@ class Bar {
   const Bar({
     this.timeSignature = TimeSignature.fourFour,
     this.size = BarSize.natural,
-    this.chords = const <BeatChord>[],
+    this.chords = const <ChordMark>[],
     this.openingBarline = Barline.single,
     this.closingBarline = Barline.single,
     this.volta,
@@ -250,8 +268,8 @@ class Bar {
     this.noChord = false,
     this.marks = const <BarMark>{},
     this.staffText = const <String>[],
-    this.melody = const <BeatNote>[],
-    this.percussion = const <PercussionHit>[],
+    this.melody = const <NoteMark>[],
+    this.percussion = const <PercussionMark>[],
   });
 
   /// The meter in force for this bar.
@@ -266,20 +284,21 @@ class Bar {
   /// of the natural width and why it never goes below 1.
   final BarSize size;
 
-  /// Chord placements, ordered by beat and then by step. Empty means the previous chord sustains.
-  final List<BeatChord> chords;
+  /// Chord placements, ordered by their place along the bar. Empty means the previous chord
+  /// sustains.
+  final List<ChordMark> chords;
 
-  /// Pitched notes on the melodic staff, at the same (beat, step) addresses as the chords.
+  /// Pitched notes on the melodic staff, each at its own place along the bar.
   ///
   /// Empty when the song has no melodic staff, which is every imported chart. The two lists are
   /// independent on purpose: owner decision D16 puts the pitched staff and the chord line in the
   /// same document simultaneously, so a bar carries both rather than one replacing the other.
-  final List<BeatNote> melody;
+  final List<NoteMark> melody;
 
-  /// Percussion hits on the drum staff, at the same addresses.
+  /// Percussion hits on the drum staff, each at its own place along the bar.
   ///
   /// Empty when the song has no drum part. A hit's instrument is a drum-map key, never transposed.
-  final List<PercussionHit> percussion;
+  final List<PercussionMark> percussion;
 
   /// The barline drawn at the left edge.
   final Barline openingBarline;

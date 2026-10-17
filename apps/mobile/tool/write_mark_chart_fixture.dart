@@ -39,13 +39,13 @@ void main(List<String> arguments) {
         bars: <Bar>[
           for (int index = 0; index < 4; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index * 2),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
               ],
             ),

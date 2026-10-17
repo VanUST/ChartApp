@@ -54,15 +54,15 @@ Song _songOf(List<(int, int)> pitches) => Song(
       label: const SectionLabel.letter('A'),
       bars: <Bar>[
         Bar(
-          melody: <BeatNote>[
+          melody: <NoteMark>[
             for (int beat = 0; beat < pitches.length; beat++)
-              BeatNote(
+              NoteMark(
+                place: cellAt(beat),
                 pitch: PitchedNote(
                   note: WrittenNote(NoteLetter.values[pitches[beat].$2], 0),
                   octave: pitches[beat].$1,
                 ),
                 value: const NoteValue.plain(NoteBase.quarter),
-                beat: beat,
               ),
           ],
         ),
@@ -320,7 +320,7 @@ void main() {
       // the column, which is the case below.
       //
       // The engraver draws step k at the k-th position across the cell (A75), so the left head is
-      // the earlier note and its ordinal is what the model stores as `BeatNote.step`.
+      // the earlier note and its ordinal is what the model stores as `NoteMark.step`.
       const double middle = 100;
       const MelodyStaffFrame frame = MelodyStaffFrame(
         middleLineY: middle,
@@ -531,9 +531,9 @@ void main() {
       expect(write.value.base, NoteBase.quarter);
       expect(
         <String>[
-          for (final BeatNote note
+          for (final NoteMark note
               in session.song.sections.first.bars.first.melody)
-            '${note.beat}.${note.step}:${note.pitch} ${note.value.base.name}',
+            '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} ${note.value.base.name}',
         ],
         <String>['0.0:E4 quarter', '1.0:F4 quarter'],
       );
@@ -599,8 +599,8 @@ void main() {
       );
       expect(write.written, hasLength(1));
       expect(write.written.single.pitch.toString(), 'F4');
-      final BeatNote first = session.song.sections.first.bars.first.melody
-          .firstWhere((BeatNote note) => note.beat == 0);
+      final NoteMark first = session.song.sections.first.bars.first.melody
+          .firstWhere((NoteMark note) => note.pseudoBeat == 0);
       expect(first.pitch.toString(), 'A3');
       expect(first.value.base, NoteBase.half);
     });

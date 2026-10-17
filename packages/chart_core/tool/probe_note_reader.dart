@@ -128,15 +128,15 @@ int trebleStepOf(int octave, int letterIndex) =>
 // OUTPUTS: A [Bar] whose melody holds one quarter note per beat, in the order given.
 // KEYWORDS: fixture, melody, adjacent-beats, bar-builder
 Bar barOfFour(List<(int, int)> pitches) => Bar(
-  melody: <BeatNote>[
+  melody: <NoteMark>[
     for (int beat = 0; beat < pitches.length; beat++)
-      BeatNote(
+      NoteMark(
+        place: cellAt(beat),
         pitch: PitchedNote(
           note: WrittenNote(NoteLetter.values[pitches[beat].$2], 0),
           octave: pitches[beat].$1,
         ),
         value: const NoteValue.plain(NoteBase.quarter),
-        beat: beat,
       ),
   ],
 );
@@ -368,7 +368,7 @@ void scoreFixture({
         barIndex: bar.barIndex,
       );
       final StringBuffer detail = StringBuffer();
-      for (final BeatNote note in model.melody) {
+      for (final NoteMark note in model.melody) {
         written++;
         final int want = trebleStepOf(
           note.pitch.octave,
@@ -376,7 +376,7 @@ void scoreFixture({
         );
         MelodyNoteHead? found;
         for (final MelodyNoteHead head in reading.heads) {
-          if (head.beat == note.beat) {
+          if (head.beat == note.pseudoBeat) {
             found = head;
             break;
           }
@@ -518,7 +518,7 @@ void readOwnerInk(String chartPath, {required bool withPlaceGate}) {
 // OUTPUTS: The song, with a declared pitched staff (D29) so the layout draws one and the frame the
 //          reader needs exists.
 // KEYWORDS: fixture, one-bar, melody-only, declared-staff
-Song oneBarSong(List<BeatNote> melody, String title) => Song(
+Song oneBarSong(List<NoteMark> melody, String title) => Song(
   id: 'probe-$title',
   title: title,
   composer: '',
@@ -536,17 +536,16 @@ Song oneBarSong(List<BeatNote> melody, String title) => Song(
 );
 
 /// One model note in a chosen beat and position, written with [base].
-BeatNote probeNote(
+NoteMark probeNote(
   NoteLetter letter,
   int octave, {
   int beat = 0,
   int step = 0,
   NoteBase base = NoteBase.quarter,
-}) => BeatNote(
+}) => NoteMark(
+  place: cellAt(beat, step),
   pitch: PitchedNote(note: WrittenNote(letter, 0), octave: octave),
   value: NoteValue.plain(base),
-  beat: beat,
-  step: step,
 );
 
 // PURPOSE: Report one reading against the notes that were written, in the addresses the model uses,
@@ -559,7 +558,7 @@ BeatNote probeNote(
 // KEYWORDS: report, round-trip, address, false-positive, taper, refusal
 void reportRun({
   required String tag,
-  required List<BeatNote> melody,
+  required List<NoteMark> melody,
   required List<MelodyGlyph> glyphs,
   required List<PageInkStroke> ink,
   required MelodyStaffFrame frame,
@@ -590,7 +589,7 @@ void reportRun({
     frame: frame,
   );
   final Set<String> truth = <String>{
-    for (final BeatNote note in melody) '${note.beat}.${note.step}',
+    for (final NoteMark note in melody) '${note.pseudoBeat}.${note.pseudoStep}',
   };
   int right = 0;
   final Set<String> seen = <String>{};
@@ -634,7 +633,7 @@ void reportRun({
 // KEYWORDS: stride, cell-width, column, beat-assignment, round-trip, engraved-then-read
 void measureBeatRun({
   required String tag,
-  required List<BeatNote> melody,
+  required List<NoteMark> melody,
   LayoutStyle? style,
   bool degraded = false,
 }) {
@@ -693,7 +692,7 @@ void measureBeatRun({
 // INPUTS: tag — the run's name; melody — the same notes the repaired run used.
 // OUTPUTS: The same `probe.run.*` lines, from a bar whose cells are the old width.
 // KEYWORDS: control, old-cell, 18, before-the-fix, defect-reproduction
-void measureOldCellRun({required String tag, required List<BeatNote> melody}) {
+void measureOldCellRun({required String tag, required List<NoteMark> melody}) {
   final LayoutStyle style = appStyle();
   final Bar bar = Bar(melody: melody);
   final double space = style.melodyStaffSpace;
@@ -939,7 +938,7 @@ void main(List<String> arguments) {
   // no longer a wider cell — see A79 in `docs/sdd.md`.
   measureBeatRun(
     tag: 'one-beat-two-notes',
-    melody: <BeatNote>[
+    melody: <NoteMark>[
       probeNote(NoteLetter.c, 5, beat: 0, step: 0),
       probeNote(NoteLetter.e, 5, beat: 0, step: 1),
     ],
@@ -949,7 +948,7 @@ void main(List<String> arguments) {
   // defect is measured.
   measureOldCellRun(
     tag: 'one-beat-two-notes-old-cell',
-    melody: <BeatNote>[
+    melody: <NoteMark>[
       probeNote(NoteLetter.c, 5, beat: 0, step: 0),
       probeNote(NoteLetter.e, 5, beat: 0, step: 1),
     ],
@@ -963,14 +962,14 @@ void main(List<String> arguments) {
   // variable.
   measureBeatRun(
     tag: 'beamed-pair',
-    melody: <BeatNote>[
+    melody: <NoteMark>[
       probeNote(NoteLetter.e, 4, beat: 0, step: 0, base: NoteBase.eighth),
       probeNote(NoteLetter.c, 5, beat: 0, step: 1, base: NoteBase.eighth),
     ],
   );
   measureBeatRun(
     tag: 'beamed-pair-pen',
-    melody: <BeatNote>[
+    melody: <NoteMark>[
       probeNote(NoteLetter.e, 4, beat: 0, step: 0, base: NoteBase.eighth),
       probeNote(NoteLetter.c, 5, beat: 0, step: 1, base: NoteBase.eighth),
     ],
@@ -980,7 +979,7 @@ void main(List<String> arguments) {
   // pair above does not, the cause is the height difference and not the beam.
   measureBeatRun(
     tag: 'beamed-pair-level',
-    melody: <BeatNote>[
+    melody: <NoteMark>[
       probeNote(NoteLetter.b, 4, beat: 0, step: 0, base: NoteBase.eighth),
       probeNote(NoteLetter.b, 4, beat: 0, step: 1, base: NoteBase.eighth),
     ],

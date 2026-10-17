@@ -74,20 +74,20 @@ Song editLoopChart() => Song(
       bars: <Bar>[
         for (int index = 0; index < 4; index++)
           Bar(
-            chords: <BeatChord>[
-              BeatChord(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellPlace(_editedSection, index, 0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
-                beat: 0,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellPlace(_editedSection, index, 2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,
                 ),
-                beat: 2,
               ),
             ],
           ),
@@ -204,8 +204,8 @@ void _printBar(String label, Song chart, String sectionId, int barIndex) {
   }
   final String cells = bar.chords
       .map(
-        (BeatChord placed) =>
-            'cell ${placed.beat + 1} (beat ${placed.beat}) -> '
+        (ChordMark placed) =>
+            'cell ${placed.pseudoBeat + 1} (beat ${placed.pseudoBeat}) -> '
             '${placed.chord.render(chart.key, const SpellingTable())}',
       )
       .join(' | ');
@@ -298,7 +298,7 @@ void main() {
     _dumpPlacedBar('layout.before', pagesBefore.single);
 
     // --- THE EDIT, through the operation log and nothing else -----------------------------------
-    final BeatChord? held = session.existingChordAt(
+    final ChordMark? held = session.existingChordAt(
       sectionId: _editedSection,
       barIndex: _editedBar,
       beat: _editedBeat,

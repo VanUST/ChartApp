@@ -81,14 +81,14 @@ Song _surfaceChart() => Song(
       bars: <Bar>[
         Bar(),
         Bar(
-          melody: <BeatNote>[
-            BeatNote(
+          melody: <NoteMark>[
+            NoteMark(
+              place: cellAt(0),
               pitch: const PitchedNote(
                 note: WrittenNote(NoteLetter.g, 0),
                 octave: 4,
               ),
               value: const NoteValue.plain(NoteBase.quarter),
-              beat: 0,
             ),
           ],
         ),
@@ -152,15 +152,15 @@ Future<List<int>> _captureWidget(WidgetTester tester, File out) async {
 // OUTPUTS: One string per chord, `beat.step:rendered`.
 // KEYWORDS: chord-rendering, readable-report
 List<String> _chords(Song song, int barIndex) => <String>[
-  for (final BeatChord placed in song.barsInReadingOrder[barIndex].chords)
+  for (final ChordMark placed in song.barsInReadingOrder[barIndex].chords)
     _readableChord(song, placed),
 ];
 
 /// One chord as `beat.step:rendered`, in a function because the lint forbids two adjacent string
 /// literals inside a list and this line is longer than one.
-String _readableChord(Song song, BeatChord placed) {
+String _readableChord(Song song, ChordMark placed) {
   final String text = placed.chord.render(song.key, const SpellingTable());
-  return '${placed.beat}.${placed.step}:$text';
+  return '${placed.pseudoBeat}.${placed.pseudoStep}:$text';
 }
 
 /// The key of the [RepaintBoundary] the harness wraps itself in, which is what a capture reads:

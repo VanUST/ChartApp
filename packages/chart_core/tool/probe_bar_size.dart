@@ -305,14 +305,13 @@ Song _unequalChart() {
   const NoteValue eighth = NoteValue.plain(NoteBase.eighth);
 
   Bar chord(String token, int rootSemitones, int beat, {int step = 0}) => Bar(
-    chords: <BeatChord>[
-      BeatChord(
+    chords: <ChordMark>[
+      ChordMark(
+        place: cellAt(beat, step),
         chord: Chord(
           root: ChordRoot(rootSemitones),
           quality: ChordQuality(token),
         ),
-        beat: beat,
-        step: step,
       ),
     ],
   );
@@ -330,67 +329,63 @@ Song _unequalChart() {
           // An EMPTY bar: nothing but four cells' worth of room.
           const Bar(),
           // THE BUSY BAR: six chords packed into four cells, a flat, and four eighths on the staff.
-          const Bar(
-            chords: <BeatChord>[
-              BeatChord(
+          Bar(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
                 chord: Chord(root: ChordRoot(0), quality: ChordQuality('maj7')),
-                beat: 0,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellAt(0, 1),
                 chord: Chord(root: ChordRoot(9), quality: ChordQuality('m7')),
-                beat: 0,
-                step: 1,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellAt(1),
                 chord: Chord(root: ChordRoot(2), quality: ChordQuality('m7b5')),
-                beat: 1,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellAt(2),
                 chord: Chord(root: ChordRoot(7), quality: ChordQuality('7')),
-                beat: 2,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellAt(3),
                 chord: Chord(root: ChordRoot(5), quality: ChordQuality('maj7')),
-                beat: 3,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellAt(3, 1),
                 chord: Chord(root: ChordRoot(10), quality: ChordQuality('7')),
-                beat: 3,
-                step: 1,
               ),
             ],
-            melody: <BeatNote>[
-              BeatNote(
+            melody: <NoteMark>[
+              NoteMark(
+                place: cellAt(0),
                 pitch: PitchedNote(note: eFlat, octave: 4),
                 value: eighth,
-                beat: 0,
               ),
-              BeatNote(
+              NoteMark(
+                place: cellAt(0, 1),
                 pitch: PitchedNote(note: g, octave: 4),
                 value: eighth,
-                beat: 0,
-                step: 1,
               ),
-              BeatNote(
+              NoteMark(
+                place: cellAt(1),
                 pitch: PitchedNote(note: bFlat, octave: 4),
                 value: eighth,
-                beat: 1,
               ),
-              BeatNote(
+              NoteMark(
+                place: cellAt(1, 1),
                 pitch: PitchedNote(note: d, octave: 5),
                 value: eighth,
-                beat: 1,
-                step: 1,
               ),
-              BeatNote(
+              NoteMark(
+                place: cellAt(2),
                 pitch: PitchedNote(note: fSharp, octave: 5),
                 value: quarter,
-                beat: 2,
               ),
-              BeatNote(
+              NoteMark(
+                place: cellAt(3),
                 pitch: PitchedNote(note: a, octave: 5),
                 value: quarter,
-                beat: 3,
               ),
             ],
           ),

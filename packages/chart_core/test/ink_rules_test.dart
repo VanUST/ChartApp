@@ -33,13 +33,13 @@ Song twoSectionChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 8; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
               ],
             ),
@@ -198,7 +198,13 @@ void main() {
   });
 
   group('anchor placement', () {
-    test('a cell anchor resolves to the cell rectangle, and a bar anchor to the bar', () {
+    test('a bar anchor resolves to the bar rectangle, and never to a cell', () {
+      // REWRITTEN. The old name was "a cell anchor resolves to the cell rectangle, and a bar anchor
+      // to the bar", and it resolved the SAME bar anchor twice — once expecting the narrowest cell's
+      // rectangle and once the bar's — because an anchor used to name a beat and the lookup preferred
+      // the cell. An anchor names a bar now, so there is one answer, and the test states it in the
+      // negative as well: the rectangle is the bar's, and NOT the rectangle of the cell that used to
+      // be preferred. The old assertion, quoted: `expect(cellPlacement!.bounds, cell.bounds)`.
       final List<PageLayout> pages = engine.layout(
         twoSectionChart(),
         pageWidth: 824,
@@ -208,24 +214,18 @@ void main() {
       final PlacedBar bar = page.bars[2];
       final PlacedCell cell = bar.cells[1];
 
-      final InkPlacement? cellPlacement = resolveEventAnchor(
-        page,
-        EventAnchor(
-          sectionId: bar.sectionId,
-          bar: bar.barIndex,
-          beat: cell.beat,
-        ),
-      );
-      expect(cellPlacement, isNotNull);
-      expect(cellPlacement!.bounds, cell.bounds);
-      expect(cellPlacement.origin, cell.bounds.origin);
-
-      final InkPlacement? barPlacement = resolveEventAnchor(
+      final InkPlacement? placement = resolveEventAnchor(
         page,
         EventAnchor(sectionId: bar.sectionId, bar: bar.barIndex),
       );
-      expect(barPlacement, isNotNull);
-      expect(barPlacement!.bounds, bar.bounds);
+      expect(placement, isNotNull);
+      expect(placement!.bounds, bar.bounds);
+      expect(placement.origin, bar.bounds.origin);
+      expect(
+        placement.bounds,
+        isNot(cell.bounds),
+        reason: 'a stroke is anchored to its bar, not to the column it was drawn in',
+      );
     });
 
     test(
@@ -235,17 +235,11 @@ void main() {
             .layout(twoSectionChart(), pageWidth: 824, pageHeight: 600)
             .first;
         expect(
-          resolveEventAnchor(
-            page,
-            const EventAnchor(sectionId: 'Z', bar: 0, beat: 0),
-          ),
+          resolveEventAnchor(page, const EventAnchor(sectionId: 'Z', bar: 0)),
           isNull,
         );
         expect(
-          resolveEventAnchor(
-            page,
-            const EventAnchor(sectionId: 'A', bar: 999, beat: 0),
-          ),
+          resolveEventAnchor(page, const EventAnchor(sectionId: 'A', bar: 999)),
           isNull,
         );
       },
@@ -272,14 +266,9 @@ void main() {
             .layout(song, pageWidth: 824, pageHeight: 600)
             .first;
         final PlacedBar plainBar = plain.bars[4];
-        final PlacedCell plainCell = plainBar.cells.first;
         final InkPlacement plainPlacement = resolveEventAnchor(
           plain,
-          EventAnchor(
-            sectionId: plainBar.sectionId,
-            bar: plainBar.barIndex,
-            beat: plainCell.beat,
-          ),
+          EventAnchor(sectionId: plainBar.sectionId, bar: plainBar.barIndex),
         )!;
         const InkPoint stored = InkPoint(x: 5, y: 5, w: 0.5, t: 0);
         final LayoutOffset plainPoint = inkPointToPage(
@@ -298,41 +287,43 @@ void main() {
         final PageLayout fitted = fit.page!;
         expect(fitted.scale, lessThan(1));
         final PlacedBar fittedBar = fitted.bars[4];
-        final PlacedCell fittedCell = fittedBar.cells.first;
         final InkPlacement fittedPlacement = resolveEventAnchor(
           fitted,
-          EventAnchor(
-            sectionId: fittedBar.sectionId,
-            bar: fittedBar.barIndex,
-            beat: fittedCell.beat,
-          ),
+          EventAnchor(sectionId: fittedBar.sectionId, bar: fittedBar.barIndex),
         )!;
         final LayoutOffset fittedPoint = inkPointToPage(
           stored,
           fittedPlacement.origin,
         );
 
-        // In engraved coordinates the two pages place the cell in different places — that is what a
+        // In engraved coordinates the two pages place the bar in different places — that is what a
         // different scale means — so the engraved points differ.
         expect(fittedPoint, isNot(plainPoint));
-        // On their own surfaces they agree to the scale, because the cell moved with the music.
+        // On their own surfaces they agree to the scale, because the bar moved with the music.
         stdout.writeln(
           'ink.fit_proof scale=${fitted.scale.toStringAsFixed(4)} '
           'plain_engraved=(${plainPoint.x.toStringAsFixed(2)},'
           '${plainPoint.y.toStringAsFixed(2)}) '
           'fitted_engraved=(${fittedPoint.x.toStringAsFixed(2)},'
           '${fittedPoint.y.toStringAsFixed(2)}) '
-          'plain_cell=(${plainCell.bounds.left.toStringAsFixed(2)},'
-          '${plainCell.bounds.top.toStringAsFixed(2)}) '
-          'fitted_cell=(${fittedCell.bounds.left.toStringAsFixed(2)},'
-          '${fittedCell.bounds.top.toStringAsFixed(2)})',
+          'plain_bar=(${plainBar.bounds.left.toStringAsFixed(2)},'
+          '${plainBar.bounds.top.toStringAsFixed(2)}) '
+          'fitted_bar=(${fittedBar.bounds.left.toStringAsFixed(2)},'
+          '${fittedBar.bounds.top.toStringAsFixed(2)})',
         );
-        // The stored offset from the cell's own corner is the same on both pages, which is the whole
-        // claim: the ink describes a place IN the music, not a place on the glass.
-        expect(plainPoint.x - plainCell.bounds.left, closeTo(5, 1e-9));
-        expect(plainPoint.y - plainCell.bounds.top, closeTo(5, 1e-9));
-        expect(fittedPoint.x - fittedCell.bounds.left, closeTo(5, 1e-9));
-        expect(fittedPoint.y - fittedCell.bounds.top, closeTo(5, 1e-9));
+        // REWRITTEN, and this is what the four expectations below used to say:
+        //   expect(plainPoint.x - plainCell.bounds.left, closeTo(5, 1e-9));
+        //   expect(plainPoint.y - plainCell.bounds.top, closeTo(5, 1e-9));
+        //   expect(fittedPoint.x - fittedCell.bounds.left, closeTo(5, 1e-9));
+        //   expect(fittedPoint.y - fittedCell.bounds.top, closeTo(5, 1e-9));
+        // They measured from the CELL's corner, which is where a stroke used to be anchored. A stroke
+        // is anchored to its BAR now, so the same claim is measured from the bar's corner: the stored
+        // offset is the same number on both pages, which is the whole point — the ink describes a
+        // place IN the music and not a place on the glass.
+        expect(plainPoint.x - plainBar.bounds.left, closeTo(5, 1e-9));
+        expect(plainPoint.y - plainBar.bounds.top, closeTo(5, 1e-9));
+        expect(fittedPoint.x - fittedBar.bounds.left, closeTo(5, 1e-9));
+        expect(fittedPoint.y - fittedBar.bounds.top, closeTo(5, 1e-9));
       },
     );
 
@@ -415,9 +406,19 @@ void main() {
         final InkStroke stroke = assembler.end(page: page, id: 'fitted')!;
 
         final EventAnchor anchor = stroke.anchor;
-        final int recordedBeat = anchor.beat ?? -1;
-        final int aimedBeat = cell.beat;
-        // How far the recorded anchor's cell is from the one under the pen, in engraved pixels.
+        // REWRITTEN, and the removed lines are quoted because they pinned a cell address the model no
+        // longer has:
+        //   final int recordedBeat = anchor.beat ?? -1;
+        //   final int aimedBeat = cell.beat;
+        // and, further down,
+        //   expect(recordedBeat, aimedBeat,
+        //       reason: 'the anchor cell must be the cell under the pen');
+        // An anchor names the BAR and the stroke's own points say where in it the pen went, so the
+        // question those lines asked — "is the recorded anchor the address under the pen?" — is asked
+        // below as "does the recorded anchor rectangle contain the pen, and does the stored point
+        // render back onto the pen?" The second is strictly stronger: a cell index could agree while
+        // the ink sat two pixels off, and the pixel round trip cannot.
+        // How far the recorded anchor's rectangle is from the cell under the pen, in engraved pixels.
         final InkPlacement? recorded = resolveEventAnchor(page, anchor);
         final LayoutOffset recordedOrigin =
             recorded?.origin ?? LayoutOffset.zero;
@@ -430,14 +431,15 @@ void main() {
           '${surface.y.toStringAsFixed(2)}) '
           'pagePoint=(${page.pagePointOf(surface).x.toStringAsFixed(2)},'
           '${page.pagePointOf(surface).y.toStringAsFixed(2)}) '
-          'aimed=${anchor.sectionId}-${bar.barIndex} beat $aimedBeat '
+          'aimed=${anchor.sectionId}-${bar.barIndex} cell_x ${cell.bounds.left} '
           'anchored=${anchor.sectionId}-${anchor.bar} '
-          'beat $recordedBeat '
+          'anchor_x ${recordedOrigin.x.toStringAsFixed(2)} '
           'cell_error_px=${_length(dx, dy).toStringAsFixed(4)}',
         );
 
         // The defect, stated as the assertion that catches it: the recorded anchor must name the
-        // bar and the cell under the pen, not the bar at `surface * scale`.
+        // bar under the pen, and its rectangle must be the bar's own rectangle — the origin every
+        // stored point is measured from.
         expect(
           anchor.bar,
           bar.barIndex,
@@ -445,14 +447,14 @@ void main() {
         );
         expect(anchor.sectionId, bar.sectionId);
         expect(
-          recordedBeat,
-          aimedBeat,
-          reason: 'the anchor cell must be the cell under the pen',
+          recordedOrigin.x,
+          bar.bounds.left,
+          reason: 'the anchor rectangle must be the bar rectangle',
         );
         expect(
-          _length(dx, dy),
-          lessThan(1e-9),
-          reason: 'the recorded anchor rect must be the aimed cell rect',
+          recordedOrigin.y,
+          bar.bounds.top,
+          reason: 'the anchor rectangle must be the bar rectangle',
         );
 
         // And the stored points must put the ink back on the surface point that was drawn, which
@@ -483,24 +485,30 @@ void main() {
           reason: 'the ink must be under the nib on the surface',
         );
         expect(stroke.points.first.w, 0.6);
-        // The stored offset is measured from the anchor's own corner, so it is the pen's distance
-        // from the cell's left edge — not the small nudge by itself, because the pen was aimed at
-        // the cell's centre and a bar's last cell is often narrow. This is the number the whole
-        // file is about: it is measured in the carved page's own pixels and is therefore the same
-        // on a fitted page and an ordinary one.
+        // REWRITTEN. These two expectations used to measure from the CELL's corner:
+        //   expect(stroke.points.first.x,
+        //       closeTo((centre.x + engravedNudge.x) - cell.bounds.left, 1e-9),
+        //       reason: 'the stored offset from the anchor corner is the pen, not its nudge');
+        //   expect(stroke.points.first.y,
+        //       closeTo((centre.y + engravedNudge.y) - cell.bounds.top, 1e-9));
+        // The origin the stored point is measured from is the BAR's corner now, so the same claim is
+        // made against the bar: the number is the pen's own position in the music, computed from the
+        // engraved point and nothing else, and it is the same number on a fitted page and an ordinary
+        // one. The old line was true for the same reason with a different origin; a reader comparing
+        // the two should see only the origin move.
         expect(
           stroke.points.first.x,
-          closeTo((centre.x + engravedNudge.x) - cell.bounds.left, 1e-9),
+          closeTo((centre.x + engravedNudge.x) - bar.bounds.left, 1e-9),
           reason: 'the stored offset from the anchor corner is the pen, not its nudge',
         );
         expect(
           stroke.points.first.y,
-          closeTo((centre.y + engravedNudge.y) - cell.bounds.top, 1e-9),
+          closeTo((centre.y + engravedNudge.y) - bar.bounds.top, 1e-9),
         );
         expect(
           stroke.points.first.x,
-          inInclusiveRange(0, cell.bounds.size.width),
-          reason: 'the stored point must lie inside the cell the pen landed in',
+          inInclusiveRange(0, bar.bounds.size.width),
+          reason: 'the stored point must lie inside the bar the pen landed on',
         );
         stdout.writeln(
           'ink.capture_fit.local scale=${page.scale.toStringAsFixed(4)} '

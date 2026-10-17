@@ -1,218 +1,138 @@
-// PURPOSE: Record the three edits a user makes to the chord line — place a chord, change it,
-//          remove it — as events carrying their own inverse, so that undo never needs a second
+// PURPOSE: Record the three edits a user makes to the chord line — write a chord at a place, change
+//          it, remove it — as events carrying their own inverse, so that undo never needs a second
 //          code path and a redo is the inverse of the inverse.
-// INPUTS: The section and bar index the edit happens in, and the chord placement itself, which
-//         already carries its beat and step within the bar.
-// OUTPUTS: Immutable events and their inverses. Insertion into a beat that already holds chords
-//          pushes the later ones one step up and deletion closes the gap again, which is what
-//          keeps a comma-packed cell a dense sequence rather than a growing list of gaps. The
-//          address of a chord is therefore NOT stable across an insert or delete at the same
-//          beat; that is deliberate, because two chords on one beat are two places in the bar
-//          and a gap between them is not a place anything can point at.
-// KEYWORDS: chord-event, insert, update, delete, inverse, beat-step-address, packing, undo
+// INPUTS: The chord mark itself, whose place names the bar and gives the position in it. There is
+//         no separate section or bar argument, because the place already carries one: two addresses
+//         for one mark is the second answer this project removes wherever it finds it, and the
+//         annotation family has worked this way since it was written.
+// OUTPUTS: Immutable events and their inverses. WRITING A CHORD ANYWHERE IN A BAR IS ONE EVENT: the
+//          owner removed the grid, so a new chord does not push its neighbours along a step and
+//          deleting one does not close a gap. A chord's position is part of its value, which means
+//          an update MAY MOVE IT — that is what moving a chord is, now that there is no address to
+//          keep fixed.
+// KEYWORDS: chord-event, insert, update, delete, inverse, place, no-grid, undo, d36, a73
 part of 'oplog.dart';
 
-/// Places a chord at its beat and step, pushing the chords already there one step up.
+/// Writes a chord at the place its mark carries.
 class ChordInsertEvent extends ChartEvent {
-  /// Creates an insertion of [chord] into bar [barIndex] of section [sectionId].
+  /// Creates an insertion of [chord].
   const ChordInsertEvent({
     required super.docId,
     required super.seq,
-    required this.sectionId,
-    required this.barIndex,
     required this.chord,
   });
 
-  /// The section the bar belongs to.
-  final String sectionId;
-
-  /// Zero-based index of the bar inside that section.
-  final int barIndex;
-
-  /// The chord placement to insert, carrying its own beat, step and engraving size.
-  final BeatChord chord;
+  /// The chord mark to write, carrying its place and its engraving size.
+  final ChordMark chord;
   @override
   String get type => 'chord.insert';
   @override
-  EventAnchor get anchor => EventAnchor(
-    sectionId: sectionId,
-    bar: barIndex,
-    beat: chord.beat,
-    step: chord.step,
-  );
+  EventAnchor get anchor => chord.place.anchor;
   @override
   Map<String, Object?> payloadJson() => <String, Object?>{
-    'sectionId': sectionId,
-    'bar': barIndex,
-    'chord': ModelJson.beatChord(chord),
+    'chord': ModelJson.chordMark(chord),
   };
   @override
-  ChordDeleteEvent inverse() => ChordDeleteEvent(
-    docId: docId,
-    seq: seq,
-    sectionId: sectionId,
-    barIndex: barIndex,
-    removed: chord,
-  );
+  ChordDeleteEvent inverse() =>
+      ChordDeleteEvent(docId: docId, seq: seq, removed: chord);
   @override
-  ChordInsertEvent withSeq(int seq) => ChordInsertEvent(
-    docId: docId,
-    seq: seq,
-    sectionId: sectionId,
-    barIndex: barIndex,
-    chord: chord,
-  );
+  ChordInsertEvent withSeq(int seq) =>
+      ChordInsertEvent(docId: docId, seq: seq, chord: chord);
   @override
   bool operator ==(Object other) =>
       other is ChordInsertEvent &&
       other.docId == docId &&
       other.seq == seq &&
-      other.sectionId == sectionId &&
-      other.barIndex == barIndex &&
       other.chord == chord;
   @override
-  int get hashCode => Object.hash(docId, seq, sectionId, barIndex, chord);
+  int get hashCode => Object.hash(docId, seq, chord);
 }
 
-/// Replaces the chord at one address with another, leaving its address unchanged.
+/// Replaces one chord mark with another, which under a coordinate model may also move it.
 class ChordUpdateEvent extends ChartEvent {
-  /// Creates an update of the chord at [from]'s address to [to].
+  /// Creates an update of the chord at [from]'s place to [to].
   ///
-  /// [from] and [to] must address the same (beat, step): moving a chord to a different cell is a
-  /// deletion and an insertion, and allowing an update to change the address would make the
-  /// event ambiguous about which cell the inverse has to restore.
+  /// [to] must live in the same bar as [from] — moving a chord from one bar to another is a
+  /// deletion and an insertion, because a single event that changed the bar would have to say which
+  /// bar's list the inverse restores it to and there would be two answers. Within a bar, though,
+  /// [to] MAY sit at a different place: that is what dragging a chord is.
   ChordUpdateEvent({
     required super.docId,
     required super.seq,
-    required this.sectionId,
-    required this.barIndex,
     required this.from,
     required this.to,
   }) : assert(
-         from.beat == to.beat && from.step == to.step,
-         'a chord update cannot move a chord; use delete then insert',
+         from.place.anchor == to.place.anchor,
+         'a chord update cannot move a chord to another bar; '
+         'use delete then insert',
        );
 
-  /// The section the bar belongs to.
-  final String sectionId;
+  /// The chord mark being replaced.
+  final ChordMark from;
 
-  /// Zero-based index of the bar inside that section.
-  final int barIndex;
-
-  /// The chord placement being replaced.
-  final BeatChord from;
-
-  /// The replacement, at the same beat and step.
-  final BeatChord to;
+  /// The replacement, in the same bar.
+  final ChordMark to;
   @override
   String get type => 'chord.update';
   @override
-  EventAnchor get anchor => EventAnchor(
-    sectionId: sectionId,
-    bar: barIndex,
-    beat: from.beat,
-    step: from.step,
-  );
+  EventAnchor get anchor => from.place.anchor;
   @override
   Map<String, Object?> payloadJson() => <String, Object?>{
-    'sectionId': sectionId,
-    'bar': barIndex,
-    'from': ModelJson.beatChord(from),
-    'to': ModelJson.beatChord(to),
+    'from': ModelJson.chordMark(from),
+    'to': ModelJson.chordMark(to),
   };
   @override
-  ChordUpdateEvent inverse() => ChordUpdateEvent(
-    docId: docId,
-    seq: seq,
-    sectionId: sectionId,
-    barIndex: barIndex,
-    from: to,
-    to: from,
-  );
+  ChordUpdateEvent inverse() =>
+      ChordUpdateEvent(docId: docId, seq: seq, from: to, to: from);
   @override
-  ChordUpdateEvent withSeq(int seq) => ChordUpdateEvent(
-    docId: docId,
-    seq: seq,
-    sectionId: sectionId,
-    barIndex: barIndex,
-    from: from,
-    to: to,
-  );
+  ChordUpdateEvent withSeq(int seq) =>
+      ChordUpdateEvent(docId: docId, seq: seq, from: from, to: to);
   @override
   bool operator ==(Object other) =>
       other is ChordUpdateEvent &&
       other.docId == docId &&
       other.seq == seq &&
-      other.sectionId == sectionId &&
-      other.barIndex == barIndex &&
       other.from == from &&
       other.to == to;
   @override
-  int get hashCode => Object.hash(docId, seq, sectionId, barIndex, from, to);
+  int get hashCode => Object.hash(docId, seq, from, to);
 }
 
-/// Removes the chord at one address and closes the gap in its beat.
+/// Removes one chord mark from the bar its place names.
 class ChordDeleteEvent extends ChartEvent {
-  /// Creates a deletion of [removed] from bar [barIndex] of section [sectionId].
+  /// Creates a deletion of [removed].
   ///
-  /// The removed placement is carried in full rather than described by its address, because the
-  /// inverse has to put back exactly what was there and an address alone would restore whatever
-  /// the document happens to hold by the time undo runs.
+  /// The removed placement is carried in full rather than described by its place, because the
+  /// inverse has to put back exactly what was there and a place alone would restore whatever the
+  /// document happens to hold there by the time undo runs.
   const ChordDeleteEvent({
     required super.docId,
     required super.seq,
-    required this.sectionId,
-    required this.barIndex,
     required this.removed,
   });
 
-  /// The section the bar belongs to.
-  final String sectionId;
-
-  /// Zero-based index of the bar inside that section.
-  final int barIndex;
-
-  /// The chord placement that was removed.
-  final BeatChord removed;
+  /// The chord mark that was removed.
+  final ChordMark removed;
   @override
   String get type => 'chord.delete';
   @override
-  EventAnchor get anchor => EventAnchor(
-    sectionId: sectionId,
-    bar: barIndex,
-    beat: removed.beat,
-    step: removed.step,
-  );
+  EventAnchor get anchor => removed.place.anchor;
   @override
   Map<String, Object?> payloadJson() => <String, Object?>{
-    'sectionId': sectionId,
-    'bar': barIndex,
-    'chord': ModelJson.beatChord(removed),
+    'chord': ModelJson.chordMark(removed),
   };
   @override
-  ChordInsertEvent inverse() => ChordInsertEvent(
-    docId: docId,
-    seq: seq,
-    sectionId: sectionId,
-    barIndex: barIndex,
-    chord: removed,
-  );
+  ChordInsertEvent inverse() =>
+      ChordInsertEvent(docId: docId, seq: seq, chord: removed);
   @override
-  ChordDeleteEvent withSeq(int seq) => ChordDeleteEvent(
-    docId: docId,
-    seq: seq,
-    sectionId: sectionId,
-    barIndex: barIndex,
-    removed: removed,
-  );
+  ChordDeleteEvent withSeq(int seq) =>
+      ChordDeleteEvent(docId: docId, seq: seq, removed: removed);
   @override
   bool operator ==(Object other) =>
       other is ChordDeleteEvent &&
       other.docId == docId &&
       other.seq == seq &&
-      other.sectionId == sectionId &&
-      other.barIndex == barIndex &&
       other.removed == removed;
   @override
-  int get hashCode => Object.hash(docId, seq, sectionId, barIndex, removed);
+  int get hashCode => Object.hash(docId, seq, removed);
 }

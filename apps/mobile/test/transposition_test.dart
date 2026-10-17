@@ -120,8 +120,8 @@ void main() {
     );
     // Same bars, same beats.
     expect(
-      moved.barsInReadingOrder[1].chords.first.beat,
-      written.barsInReadingOrder[1].chords.first.beat,
+      moved.barsInReadingOrder[1].chords.first.pseudoBeat,
+      written.barsInReadingOrder[1].chords.first.pseudoBeat,
     );
     // The written chart is untouched.
     expect(written.key, _dMajor);

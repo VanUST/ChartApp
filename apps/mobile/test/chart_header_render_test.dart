@@ -85,8 +85,11 @@ Song chartOf({
         for (int index = 0; index < bars; index++)
           Bar(
             timeSignature: meter,
-            chords: <BeatChord>[
-              BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
+                chord: Chord(root: ChordRoot(0)),
+              ),
             ],
           ),
       ],

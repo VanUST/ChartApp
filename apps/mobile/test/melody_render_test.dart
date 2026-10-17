@@ -131,7 +131,7 @@ FlutterTextMetrics _metricsFor(String? family) => FlutterTextMetrics(
 );
 
 /// A note of [base] at [letter]/[octave], placed at ([beat], [step]).
-BeatNote noteOf(
+NoteMark noteOf(
   NoteLetter letter,
   int octave,
   NoteValue value, {
@@ -139,18 +139,20 @@ BeatNote noteOf(
   int beat = 0,
   int step = 0,
   bool tied = false,
-}) => BeatNote(
+}) => NoteMark(
+  place: cellAt(beat, step),
   pitch: PitchedNote(note: WrittenNote(letter, alter), octave: octave),
   value: value,
-  beat: beat,
-  step: step,
   tiedToNext: tied,
 );
 
 /// A one-note bar: one chord on beat 0 and a melody, so the staff has a chord line above it.
-Bar melodyBar(List<BeatNote> melody) => Bar(
-  chords: <BeatChord>[
-    const BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+Bar melodyBar(List<NoteMark> melody) => Bar(
+  chords: <ChordMark>[
+    ChordMark(
+      place: cellAt(0),
+      chord: Chord(root: ChordRoot(0)),
+    ),
   ],
   melody: melody,
 );
@@ -171,10 +173,10 @@ Song melodySong() => Song(
       label: const SectionLabel.letter('M'),
       bars: <Bar>[
         // Every written value the model can express, plus the dotted and the tuplet forms.
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(NoteLetter.c, 4, const NoteValue.plain(NoteBase.whole)),
         ]),
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(
             NoteLetter.d,
             4,
@@ -188,7 +190,7 @@ Song melodySong() => Song(
             beat: 2,
           ),
         ]),
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(
             NoteLetter.f,
             4,
@@ -243,7 +245,7 @@ Song melodySong() => Song(
           ),
         ]),
         // A tie from one beat into the next: one sound written as two notes.
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(
             NoteLetter.g,
             4,
@@ -259,7 +261,7 @@ Song melodySong() => Song(
           ),
         ]),
         // A stacked beat: two notes at one address, which is a chord on the staff.
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(
             NoteLetter.c,
             4,
@@ -288,7 +290,7 @@ Song melodySong() => Song(
           ),
         ]),
         // Accidentals: a flat, a sharp and a double flat, each on the first note of its beat.
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(
             NoteLetter.d,
             4,
@@ -319,7 +321,7 @@ Song melodySong() => Song(
           ),
         ]),
         // Three ledger lines above the staff: A5, the topmost line; B5; and C6 above it.
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(
             NoteLetter.a,
             highOctave,
@@ -346,7 +348,7 @@ Song melodySong() => Song(
           ),
         ]),
         // Three ledger lines below the staff: C4, A3, and F3 below them.
-        melodyBar(<BeatNote>[
+        melodyBar(<NoteMark>[
           noteOf(
             NoteLetter.c,
             4,
@@ -622,7 +624,7 @@ void main() {
     // covering one case would still render and still look plausible.
     final Set<NoteBase> bases = <NoteBase>{
       for (final Bar b in song.sections.first.bars)
-        for (final BeatNote n in b.melody) n.value.base,
+        for (final NoteMark n in b.melody) n.value.base,
     };
     expect(
       bases,
@@ -781,7 +783,7 @@ void main() {
           id: 'N',
           label: const SectionLabel.letter('N'),
           bars: <Bar>[
-            melodyBar(<BeatNote>[
+            melodyBar(<NoteMark>[
               noteOf(
                 NoteLetter.c,
                 4,
@@ -924,7 +926,7 @@ class MelodyNote {
   });
 
   /// Describes [note] — and the number of ledger lines its pitch needs — for the report.
-  factory MelodyNote.of(BeatNote note) {
+  factory MelodyNote.of(NoteMark note) {
     final int step = melodyStepOf(
       note.pitch.note,
       octave: note.pitch.octave,

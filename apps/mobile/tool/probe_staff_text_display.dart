@@ -255,8 +255,11 @@ void main() {
             bars: <Bar>[
               Bar(
                 timeSignature: TimeSignature.fourFour,
-                chords: <BeatChord>[
-                  BeatChord(chord: const Chord(root: ChordRoot(0)), beat: 0),
+                chords: <ChordMark>[
+                  ChordMark(
+                    place: cellAt(0),
+                    chord: const Chord(root: ChordRoot(0)),
+                  ),
                 ],
                 staffText: const <String>[
                   '*69Куплет',

@@ -13,29 +13,33 @@ import 'package:test/test.dart';
 ///
 /// Two chords sharing a beat is what a comma packs into one cell, and it is the case an anchor
 /// has to keep apart.
-const Bar _packedBeat = Bar(
-  chords: <BeatChord>[
-    BeatChord(
+Bar _packedBeat = Bar(
+  chords: <ChordMark>[
+    ChordMark(
+      place: cellAt(0),
       chord: Chord(root: ChordRoot(2), quality: ChordQuality.minorSeventh),
-      beat: 0,
     ),
-    BeatChord(
+    ChordMark(
+      place: cellAt(0, 1),
       chord: Chord(root: ChordRoot(7), quality: ChordQuality.dominantSeventh),
-      beat: 0,
-      step: 1,
     ),
   ],
 );
 
 /// A bar that carries no chords, which means the previous chord sustains.
-const Bar _sustainingBar = Bar();
+final Bar _sustainingBar = Bar();
 
 /// A two-bar repeated passage with a first and a second ending.
-const List<Bar> _repeatedPassage = <Bar>[
+List<Bar> _repeatedPassage = <Bar>[
   Bar(
     openingBarline: Barline.repeatStart,
     volta: Volta(1),
-    chords: <BeatChord>[BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0)],
+    chords: <ChordMark>[
+      ChordMark(
+        place: cellAt(0),
+        chord: Chord(root: ChordRoot(0)),
+      ),
+    ],
   ),
   Bar(closingBarline: Barline.repeatEnd, volta: Volta(1)),
   Bar(volta: Volta(2), marks: <BarMark>{BarMark.fermata}),
@@ -77,40 +81,39 @@ void main() {
     );
   });
 
-  group('BeatChord addressing', () {
+  group('ChordMark addressing', () {
     test('two chords packed onto one beat differ by their step', () {
-      const BeatChord first = BeatChord(
+      final ChordMark first = ChordMark(
+        place: cellAt(0),
         chord: Chord(root: ChordRoot(2)),
-        beat: 0,
       );
-      const BeatChord second = BeatChord(
+      final ChordMark second = ChordMark(
+        place: cellAt(0, 1),
         chord: Chord(root: ChordRoot(2)),
-        beat: 0,
-        step: 1,
       );
       // Same chord, same beat, different place in the bar.
       expect(first.chord, second.chord);
-      expect(first.beat, second.beat);
+      expect(first.pseudoBeat, second.pseudoBeat);
       expect(first == second, isFalse);
     });
 
     test('the default step is zero and the default size is normal', () {
-      const BeatChord chord = BeatChord(
+      final ChordMark chord = ChordMark(
+        place: cellAt(2),
         chord: Chord(root: ChordRoot(0)),
-        beat: 2,
       );
-      expect(chord.step, 0);
+      expect(chord.pseudoStep, 0);
       expect(chord.size, ChordSize.normal);
     });
 
     test('size is part of equality', () {
-      const BeatChord normal = BeatChord(
+      final ChordMark normal = ChordMark(
+        place: cellAt(0),
         chord: Chord(root: ChordRoot(0)),
-        beat: 0,
       );
-      const BeatChord small = BeatChord(
+      final ChordMark small = ChordMark(
+        place: cellAt(0),
         chord: Chord(root: ChordRoot(0)),
-        beat: 0,
         size: ChordSize.small,
       );
       expect(normal == small, isFalse);
@@ -168,25 +171,24 @@ void main() {
 
     test('keeps two chords on one beat in order under equality', () {
       expect(_packedBeat.chords.length, 2);
-      expect(_packedBeat.chords[0].step, 0);
-      expect(_packedBeat.chords[1].step, 1);
+      expect(_packedBeat.chords[0].pseudoStep, 0);
+      expect(_packedBeat.chords[1].pseudoStep, 1);
       // Built the other way round, the same bar is a different bar.
-      const Bar reversed = Bar(
-        chords: <BeatChord>[
-          BeatChord(
+      final Bar reversed = Bar(
+        chords: <ChordMark>[
+          ChordMark(
+            place: cellAt(0, 1),
             chord: Chord(
               root: ChordRoot(7),
               quality: ChordQuality.dominantSeventh,
             ),
-            beat: 0,
-            step: 1,
           ),
-          BeatChord(
+          ChordMark(
+            place: cellAt(0),
             chord: Chord(
               root: ChordRoot(2),
               quality: ChordQuality.minorSeventh,
             ),
-            beat: 0,
           ),
         ],
       );
@@ -230,12 +232,12 @@ void main() {
     });
 
     test('compares its bars in order', () {
-      const Section one = Section(
+      final Section one = Section(
         id: 's',
         label: SectionLabel.letter('A'),
         bars: <Bar>[_packedBeat, _sustainingBar],
       );
-      const Section other = Section(
+      final Section other = Section(
         id: 's',
         label: SectionLabel.letter('A'),
         bars: <Bar>[_sustainingBar, _packedBeat],
@@ -245,7 +247,7 @@ void main() {
   });
 
   group('Song', () {
-    const Song song = Song(
+    final Song song = Song(
       id: 'doc-1',
       title: 'Probe',
       composer: 'LastName FirstName',

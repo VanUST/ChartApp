@@ -115,7 +115,7 @@ Future<void> tapEngraved(WidgetTester tester, Offset engraved) async {
 List<String> notesOf(Song song) => <String>[
   for (final Section section in song.sections)
     for (int barIndex = 0; barIndex < section.bars.length; barIndex++)
-      for (final BeatNote note in section.bars[barIndex].melody)
+      for (final NoteMark note in section.bars[barIndex].melody)
         // One string per element, assembled by `noteLine`: `no_adjacent_strings_in_list` forbids two
         // literals in a list, and the mirror lint forbids joining them with `+`. Both are satisfied
         // by building the line in a function and placing the call here.
@@ -123,10 +123,10 @@ List<String> notesOf(Song song) => <String>[
 ];
 
 /// One note rendered as `A[0] 1.0:A4 eighth~`.
-String noteLine(String sectionId, int barIndex, BeatNote note) {
+String noteLine(String sectionId, int barIndex, NoteMark note) {
   final String tie = note.tiedToNext ? '~' : '';
   final String value = '${note.value}';
-  return '$sectionId[$barIndex] ${note.beat}.${note.step}:${note.pitch} '
+  return '$sectionId[$barIndex] ${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} '
       '$value$tie';
 }
 
@@ -315,7 +315,9 @@ void main() {
       // single note. Bar 2 is empty because the palette's own Remove took the note back off it.
       expect(reopened.song.barsInReadingOrder[1].melody, isEmpty);
       expect(
-        reopened.song.barsInReadingOrder[0].melody.map((BeatNote n) => n.step),
+        reopened.song.barsInReadingOrder[0].melody.map(
+          (NoteMark n) => n.pseudoStep,
+        ),
         <int>[0, 1, 0],
         reason: 'the steps of each beat must come back as they were written',
       );

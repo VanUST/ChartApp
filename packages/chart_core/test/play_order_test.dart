@@ -25,7 +25,12 @@ Bar _bar(
   openingBarline: opening,
   closingBarline: closing,
   volta: volta,
-  chords: <BeatChord>[BeatChord(chord: Chord(root: ChordRoot(root)), beat: 0)],
+  chords: <ChordMark>[
+    ChordMark(
+      place: cellAt(0),
+      chord: Chord(root: ChordRoot(root)),
+    ),
+  ],
 );
 
 /// A bar that writes no chord and carries only a repeat-previous symbol, as a `%` bar does.

@@ -24,17 +24,20 @@ import 'package:test/test.dart';
 
 /// A 4/4 bar holding one major triad on beat 0 and nothing else.
 Bar oneChordBar(int rootPitchClass) => Bar(
-  chords: <BeatChord>[
-    BeatChord(chord: Chord(root: ChordRoot(rootPitchClass)), beat: 0),
+  chords: <ChordMark>[
+    ChordMark(
+      place: cellAt(0),
+      chord: Chord(root: ChordRoot(rootPitchClass)),
+    ),
   ],
 );
 
 /// A 4/4 bar holding one chord on the given beat.
 Bar chordOnBeat(int rootPitchClass, int beat) => Bar(
-  chords: <BeatChord>[
-    BeatChord(
+  chords: <ChordMark>[
+    ChordMark(
+      place: cellAt(beat),
       chord: Chord(root: ChordRoot(rootPitchClass)),
-      beat: beat,
     ),
   ],
 );
@@ -67,24 +70,24 @@ Song staffSong() => Song(
       bars: <Bar>[
         for (int barIndex = 0; barIndex < 4; barIndex++)
           Bar(
-            chords: <BeatChord>[
+            chords: <ChordMark>[
               for (int beat = 0; beat < 4; beat++)
-                BeatChord(
+                ChordMark(
+                  place: cellAt(beat),
                   chord: Chord(root: ChordRoot(barIndex + beat)),
-                  beat: beat,
                 ),
             ],
             // A note on every beat, so the column a tap names is also the column a notehead stands
             // in: the beat the hit test answers can be checked against the note that beat holds.
-            melody: <BeatNote>[
+            melody: <NoteMark>[
               for (int beat = 0; beat < 4; beat++)
-                BeatNote(
+                NoteMark(
+                  place: cellAt(beat),
                   pitch: const PitchedNote(
                     note: WrittenNote(NoteLetter.e, 0),
                     octave: 4,
                   ),
                   value: const NoteValue.plain(NoteBase.quarter),
-                  beat: beat,
                 ),
             ],
           ),

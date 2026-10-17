@@ -89,7 +89,7 @@ Future<void> showChordPalette(
   int semitoneShift = 0,
   VoidCallback? onChanged,
 }) async {
-  final BeatChord? existing = session.existingChordAt(
+  final ChordMark? existing = session.existingChordAt(
     sectionId: sectionId,
     barIndex: barIndex,
     beat: beat,
@@ -147,7 +147,7 @@ class ChordPaletteSheet extends StatefulWidget {
   final int beat;
 
   /// What the cell held when the sheet opened, or null when it was empty.
-  final BeatChord? initialChord;
+  final ChordMark? initialChord;
 
   /// The key the preview is spelled in.
   final Key shownKey;
@@ -184,7 +184,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   );
 
   /// The chord the cell held when the sheet opened, so the grid can mark where the edit started.
-  late final BeatChord? _opening = widget.initialChord;
+  late final ChordMark? _opening = widget.initialChord;
 
   /// What the musician has typed into the symbol field, unfinished.
   final TextEditingController _symbol = TextEditingController();
@@ -207,7 +207,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
     // The field opens holding the chord the cell already carries, spelled in the WRITTEN key: a
     // musician editing a chord should be able to see what he wrote and change one character of it,
     // rather than retype a symbol the editor already holds.
-    final BeatChord? existing = widget.initialChord;
+    final ChordMark? existing = widget.initialChord;
     if (existing != null) {
       _symbol.text = existing.chord.render(
         widget.session.song.key,
@@ -290,7 +290,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   // INPUTS: None.
   // OUTPUTS: The cell's chord, or null when it holds none.
   // KEYWORDS: read-back, live-state, undo-aware
-  BeatChord? get _current => widget.session.existingChordAt(
+  ChordMark? get _current => widget.session.existingChordAt(
     sectionId: widget.sectionId,
     barIndex: widget.barIndex,
     beat: widget.beat,
@@ -304,7 +304,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   //          for why that is the interaction and not an oversight.
   // KEYWORDS: apply, haptic, session-append, one-tap-per-root, stay-open
   void _apply(Chord chord) {
-    final BeatChord? existing = _current;
+    final ChordMark? existing = _current;
     final bool applied = widget.session.applyChordToCell(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
@@ -382,7 +382,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final BeatChord? current = _current;
+    final ChordMark? current = _current;
     final ChordRootChoice? draft = _draftRoot;
     final Chord? preview = draft == null ? null : chordOf(draft, _quality);
     final int? currentPitch = current?.chord.root.pitchClass;
@@ -560,7 +560,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   // OUTPUTS: A two-line card: the preview, or a prompt to pick a root; beneath it, the chord the
   //          cell holds now, which is what makes the change legible before it is made.
   // KEYWORDS: preview-card, current-chord, prompt, falsifiable-feedback, localized
-  Widget _buildPreview(Chord? preview, BeatChord? current) {
+  Widget _buildPreview(Chord? preview, ChordMark? current) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -642,7 +642,7 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   // INPUTS: current — the cell's chord; the action is disabled when there is none.
   // OUTPUTS: A row holding one destructive-styled button.
   // KEYWORDS: remove, destructive, disabled-when-empty, same-sheet, localized
-  Widget _buildRemoveRow(BeatChord? current) => Row(
+  Widget _buildRemoveRow(ChordMark? current) => Row(
     mainAxisAlignment: MainAxisAlignment.end,
     children: <Widget>[
       TextButton.icon(

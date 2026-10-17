@@ -289,11 +289,11 @@ Bar _barWithOneNote(Bar bar) => Bar(
   noChord: bar.noChord,
   marks: bar.marks,
   staffText: bar.staffText,
-  melody: const <BeatNote>[
-    BeatNote(
+  melody: <NoteMark>[
+    NoteMark(
+      place: cellAt(0),
       pitch: PitchedNote(note: WrittenNote(NoteLetter.b, -1), octave: 4),
       value: NoteValue.plain(NoteBase.quarter),
-      beat: 0,
     ),
   ],
   percussion: bar.percussion,

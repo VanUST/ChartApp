@@ -37,8 +37,11 @@ Song syntheticSong({required int bars, bool repeats = false, String? title}) =>
           bars: <Bar>[
             for (int index = 0; index < bars; index++)
               Bar(
-                chords: <BeatChord>[
-                  const BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+                chords: <ChordMark>[
+                  ChordMark(
+                    place: cellAt(0),
+                    chord: Chord(root: ChordRoot(0)),
+                  ),
                 ],
                 openingBarline: repeats && index == 0
                     ? Barline.repeatStart

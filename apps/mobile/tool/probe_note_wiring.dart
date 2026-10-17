@@ -96,8 +96,8 @@ int noteCount(EditSession session) {
 List<String> notesOf(EditSession session) => <String>[
   for (final Section section in session.song.sections)
     for (final Bar bar in section.bars)
-      for (final BeatNote note in bar.melody)
-        '${note.beat}.${note.step}:${note.pitch}',
+      for (final NoteMark note in bar.melody)
+        '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch}',
 ];
 
 /// The page-space centre of the staff step [step] in column [beat] of the page's first bar.

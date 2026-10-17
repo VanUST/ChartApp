@@ -37,7 +37,7 @@
 //              prototype had no cells, so it matched its noteheads to the truth by nearest x. Here
 //              the bar publishes the columns its beats were engraved at, so which beat a notehead
 //              belongs to is read, and the order of heads inside one beat gives the sub-beat ordinal
-//              that [BeatNote.step] stores (A75: `step` is TIME, and the engraver draws step k at
+//              that [NoteMark.step] stores (A75: `step` is TIME, and the engraver draws step k at
 //              the k-th position across the cell).
 //
 //          WHAT IT DELIBERATELY DOES NOT DO, AND EACH IS A BOUND THE MEASUREMENT HAS TOO:
@@ -491,7 +491,7 @@ class MelodyNoteHead {
   final int beat;
 
   /// The head's position INSIDE its beat, counting from the left: 0 is the first note of the cell,
-  /// which is the ordinal [BeatNote.step] stores and the engraver draws at the k-th x (A75).
+  /// which is the ordinal [NoteMark.step] stores and the engraver draws at the k-th x (A75).
   final int orderInBeat;
 
   /// The pitch that staff step names, with a NATURAL alteration.
@@ -708,7 +708,7 @@ class MelodyNoteReader {
   // INPUTS: heads — the accepted heads, in the order the blobs were found.
   // OUTPUTS: The same heads, one per beat sorted left to right, and beats ascending. The ordinal is
   //          the head's RANK by x within its own beat: the leftmost head of a cell is 0 and the
-  //          engraver draws step 0 leftmost (A75), so the ordinal is `BeatNote.step` and reading it
+  //          engraver draws step 0 leftmost (A75), so the ordinal is `NoteMark.step` and reading it
   //          from the drawing is the same statement the engraver makes.
   //
   //          An empty list yields an empty list; a bar whose heads all fall in one beat yields that

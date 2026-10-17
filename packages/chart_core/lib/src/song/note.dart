@@ -1,13 +1,14 @@
-// PURPOSE: Place pitches and drum hits inside a bar. A melody note and a percussion hit share the
-//          same addressing as a chord — a cell plus a step within it — so that one anchor scheme
-//          covers every object a user can point at, and a bar can hold a chord line, a melody and
-//          a drum part without three different coordinate systems.
-// INPUTS: A pitched note or an instrument number, a written duration, and a cell and step within
-//         the bar.
-// OUTPUTS: Immutable values. [melodyFillsBar] answers whether a list of notes exactly fills a
-//          bar, using exact rational arithmetic so that a triplet-based fill is not reported as
-//          short by a rounding error.
-// KEYWORDS: melody, note, percussion, drum-hit, beat-address, anchor, bar-fill
+// PURPOSE: Place pitches and drum hits inside a bar. A melody note and a percussion hit are
+//          located the way a chord now is — a coordinate in the bar, not an index in a grid — so
+//          that one place scheme covers every object a user can point at, and a bar can hold a
+//          chord line, a melody and a drum part without three different coordinate systems.
+// INPUTS: A pitched note or an instrument number, a written duration, and an [AnchoredPlace].
+// OUTPUTS: Immutable values. [melodyFillsBar] answers whether a list of notes adds up to the length
+//          a meter states, using exact rational arithmetic so that a triplet-based fill is not
+//          reported short by a rounding error; it is a question about the written page and it
+//          places nothing, so the meter remains a label.
+// KEYWORDS: melody, note, percussion, drum-hit, anchored-place, coordinate, no-grid, bar-fill
+import '../anchored_place.dart';
 import '../pitch.dart';
 import 'note_value.dart';
 import 'time_signature.dart';
@@ -41,16 +42,24 @@ class PitchedNote {
   String toString() => '${note.toString()}$octave';
 }
 
-/// A pitched note placed on a beat of a bar.
-class BeatNote {
-  /// Creates a note of [value] at ([beat], [step]).
-  const BeatNote({
+/// A pitch written at a place in a bar, with the duration it is written to last.
+///
+/// ITS HORIZONTAL OFFSET IS ITS TIME. There is no beat, no cell and no step: the musician writes a
+/// notehead where he wants it to sound, and the engraver draws it at that x. The vertical offset of
+/// the place is always zero, because a note's height IS its pitch — the melody staff derives the y
+/// from [pitch], and storing a second y here would allow a note whose glyph and whose sound
+/// disagreed.
+class NoteMark {
+  /// Creates a note of [value] at [place].
+  const NoteMark({
+    required this.place,
     required this.pitch,
     required this.value,
-    required this.beat,
-    this.step = 0,
     this.tiedToNext = false,
   });
+
+  /// Where the note is written: its bar, and its distance along that bar.
+  final AnchoredPlace place;
 
   /// The note that sounds.
   final PitchedNote pitch;
@@ -58,44 +67,59 @@ class BeatNote {
   /// How long it is written to last.
   final NoteValue value;
 
-  /// Zero-based cell index inside the bar, the same address a chord uses.
-  final int beat;
-
-  /// Order within [beat] when several notes share it.
-  final int step;
-
   /// Whether this note is tied into the next one, which is how a single sound is written across a
   /// barline. Stored on the earlier note rather than as a pair identifier because a tie always
   /// points forward, and a backward pointer would have to be repaired whenever the bar before it
   /// changed.
   final bool tiedToNext;
 
+  /// Where the note sits along its bar, in bar-local logical pixels. This is its time.
+  double get offsetX => place.offsetX;
+
+  /// Returns a copy of this note with the given fields replaced.
+  NoteMark copyWith({
+    AnchoredPlace? place,
+    PitchedNote? pitch,
+    NoteValue? value,
+    bool? tiedToNext,
+  }) => NoteMark(
+    place: place ?? this.place,
+    pitch: pitch ?? this.pitch,
+    value: value ?? this.value,
+    tiedToNext: tiedToNext ?? this.tiedToNext,
+  );
+
   @override
   bool operator ==(Object other) =>
-      other is BeatNote &&
+      other is NoteMark &&
+      other.place == place &&
       other.pitch == pitch &&
       other.value == value &&
-      other.beat == beat &&
-      other.step == step &&
       other.tiedToNext == tiedToNext;
 
   @override
-  int get hashCode => Object.hash(pitch, value, beat, step, tiedToNext);
+  int get hashCode => Object.hash(place, pitch, value, tiedToNext);
 
   @override
   String toString() =>
-      'beat $beat.$step: $pitch ${value.toString()}${tiedToNext ? '~' : ''}';
+      'x${place.offsetX.toStringAsFixed(1)}: $pitch ${value.toString()}'
+      '${tiedToNext ? '~' : ''}';
 }
 
-/// A percussion hit placed on a beat of a bar.
-class PercussionHit {
-  /// Creates a hit on [instrument] of [value] at ([beat], [step]).
-  const PercussionHit({
+/// A percussion hit written at a place in a bar.
+///
+/// THE SAME PLACE SCHEME AS A NOTE, for the same reason: the drum staff is a staff, and a hit is at
+/// the x it was written at. Its vertical position is its instrument, not a stored y.
+class PercussionMark {
+  /// Creates a hit on [instrument] of [value] at [place].
+  const PercussionMark({
+    required this.place,
     required this.instrument,
     required this.value,
-    required this.beat,
-    this.step = 0,
   });
+
+  /// Where the hit is written.
+  final AnchoredPlace place;
 
   /// The struck instrument, as a MIDI percussion note number.
   ///
@@ -108,30 +132,38 @@ class PercussionHit {
   /// the note is drawn rather than one about how long it rings.
   final NoteValue value;
 
-  /// Zero-based cell index inside the bar.
-  final int beat;
+  /// Where the hit sits along its bar, in bar-local logical pixels.
+  double get offsetX => place.offsetX;
 
-  /// Order within [beat] when several hits share it.
-  final int step;
+  /// Returns a copy of this hit with the given fields replaced.
+  PercussionMark copyWith({
+    AnchoredPlace? place,
+    int? instrument,
+    NoteValue? value,
+  }) => PercussionMark(
+    place: place ?? this.place,
+    instrument: instrument ?? this.instrument,
+    value: value ?? this.value,
+  );
 
   @override
   bool operator ==(Object other) =>
-      other is PercussionHit &&
+      other is PercussionMark &&
+      other.place == place &&
       other.instrument == instrument &&
-      other.value == value &&
-      other.beat == beat &&
-      other.step == step;
+      other.value == value;
 
   @override
-  int get hashCode => Object.hash(instrument, value, beat, step);
+  int get hashCode => Object.hash(place, instrument, value);
 
   @override
-  String toString() => 'beat $beat.$step: drum $instrument ${value.toString()}';
+  String toString() =>
+      'x${place.offsetX.toStringAsFixed(1)}: drum $instrument ${value.toString()}';
 }
 
-// PURPOSE: Answer whether a run of notes exactly fills one bar of a meter, using the exact written
-//          durations rather than a tick conversion.
-// INPUTS: timeSignature — the meter in force for the bar. notes — the notes as written.
+// PURPOSE: Answer whether a run of written durations adds up to one bar of a meter, using the
+//          exact written durations rather than a tick conversion.
+// INPUTS: timeSignature — the meter whose length is compared with. notes — the notes as written.
 // OUTPUTS: True when the durations sum to the bar's length exactly.
 //
 //          False for an empty list, because an empty bar is not a full one; the caller that wants
@@ -139,9 +171,14 @@ class PercussionHit {
 //          things. Durations are summed as an exact fraction, so a fill built from triplets is
 //          judged correctly rather than being reported short by rounding — which is exactly the
 //          case a tick grid chosen for binary values gets wrong.
-// KEYWORDS: bar-fill, validation, exact-arithmetic, triplets, completeness
-/// Returns whether [notes] fill exactly one bar of [timeSignature].
-bool melodyFillsBar(TimeSignature timeSignature, List<BeatNote> notes) {
+//
+//          THIS FUNCTION PLACES NOTHING AND GATES NOTHING. It reports a sum; the meter is a label
+//          on the chart, and no position in this model is derived from it. It is kept because the
+//          written duration is still part of a note, and a musician asking "does this bar add up"
+//          deserves an answer that is arithmetic rather than an opinion.
+// KEYWORDS: bar-fill, validation, exact-arithmetic, triplets, completeness, no-grid
+/// Returns whether [notes] add up to exactly one bar of [timeSignature].
+bool melodyFillsBar(TimeSignature timeSignature, List<NoteMark> notes) {
   if (notes.isEmpty) {
     return false;
   }
@@ -150,7 +187,7 @@ bool melodyFillsBar(TimeSignature timeSignature, List<BeatNote> notes) {
   // calculation does not justify.
   int sumNumerator = 0;
   int sumDenominator = 1;
-  for (final BeatNote note in notes) {
+  for (final NoteMark note in notes) {
     sumNumerator =
         sumNumerator * note.value.wholeDenominator +
         note.value.wholeNumerator * sumDenominator;

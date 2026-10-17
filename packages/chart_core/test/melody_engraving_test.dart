@@ -133,19 +133,18 @@ const List<Written> _pitchesForBothClefs = <Written>[
 ///
 /// [value] is a quarter note unless a case is about the written value, and [step] is the stacking
 /// offset of a second note on the SAME beat, which is a chord on the staff rather than a later note.
-BeatNote _note(
+NoteMark _note(
   Written pitch, {
   int beat = 0,
   int step = 0,
   NoteValue value = const NoteValue.plain(NoteBase.quarter),
-}) => BeatNote(
+}) => NoteMark(
+  place: cellAt(beat, step),
   pitch: PitchedNote(
     note: WrittenNote(pitch.letter, pitch.alter),
     octave: pitch.octave,
   ),
   value: value,
-  beat: beat,
-  step: step,
 );
 
 /// The melody staff of a one-bar song holding [melody], engraved on the geometry declared above.
@@ -153,7 +152,7 @@ BeatNote _note(
 /// [timeSignature] is the bar's meter. It matters to beaming, which is grouped by BEAT, and in a
 /// compound meter the beat is not the note the numerator counts: 6/8 has two beats of three eighths.
 PlacedMelodyStaff _engrave(
-  List<BeatNote> melody, {
+  List<NoteMark> melody, {
   String clef = 'treble',
   bool includeClef = false,
   TimeSignature timeSignature = TimeSignature.fourFour,
@@ -184,12 +183,12 @@ const NoteValue _eighth = NoteValue.plain(NoteBase.eighth);
 /// The notes land at ([beat], 0), ([beat], 1) … which is how a run inside a beat is addressed: one
 /// cell, one note after another. [pitches] is read from its start, so a case that names four pitches
 /// and asks for four notes says exactly what it means.
-List<BeatNote> _run(
+List<NoteMark> _run(
   int count,
   NoteBase base,
   List<Written> pitches, {
   int beat = 0,
-}) => <BeatNote>[
+}) => <NoteMark>[
   for (int index = 0; index < count; index++)
     _note(
       pitches[index],
@@ -203,7 +202,7 @@ List<BeatNote> _run(
 ///
 /// It exists for the claims that are about a PAGE rather than about one bar — whether a beam crosses
 /// a barline is one of those, and it cannot be answered by engraving a bar on its own.
-Song _beamSong(List<List<BeatNote>> melodies) => Song(
+Song _beamSong(List<List<NoteMark>> melodies) => Song(
   title: 'Beam cases',
   key: Key.cMajor,
   staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
@@ -212,7 +211,7 @@ Song _beamSong(List<List<BeatNote>> melodies) => Song(
       id: 'B',
       label: const SectionLabel.letter('B'),
       bars: <Bar>[
-        for (final List<BeatNote> melody in melodies) Bar(melody: melody),
+        for (final List<NoteMark> melody in melodies) Bar(melody: melody),
       ],
     ),
   ],
@@ -520,7 +519,7 @@ void main() {
       // space, six times more. The offset is printed so the number can be read off the run instead
       // of being taken on trust.
       const double tolerance = _staffSpace / 4;
-      final PlacedMelodyStaff c4 = _engrave(<BeatNote>[
+      final PlacedMelodyStaff c4 = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4)),
       ]);
       final MelodyGlyph head = _oneOf(c4, MelodyGlyphKind.notehead);
@@ -548,7 +547,7 @@ void main() {
 
       // A note two lines outside the staff needs TWO ledger lines, and each of them lies on the
       // grid: A3 is the second ledger line below a treble staff.
-      final PlacedMelodyStaff a3 = _engrave(<BeatNote>[
+      final PlacedMelodyStaff a3 = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.a, 3)),
       ]);
       final List<MelodyGlyph> ledgers = _glyphsOf(
@@ -589,7 +588,7 @@ void main() {
 
       // AND A NOTE IN THE SPACE OUTSIDE THE STAFF gets a line NEARER THE STAFF than itself, never a
       // line through it: B3 is the space between the first and second ledger lines below.
-      final PlacedMelodyStaff b3 = _engrave(<BeatNote>[
+      final PlacedMelodyStaff b3 = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.b, 3)),
       ]);
       final MelodyGlyph b3Ledger = _oneOf(b3, MelodyGlyphKind.ledgerLine);
@@ -652,7 +651,7 @@ void main() {
 
       // And the SIGN is drawn at its notehead's own height and clear of it, which is how a reader
       // pairs a sign with a note when a chord or a fast passage has several on one beat.
-      final PlacedMelodyStaff flat = _engrave(<BeatNote>[
+      final PlacedMelodyStaff flat = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.d, 4, alter: -1)),
       ]);
       final MelodyGlyph flatHead = _oneOf(flat, MelodyGlyphKind.notehead);
@@ -689,7 +688,7 @@ void main() {
 
       // The flat is at D's height and NOT at C's, which is the geometry of the letter fact above:
       // a C#4 sits on a ledger line a whole space lower than the Db4 that sounds the same.
-      final PlacedMelodyStaff sharp = _engrave(<BeatNote>[
+      final PlacedMelodyStaff sharp = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4, alter: 1)),
       ]);
       final double flatHeadY = _cy(flatHead);
@@ -735,7 +734,7 @@ void main() {
         (Written(NoteLetter.f, 5), false),
       ];
       for (final (Written pitch, bool up) in stemCases) {
-        final PlacedMelodyStaff staff = _engrave(<BeatNote>[_note(pitch)]);
+        final PlacedMelodyStaff staff = _engrave(<NoteMark>[_note(pitch)]);
         final MelodyGlyph head = _oneOf(staff, MelodyGlyphKind.notehead);
         final MelodyGlyph stem = _oneOf(staff, MelodyGlyphKind.stem);
         stdout.writeln(
@@ -759,7 +758,7 @@ void main() {
       // HOLLOW AND FILLED. A whole note and a half note are engraved hollow; a quarter and anything
       // shorter is filled. This is how a musician reads the duration before reading anything else.
       for (final NoteBase base in <NoteBase>[NoteBase.whole, NoteBase.half]) {
-        final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+        final PlacedMelodyStaff staff = _engrave(<NoteMark>[
           _note(const Written(NoteLetter.e, 4), value: NoteValue.plain(base)),
         ]);
         expect(
@@ -773,7 +772,7 @@ void main() {
         NoteBase.eighth,
         NoteBase.sixteenth,
       ]) {
-        final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+        final PlacedMelodyStaff staff = _engrave(<NoteMark>[
           _note(const Written(NoteLetter.e, 4), value: NoteValue.plain(base)),
         ]);
         expect(
@@ -792,7 +791,7 @@ void main() {
       // лучше»: a staff that looks signed and says nothing readable is worse than one with no clef.
       // This test exists so the next person cannot add one back as an improvement without meeting
       // the decision.
-      final PlacedMelodyStaff treble = _engrave(<BeatNote>[
+      final PlacedMelodyStaff treble = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4)),
       ], includeClef: true);
       expect(
@@ -821,7 +820,7 @@ void main() {
 
       // The one kind of glyph that carries text is the accidental, and it carries its own note's
       // sign — so "text on the staff" cannot come to mean anything else by accident.
-      final PlacedMelodyStaff withFlat = _engrave(<BeatNote>[
+      final PlacedMelodyStaff withFlat = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.d, 4, alter: -1)),
       ]);
       final List<MelodyGlyph> texts = <MelodyGlyph>[
@@ -838,7 +837,7 @@ void main() {
       // A bar that opens no system prints no clef at all, which is the model half of the same rule:
       // one clef per system, and never a letter on every bar.
       expect(
-        _engrave(<BeatNote>[_note(const Written(NoteLetter.c, 4))]).clef,
+        _engrave(<NoteMark>[_note(const Written(NoteLetter.c, 4))]).clef,
         isNull,
         reason: 'a bar that does not open a system does not print the clef',
       );
@@ -912,7 +911,7 @@ void main() {
       // A LONE EIGHTH KEEPS ITS FLAG, because there is no other note of its beat to join: an
       // engraver who beamed it to nothing would draw a single-note group, and one who beamed it to
       // the next beat would join two different beats.
-      final PlacedMelodyStaff lone = _engrave(<BeatNote>[
+      final PlacedMelodyStaff lone = _engrave(<NoteMark>[
         _note(
           const Written(NoteLetter.e, 4),
           value: const NoteValue.plain(NoteBase.eighth),
@@ -945,7 +944,7 @@ void main() {
         Written(NoteLetter.f, 4),
         Written(NoteLetter.g, 4),
       ];
-      final List<BeatNote> acrossTwoBeats = <BeatNote>[
+      final List<NoteMark> acrossTwoBeats = <NoteMark>[
         _note(pitches[0], beat: 0, step: 0, value: _eighth),
         _note(pitches[1], beat: 0, step: 1, value: _eighth),
         _note(pitches[2], beat: 1, step: 0, value: _eighth),
@@ -982,7 +981,7 @@ void main() {
       // AND A BEAM STAYS INSIDE ITS BAR. Engraved through the layout engine, because "does it cross
       // the barline" is a question about a page: two bars whose last beat is a sixteenth run, and
       // every beam of the page must lie inside the bar that owns it.
-      final Song song = _beamSong(<List<BeatNote>>[
+      final Song song = _beamSong(<List<NoteMark>>[
         for (int bar = 0; bar < 2; bar++)
           _run(4, NoteBase.sixteenth, pitches, beat: 3),
       ]);
@@ -1030,7 +1029,7 @@ void main() {
       // beams of three and not three beams of two. This is the assertion that a rule counting the
       // meter's numerator instead of its beats would fail — and it is the difference between an
       // engraving a jazz musician reads as 6/8 and one he reads as 3/4 written oddly.
-      final PlacedMelodyStaff compound = _engrave(<BeatNote>[
+      final PlacedMelodyStaff compound = _engrave(<NoteMark>[
         for (int beat = 0; beat < 2; beat++)
           for (int step = 0; step < 3; step++)
             _note(pitches[0], beat: beat, step: step, value: _eighth),
@@ -1068,7 +1067,7 @@ void main() {
       // sixteenths exactly — which is a mixed group with a longer note at BOTH ends. In 4/4 a beat
       // holds only an eighth and two sixteenths, and the shorter value's beam would then run to the
       // group's own edge on one side, which is a weaker picture of the same rule.
-      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+      final PlacedMelodyStaff staff = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4), beat: 0, step: 0, value: _eighth),
         _note(
           const Written(NoteLetter.e, 4),
@@ -1147,7 +1146,7 @@ void main() {
       // the measure a musician knows rather than against the number the code uses: half a staff
       // space is the ordinary thickness, and it is several times a stem's weight, which is what makes
       // two joined notes look joined instead of adjacent.
-      final PlacedMelodyStaff pair = _engrave(<BeatNote>[
+      final PlacedMelodyStaff pair = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.g, 4), beat: 0, step: 0, value: _eighth),
         _note(const Written(NoteLetter.a, 4), beat: 0, step: 1, value: _eighth),
       ]);
@@ -1255,7 +1254,7 @@ void main() {
       // per-note rule (the one A70 pins for a single note) gives a WRONG answer for the second note:
       // F4 is below the middle line B4 and takes a stem up, D5 is above it and would take a stem
       // down, and one group cannot have both.
-      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+      final PlacedMelodyStaff staff = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.f, 4), beat: 0, step: 0, value: _eighth),
         _note(const Written(NoteLetter.d, 5), beat: 0, step: 1, value: _eighth),
       ]);
@@ -1310,7 +1309,7 @@ void main() {
       // are a pair; the second half of beat two is a rest, so the eighth on beat two is NOT joined to
       // them — it is written with its own flag, which is exactly how a musician sees that it stands
       // alone.
-      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+      final PlacedMelodyStaff staff = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4), beat: 0, step: 0, value: _eighth),
         _note(const Written(NoteLetter.d, 4), beat: 0, step: 1, value: _eighth),
         _note(const Written(NoteLetter.e, 4), beat: 1, step: 0, value: _eighth),
@@ -1353,7 +1352,7 @@ void main() {
 
       // AND TWO NOTES SEPARATED BY A WHOLE REST ARE NOT A GROUP AT ALL: eighths on beats one and
       // three are two single notes, so neither is beamed.
-      final PlacedMelodyStaff separated = _engrave(<BeatNote>[
+      final PlacedMelodyStaff separated = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4), beat: 0, value: _eighth),
         _note(const Written(NoteLetter.e, 4), beat: 2, value: _eighth),
       ]);
@@ -1379,7 +1378,7 @@ void main() {
       // the box means the ink, which makes the offset zero EXACTLY rather than small: the other
       // reading — move the painter's arithmetic for one kind of glyph — would have left one kind
       // drawn from a different rule than every other kind.
-      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+      final PlacedMelodyStaff staff = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4)),
       ]);
       final MelodyGlyph head = _oneOf(staff, MelodyGlyphKind.notehead);
@@ -1419,25 +1418,25 @@ void main() {
   group('the tie, which hangs on the side AWAY from its stem', () {
     /// One tied pair of [pitch] across two beats of the bar, as a bar of two quarter notes.
     ///
-    /// The tie is the model's `BeatNote.tiedToNext` on the FIRST note, which is where the model keeps
+    /// The tie is the model's `NoteMark.tiedToNext` on the FIRST note, which is where the model keeps
     /// it: a tie always points forward, so it is a field of the earlier note and not a pair id.
-    PlacedMelodyStaff tiedPair(Written pitch) => _engrave(<BeatNote>[
-      BeatNote(
+    PlacedMelodyStaff tiedPair(Written pitch) => _engrave(<NoteMark>[
+      NoteMark(
+        place: cellAt(0),
         pitch: PitchedNote(
           note: WrittenNote(pitch.letter, pitch.alter),
           octave: pitch.octave,
         ),
         value: const NoteValue.plain(NoteBase.quarter),
-        beat: 0,
         tiedToNext: true,
       ),
-      BeatNote(
+      NoteMark(
+        place: cellAt(1),
         pitch: PitchedNote(
           note: WrittenNote(pitch.letter, pitch.alter),
           octave: pitch.octave,
         ),
         value: const NoteValue.plain(NoteBase.quarter),
-        beat: 1,
       ),
     ]);
 

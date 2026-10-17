@@ -62,9 +62,14 @@ class InkPlacement {
   LayoutOffset get origin => bounds.origin;
 
   /// The anchor as one comparable string key, so placements can be indexed by address.
+  ///
+  /// THE KEY IS THE BAR AND NOTHING ELSE, because a stroke is anchored to a bar: the position inside
+  /// it is in the stroke's own points, which are bar-local logical pixels. There used to be a beat
+  /// and a step in this key, from the days when a stroke was captured against a cell; the grid those
+  /// two numbers came from is gone, and a key that named one would be a second answer to where the
+  /// stroke was drawn.
   static String keyOf(EventAnchor anchor) =>
-      '${anchor.sectionId}\u0000${anchor.bar}\u0000'
-      '${anchor.beat ?? -1}\u0000${anchor.step}';
+      '${anchor.sectionId}\u0000${anchor.bar}';
 
   /// This placement's key, for a lookup indexed by [keyOf].
   String get key => keyOf(anchor);
@@ -91,27 +96,15 @@ class InkPageIndex {
   /// Creates an index over [placements].
   const InkPageIndex(this.placements);
 
-  /// Builds the index for every cell and every bar of [page].
+  /// Builds the index for every bar of [page].
   ///
-  /// Cells are indexed first and a bar is only added for an address no cell claimed, so a lookup
-  /// can never return the whole bar where a cell exists — the bar and its cells overlap, and the
-  /// narrower rectangle is the one a stroke is anchored to.
+  /// ONE FAMILY OF RECTANGLES, because the grid that gave the other one columns is gone: a stroke is
+  /// written beside a BAR and carries its own offsets from that bar, so the bar's rectangle is both
+  /// the address and the origin of the coordinates. A row of narrower cell rectangles used to be
+  /// indexed first, and the only thing it bought was a narrower origin — which the stroke's own
+  /// points now carry without a second lookup.
   factory InkPageIndex.ofPage(PageLayout page) {
     final Map<String, InkPlacement> placements = <String, InkPlacement>{};
-    for (final PlacedBar bar in page.bars) {
-      for (final PlacedCell cell in bar.cells) {
-        final InkPlacement placement = InkPlacement(
-          anchor: EventAnchor(
-            sectionId: bar.sectionId,
-            bar: bar.barIndex,
-            beat: cell.beat,
-          ),
-          pageIndex: page.index,
-          bounds: cell.bounds,
-        );
-        placements[placement.key] = placement;
-      }
-    }
     for (final PlacedBar bar in page.bars) {
       final InkPlacement placement = InkPlacement(
         anchor: EventAnchor(sectionId: bar.sectionId, bar: bar.barIndex),
@@ -132,58 +125,43 @@ class InkPageIndex {
 }
 
 // PURPOSE: Find where a stroke's anchor landed on a page, so the stroke can be placed relative to
-//          the cell it was drawn in rather than to the page corner. This is the lookup that must
+//          the bar it was drawn in rather than to the page corner. This is the lookup that must
 //          succeed for a stroke to appear at all, and it is deliberately a page-level search rather
 //          than a stored rectangle: the rectangle stored at capture time would be stale after a
 //          transposition moved the bar half a millimetre.
 // INPUTS: page — the layout to resolve against. anchor — the address the stroke carries.
-// OUTPUTS: The [InkPlacement], or null when the page has no bar or cell at that address. Null is a
-//          real answer and not a failure: an anchor may name a bar on another page of a paginated
-//          document, and the caller drawing one page must simply not draw that stroke here.
-// KEYWORDS: anchor-resolution, placement, lookup, null-when-absent, page-coordinates
+// OUTPUTS: The [InkPlacement] for the bar the anchor names, or null when the page has no bar at that
+//          address. Null is a real answer and not a failure: an anchor may name a bar on another
+//          page of a paginated document, and the caller drawing one page must simply not draw that
+//          stroke here.
+//
+//          THE ANSWER IS ALWAYS THE BAR'S OWN RECTANGLE, and that is what makes a stroke's stored
+//          points bar-local. It used to be a narrower cell rectangle when the anchor named a beat,
+//          which meant the same stroke's numbers changed meaning depending on where it was written;
+//          one family of rectangles means one meaning.
+// KEYWORDS: anchor-resolution, placement, lookup, null-when-absent, page-coordinates, bar-anchored
 /// Returns the placement of [anchor] on [page], or null when the page does not hold it.
 InkPlacement? resolveEventAnchor(PageLayout page, EventAnchor anchor) {
   for (final PlacedBar bar in page.bars) {
-    if (bar.sectionId != anchor.sectionId || bar.barIndex != anchor.bar) {
-      continue;
-    }
-    final int? beat = anchor.beat;
-    if (beat == null) {
+    if (bar.sectionId == anchor.sectionId && bar.barIndex == anchor.bar) {
       return InkPlacement(
         anchor: anchor,
         pageIndex: page.index,
         bounds: bar.bounds,
       );
     }
-    for (final PlacedCell cell in bar.cells) {
-      if (cell.beat == beat) {
-        return InkPlacement(
-          anchor: anchor,
-          pageIndex: page.index,
-          bounds: cell.bounds,
-        );
-      }
-    }
-    // The bar is here and the cell is not: the bar has fewer cells than the meter the anchor was
-    // written against, which a hand-edited anchor can produce. Falling back to the bar keeps the
-    // stroke visible and on the right bar rather than dropping it.
-    return InkPlacement(
-      anchor: anchor,
-      pageIndex: page.index,
-      bounds: bar.bounds,
-    );
   }
   return null;
 }
 
-/// Which of the three rules chose a stroke's anchor, so that "this stroke is anchored to the bar
+/// Which of the two rules chose a stroke's anchor, so that "this stroke is anchored to the bar
 /// nearest it" is a fact the log states rather than one a reader infers from a rectangle.
 enum InkAnchorBasis {
-  /// The stroke began inside a cell's column, so it is anchored to that beat of that bar.
-  cell('cell'),
-
-  /// The stroke began on a bar but in one of its paddings, where no cell has a column, so it is
-  /// anchored to the bar itself.
+  /// The stroke began on a bar, so it is anchored to the bar itself.
+  ///
+  /// There used to be a finer case for a stroke begun inside a beat column. The columns went with
+  /// the grid that divided the bar into them, and a stroke's own offset from its bar is what tells a
+  /// reader where along the bar he wrote — so one case is left, and it is the honest one.
   bar('bar'),
 
   /// The stroke began outside every bar — a margin, the space between two systems, or the melody
@@ -217,7 +195,7 @@ class InkAnchorChoice {
 
   /// How far the first sample lay outside the anchor's rectangle, in ENGINE-PAGE pixels.
   ///
-  /// Zero for [InkAnchorBasis.cell] and [InkAnchorBasis.bar], which contain the point by
+  /// Zero for [InkAnchorBasis.bar], which contains the point by
   /// construction. A positive value on [InkAnchorBasis.nearestBar] is the honest measure of how far
   /// into the margin the musician wrote: it is what a reader checks against the picture, and it is
   /// what a future "should this have been refused" question can be asked of instead of a guess.
@@ -326,30 +304,31 @@ InkPlacement? resolveNearestBarAnchor(PageLayout page, LayoutOffset pagePoint) {
 }
 
 // PURPOSE: Choose, in ONE place, the anchor one stroke is stored against, so that capture has a
-//          single rule and a reader can see the whole of it without following a call site. The
-//          three cases are decided here in the order of how much the musician's own address is
-//          known: a cell when the point is over one, the bar when it is over the bar's padding, and
-//          the nearest bar when it is over no bar at all.
+//          single rule and a reader can see the whole of it without following a call site. Two cases
+//          are decided here: the bar the point lies on, and the nearest bar when it lies on none.
 // INPUTS: page — the layout, in engraved coordinates. pagePoint — the stroke's first sample in
 //         those coordinates.
 // OUTPUTS: The choice, or null only for a page that carries no bar, in which case there is nothing
 //          in the document to anchor to and the caller must report the refusal rather than store a
 //          fabricated address. Every other outcome is an anchor: refusing to store a mark the
 //          musician made is the defect this function was written to remove.
-// KEYWORDS: ink-anchor, single-rule, cell-then-bar-then-nearest, no-refusal, capture-entry
+//
+//          THE THREE-STEP LADDER LOST A STEP. It used to prefer the CELL the point was over, then
+//          the bar, then the nearest bar — and the cell step only ever changed which rectangle the
+//          stored coordinates were measured from, which is exactly the second answer to "where is
+//          this stroke" that the bar alone gives. A stroke's position along its bar is now in its
+//          own points, so the ladder is: the bar under the point, else the nearest bar.
+// KEYWORDS: ink-anchor, single-rule, bar-then-nearest, no-refusal, capture-entry, bar-anchored
 /// Returns the anchor for a stroke that began at [pagePoint], with the rule that chose it.
 InkAnchorChoice? resolveInkAnchor(PageLayout page, LayoutOffset pagePoint) {
   final ChartHit? hit = hitTestPage(page, pagePoint);
   if (hit != null) {
     final InkPlacement? placement = resolveEventAnchor(
       page,
-      EventAnchor(sectionId: hit.sectionId, bar: hit.barIndex, beat: hit.beat),
+      EventAnchor(sectionId: hit.sectionId, bar: hit.barIndex),
     );
     if (placement != null) {
-      return InkAnchorChoice(
-        placement: placement,
-        basis: hit.beat == null ? InkAnchorBasis.bar : InkAnchorBasis.cell,
-      );
+      return InkAnchorChoice(placement: placement, basis: InkAnchorBasis.bar);
     }
   }
   final InkPlacement? nearest = resolveNearestBarAnchor(page, pagePoint);

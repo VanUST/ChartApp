@@ -30,13 +30,13 @@ Song probeChart() => Song(
       bars: <Bar>[
         for (int index = 0; index < 4; index++)
           Bar(
-            chords: <BeatChord>[
-              BeatChord(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
-                beat: 0,
               ),
             ],
           ),
@@ -84,7 +84,6 @@ void main() {
   final EventAnchor anchor = EventAnchor(
     sectionId: bar.sectionId,
     bar: bar.barIndex,
-    beat: cell.beat,
   );
   final InkPlacement placement = resolveEventAnchor(page, anchor)!;
 

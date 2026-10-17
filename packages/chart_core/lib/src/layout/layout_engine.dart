@@ -563,21 +563,21 @@ class LayoutEngine {
     final int declared = bar.timeSignature.cellsPerBar;
     final int meterCells = declared < 1 ? 1 : declared;
     int cells = meterCells;
-    for (final BeatChord placement in bar.chords) {
-      if (placement.beat >= cells) {
-        cells = placement.beat + 1;
+    for (final ChordMark placement in bar.chords) {
+      if (placement.pseudoBeat >= cells) {
+        cells = placement.pseudoBeat + 1;
       }
     }
     final List<double> totals = List<double>.filled(cells, 0);
-    for (final BeatChord placement in bar.chords) {
-      if (placement.beat < 0) {
+    for (final ChordMark placement in bar.chords) {
+      if (placement.pseudoBeat < 0) {
         continue;
       }
       final String text = placement.chord.render(key, spellingTable);
       final double chordWidth = style.textMetrics
           .measure(text, ChartTextRole.chord)
           .width;
-      totals[placement.beat] += chordWidth + style.chordSpacing;
+      totals[placement.pseudoBeat] += chordWidth + style.chordSpacing;
     }
     return <double>[
       for (final double total in totals)
@@ -684,7 +684,7 @@ class LayoutEngine {
         for (final TextCue cue in cues)
           _MeasuredTextCue(
             id: cue.id,
-            anchor: cue.place.anchor,
+            beat: cue.place.pseudoBeat,
             text: cue.text,
             size: style.textMetrics.measure(cue.text, ChartTextRole.textCue),
           ),
@@ -1051,8 +1051,8 @@ class LayoutEngine {
     for (final _MeasuredTextCue cue in cues) {
       final double height = _cueRowHeight(cue, drawScale);
       y -= height;
-      final int? beat = cue.anchor.beat;
-      final double left = beat != null && beat >= 0 && beat < offsets.length
+      final int beat = cue.beat;
+      final double left = beat >= 0 && beat < offsets.length
           ? bounds.left + offsets[beat]
           : bounds.left;
       placed.add(
@@ -1124,8 +1124,8 @@ class LayoutEngine {
 
     // Chords are visited in the order the model stores them, which is by cell and then by step,
     // so a comma-packed pair is drawn left to right in the order it is read.
-    for (final BeatChord placement in bar.chords) {
-      if (placement.beat < 0 || placement.beat >= offsets.length) {
+    for (final ChordMark placement in bar.chords) {
+      if (placement.pseudoBeat < 0 || placement.pseudoBeat >= offsets.length) {
         continue;
       }
       final String text = placement.chord.render(measured.key, spellingTable);
@@ -1133,8 +1133,9 @@ class LayoutEngine {
         text,
         ChartTextRole.chord,
       );
-      final double used = consumedInCell[placement.beat] ?? 0;
-      final double chordX = barBounds.left + offsets[placement.beat] + used;
+      final double used = consumedInCell[placement.pseudoBeat] ?? 0;
+      final double chordX =
+          barBounds.left + offsets[placement.pseudoBeat] + used;
       // Chords sit in the middle of the stave's vertical extent. That extent is now the CHORD LINE
       // of a two-staff system — the melody staff is placed below it, never inside it — so the symbol
       // keeps the position it had before a melody existed and reads above the notes, which is the
@@ -1146,8 +1147,8 @@ class LayoutEngine {
       placed.add(
         PlacedChord(
           chord: placement.chord,
-          beat: placement.beat,
-          step: placement.step,
+          beat: placement.pseudoBeat,
+          step: placement.pseudoStep,
           bounds: LayoutRect.fromLTWH(
             chordX,
             chordY,
@@ -1156,7 +1157,7 @@ class LayoutEngine {
           ),
         ),
       );
-      consumedInCell[placement.beat] =
+      consumedInCell[placement.pseudoBeat] =
           used + textSize.width + style.chordSpacing;
     }
     return placed;
@@ -1307,7 +1308,7 @@ class _MeasuredStaffText {
 class _MeasuredTextCue {
   const _MeasuredTextCue({
     required this.id,
-    required this.anchor,
+    required this.beat,
     required this.text,
     required this.size,
   });
@@ -1316,8 +1317,10 @@ class _MeasuredTextCue {
   /// pair a placement with the cue it came from even when two cues share one anchor.
   final String id;
 
-  /// The address the cue hangs on, which decides the column it starts at inside its bar.
-  final EventAnchor anchor;
+  /// The column the cue starts at inside its bar, read from the cue's place through the temporary
+  /// pseudo-grid. SHIM: the layout still divides a bar into columns, so it asks which column a cue's
+  /// x falls in; the day the layout draws the cue at its own offset, this field goes.
+  final int beat;
 
   /// The words to draw, exactly as the document stores them.
   final String text;

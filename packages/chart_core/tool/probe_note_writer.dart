@@ -22,7 +22,7 @@ int _failures = 0;
 
 /// A one-bar song in C major with an A7 chord on beat 0, which is what the transposition half needs:
 /// a chord and a melody in the same bar that have to agree after a move.
-Song _songWithChords({List<BeatNote> melody = const <BeatNote>[]}) => Song(
+Song _songWithChords({List<NoteMark> melody = const <NoteMark>[]}) => Song(
   id: 'probe-song',
   title: 'Probe',
   key: const Key(tonic: WrittenNote(NoteLetter.c, 0), mode: Mode.major),
@@ -32,13 +32,13 @@ Song _songWithChords({List<BeatNote> melody = const <BeatNote>[]}) => Song(
       label: SectionLabel.letter('A'),
       bars: <Bar>[
         Bar(
-          chords: <BeatChord>[
-            const BeatChord(
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellPlace('s1', 0, 0),
               chord: Chord(
                 root: ChordRoot(9),
                 quality: ChordQuality.dominantSeventh,
               ),
-              beat: 0,
             ),
           ],
           melody: melody,
@@ -49,7 +49,7 @@ Song _songWithChords({List<BeatNote> melody = const <BeatNote>[]}) => Song(
 );
 
 /// A note of [base] at ([beat], [step]) with the given written pitch.
-BeatNote _note(
+NoteMark _note(
   NoteLetter letter,
   int alter,
   int octave,
@@ -57,40 +57,39 @@ BeatNote _note(
   int step = 0,
   NoteBase base = NoteBase.quarter,
   bool tied = false,
-}) => BeatNote(
+}) => NoteMark(
+  place: cellAt(beat, step),
   pitch: PitchedNote(note: WrittenNote(letter, alter), octave: octave),
   value: NoteValue.plain(base),
-  beat: beat,
-  step: step,
   tiedToNext: tied,
 );
 
 /// One note as the probe prints it: its address, its written pitch, its written value and its tie.
-String _render(BeatNote note) =>
-    '${note.beat}.${note.step}:${note.pitch} ${note.value}'
+String _render(NoteMark note) =>
+    '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} ${note.value}'
     '${note.tiedToNext ? '~' : ''}';
 
 /// Every note of [document]'s first bar, as a readable string, in the model's own order.
 List<String> _notes(DocumentState document) => <String>[
-  for (final BeatNote note in document.song.barsInReadingOrder.first.melody)
+  for (final NoteMark note in document.song.barsInReadingOrder.first.melody)
     _render(note),
 ];
 
 /// Every note of [song]'s first bar, as a readable string, in the model's own order.
 List<String> _songNotes(Song song) => <String>[
-  for (final BeatNote note in song.barsInReadingOrder.first.melody)
+  for (final NoteMark note in song.barsInReadingOrder.first.melody)
     _render(note),
 ];
 
 /// Every chord root pitch class of [song]'s first bar, so a note can be checked against it.
 List<int> _chordClasses(Song song) => <int>[
-  for (final BeatChord placed in song.barsInReadingOrder.first.chords)
+  for (final ChordMark placed in song.barsInReadingOrder.first.chords)
     placed.chord.root.pitchClass,
 ];
 
 /// Every melody pitch class of [song]'s first bar, in order.
 List<int> _noteClasses(Song song) => <int>[
-  for (final BeatNote note in song.barsInReadingOrder.first.melody)
+  for (final NoteMark note in song.barsInReadingOrder.first.melody)
     note.pitch.note.pitchClass,
 ];
 
@@ -206,7 +205,7 @@ void _stackedNotesAndInverse() {
     'the cell reports both, by step',
     <String>['0.0:E4 quarter', '0.1:G4 half'],
     <String>[
-      for (final BeatNote note in session.existingNotesAt(
+      for (final NoteMark note in session.existingNotesAt(
         sectionId: 's1',
         barIndex: 0,
         beat: 0,
@@ -231,7 +230,14 @@ void _stackedNotesAndInverse() {
     '0.1:G4 half',
   ], _notes(session.document));
 
-  // Delete the note at step 0. The gap closes, so the surviving note moves DOWN to step 0; the  // inverse has to push it back up, which is exactly the case a delta-based inverse gets wrong.
+  // Delete the note at step 0. NOTHING CLOSES THE GAP: the note that was at step 1 keeps the step it
+  // was written at, because a step is part of the mark's place now and the reducer no longer renumbers
+  // its neighbours. The check below is a REWRITE, and the assertion it replaces was
+  //   _same('the surviving note closed the gap and is now at step 0', <String>['0.0:G4 half'], …)
+  // with the comment "the gap closes, so the surviving note moves DOWN to step 0; the inverse has to
+  // push it back up, which is exactly the case a delta-based inverse gets wrong". That renumbering was
+  // the grid keeping itself dense, and the inverse no longer has to push anything: it puts back the
+  // whole mark it removed, at the step that mark carried.
   final bool deleted = session.deleteNoteAt(
     sectionId: 's1',
     barIndex: 0,
@@ -239,8 +245,8 @@ void _stackedNotesAndInverse() {
     step: 0,
   );
   _same('delete returns true', true, deleted);
-  _same('the surviving note closed the gap and is now at step 0', <String>[
-    '0.0:G4 half',
+  _same('the surviving note keeps the step it was written at', <String>[
+    '0.1:G4 half',
   ], _notes(session.document));
   final bool undone = session.undo();
   _same('undo returns true', true, undone);
@@ -256,7 +262,7 @@ void _stackedNotesAndInverse() {
   );
 
   _section('an update keeps the address and carries the previous value whole');
-  final BeatNote? atStepOne = session.existingNoteAt(
+  final NoteMark? atStepOne = session.existingNoteAt(
     sectionId: 's1',
     barIndex: 0,
     beat: 0,
@@ -493,7 +499,7 @@ void _transposition() {
     'the melody moves with the chords, and the written chart is not touched',
   );
   final Song written = _songWithChords(
-    melody: <BeatNote>[
+    melody: <NoteMark>[
       _note(NoteLetter.e, 0, 4, 0),
       _note(NoteLetter.g, 0, 4, 0, step: 1),
       _note(NoteLetter.f, 0, 4, 1, base: NoteBase.half, tied: true),
@@ -575,15 +581,15 @@ void _transposition() {
 // ---------------------------------------------------------------------------------------------
 
 /// [note] as the probe prints it, with a readable placeholder when it is absent.
-String _renderNote(BeatNote? note) => note == null
+String _renderNote(NoteMark? note) => note == null
     ? 'none'
-    : '${note.beat}.${note.step}:${note.pitch} ${note.value}';
+    : '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} ${note.value}';
 
 /// Every note of every bar of [document], in reading order.
 List<String> _allNotes(DocumentState document) => <String>[
   for (final Section section in document.song.sections)
     for (int barIndex = 0; barIndex < section.bars.length; barIndex++)
-      for (final BeatNote note in section.bars[barIndex].melody)
+      for (final NoteMark note in section.bars[barIndex].melody)
         '${section.id}[$barIndex] ${_render(note)}',
 ];
 

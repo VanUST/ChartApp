@@ -89,8 +89,8 @@ void main(List<String> args) {
         final Bar bar = section.bars[barIndex];
         final String chords = bar.chords
             .map(
-              (BeatChord c) =>
-                  '${c.beat}:${c.chord.render(song.key, const SpellingTable())}'
+              (ChordMark c) =>
+                  '${c.pseudoBeat}:${c.chord.render(song.key, const SpellingTable())}'
                   '${c.size == ChordSize.small ? '(s)' : ''}',
             )
             .join(' ');

@@ -22,6 +22,7 @@ library;
 
 import 'dart:convert';
 
+import '../anchored_place.dart';
 import '../chord.dart';
 import '../editing/bar_range.dart';
 import '../editing/chord_symbol_parser.dart';
@@ -31,6 +32,7 @@ import '../pitch.dart';
 import '../song/bar.dart';
 import '../song/note.dart';
 import '../song/note_value.dart';
+import '../song/pseudo_grid.dart';
 import '../song/section.dart';
 import '../song/song.dart';
 import '../song/staff.dart';
@@ -38,7 +40,18 @@ import '../song/time_signature.dart';
 import '../spelling_table.dart';
 import '../transposition.dart';
 
-part 'anchor.dart';
+// The place type lives outside this library, because the song model carries places too and a
+// model may not depend on the operation log. It is RE-EXPORTED rather than merely imported for two
+// reasons: every event's `anchor` getter returns one, so a caller of this library has to be able to
+// name the type; and until this change it lived in `anchor.dart` as a part of this very library, so
+// re-exporting it is what keeps the public surface of the catalogue the same shape it was.
+//
+// The same is true of the temporary pseudo-grid in `../song/pseudo_grid.dart`: the parts of this
+// library cannot carry imports of their own, and the edit session — a part — still builds a place
+// from a cell while the surface speaks in beats. Both exports go together when the shim dies.
+export '../anchored_place.dart';
+export '../song/pseudo_grid.dart';
+
 part 'barline.dart';
 part 'barline_events.dart';
 part 'annotation.dart';

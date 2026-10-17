@@ -72,8 +72,11 @@ Song _namedSong() => Song(
       label: const SectionLabel.letter('A'),
       bars: <Bar>[
         Bar(
-          chords: <BeatChord>[
-            const BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(0)),
+            ),
           ],
         ),
       ],
@@ -94,8 +97,11 @@ Song _namelessSong() => Song(
       label: const SectionLabel.letter('A'),
       bars: <Bar>[
         Bar(
-          chords: <BeatChord>[
-            const BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(0)),
+            ),
           ],
         ),
       ],

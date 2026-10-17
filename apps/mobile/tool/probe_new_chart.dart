@@ -322,7 +322,7 @@ Future<void> main() async {
         tool: StrokeTool.pen,
         color: '#102a43',
         size: 3,
-        anchor: EventAnchor(sectionId: sectionA, bar: 0, beat: 0),
+        anchor: EventAnchor(sectionId: sectionA, bar: 0),
         points: const <InkPoint>[
           InkPoint(x: 2.0, y: 3.0, w: 0.4, t: 0),
           InkPoint(x: 9.0, y: 5.0, w: 0.8, t: 12),
@@ -436,8 +436,8 @@ Future<void> main() async {
   _same(
     'the note came back at beat 1, as F#4 tied, and the staff is declared',
     'beat=1 step=0 pitch=F#4 value=eighth tie=true staff=pitched',
-    'beat=${reopened.document.song.barsInReadingOrder.first.melody.single.beat} '
-        'step=${reopened.document.song.barsInReadingOrder.first.melody.single.step} '
+    'beat=${reopened.document.song.barsInReadingOrder.first.melody.single.pseudoBeat} '
+        'step=${reopened.document.song.barsInReadingOrder.first.melody.single.pseudoStep} '
         'pitch=${reopened.document.song.barsInReadingOrder.first.melody.single.pitch} '
         'value=${reopened.document.song.barsInReadingOrder.first.melody.single.value} '
         'tie=${reopened.document.song.barsInReadingOrder.first.melody.single.tiedToNext} '

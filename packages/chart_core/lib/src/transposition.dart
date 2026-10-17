@@ -287,17 +287,16 @@ Bar transposedBar(
   return Bar(
     timeSignature: bar.timeSignature,
     size: bar.size,
-    chords: <BeatChord>[
-      for (final BeatChord placed in bar.chords)
-        BeatChord(
+    chords: <ChordMark>[
+      for (final ChordMark placed in bar.chords)
+        ChordMark(
+          place: placed.place,
           chord: transposer.transposeChord(placed.chord, semitones),
-          beat: placed.beat,
-          step: placed.step,
           size: placed.size,
         ),
     ],
-    melody: <BeatNote>[
-      for (final BeatNote note in bar.melody)
+    melody: <NoteMark>[
+      for (final NoteMark note in bar.melody)
         _transposedNote(note, transposer, semitones, writtenKey, targetKey),
     ],
     percussion: bar.percussion,
@@ -313,28 +312,29 @@ Bar transposedBar(
 }
 
 // PURPOSE: Move one note of the melody, keeping everything a transposition has no business changing
-//          — its address in the bar, how long it is written, and its tie — so that only the pitch
+//          — its place in the bar, how long it is written, and its tie — so that only the pitch
 //          moves and the melody stays the melody.
 // INPUTS: note — the note as written. transposer — the shared transposer. semitones — the interval.
 //         writtenKey — the key the note is written in. shownKey — the key the result is written in.
-// OUTPUTS: A [BeatNote] at the same (beat, step) with the same [NoteValue] and the same
-//          [BeatNote.tiedToNext], whose pitch has been moved by [semitones] and rewritten in
+// OUTPUTS: A [NoteMark] at the SAME place, with the same [NoteValue] and the same
+//          [NoteMark.tiedToNext], whose pitch has been moved by [semitones] and rewritten in
 //          [shownKey].
 //
-//          WHY THE ADDRESS AND THE TIE ARE COPIED RATHER THAN TAKEN FROM THE MOVE. A tie points
-//          FORWARD at a note that is moving by the same interval and is still the note that follows
-//          it, and a step within a cell is a place in a dense sequence whose neighbours are all
-//          moving with it. Re-deriving either would be this function deciding a fact that has not
-//          changed, and the only way to decide it wrongly.
-// KEYWORDS: melody-transposition, address-preserved, duration-preserved, tie-preserved
-/// Returns [note] moved by [semitones] into [shownKey], keeping its address, value and tie.
-BeatNote _transposedNote(
-  BeatNote note,
+//          WHY THE PLACE AND THE TIE ARE COPIED RATHER THAN RE-DERIVED. A tie points FORWARD at a
+//          note that is moving by the same interval and is still the note that follows it, and a
+//          place along the bar is where the musician wrote it — transposition changes what sounds,
+//          not where it is written. The owner said this about handwriting and it is the same fact for
+//          a written note: «Рукопись никак не меняется при транспозиции, это в целом невозможно.»
+// KEYWORDS: melody-transposition, place-preserved, duration-preserved, tie-preserved, handwriting
+/// Returns [note] moved by [semitones] into [shownKey], keeping its place, value and tie.
+NoteMark _transposedNote(
+  NoteMark note,
   Transposer transposer,
   int semitones,
   Key writtenKey,
   Key shownKey,
-) => BeatNote(
+) => NoteMark(
+  place: note.place,
   pitch: transposer.transposeNote(
     note.pitch,
     semitones,
@@ -342,7 +342,5 @@ BeatNote _transposedNote(
     targetKey: shownKey,
   ),
   value: note.value,
-  beat: note.beat,
-  step: note.step,
   tiedToNext: note.tiedToNext,
 );

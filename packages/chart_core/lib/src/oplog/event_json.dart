@@ -212,6 +212,38 @@ abstract final class EventJson {
     );
   }
 
+  // PURPOSE: Read the [AnchoredPlace] stored at [key] as the model's own place value, so that a
+  //          chord, a note, a text cue and an annotation are all read by one function.
+  // INPUTS: json — the payload object. key — the field the place is stored under.
+  // OUTPUTS: The place. A missing or malformed field is reported as [EventFormatException], which
+  //          is this library's one failure type, rather than as the [FormatException] the place's
+  //          own reader raises: the place lives outside this library (a model may not depend on the
+  //          operation log), so its failures are translated here at the one boundary that crosses.
+  // KEYWORDS: json-reading, anchored-place, failure-translation, single-reader
+  /// Reads the [AnchoredPlace] stored at [key].
+  static AnchoredPlace anchoredPlace(Map<String, Object?> json, String key) {
+    final Map<String, Object?> place = object(json, key);
+    try {
+      return AnchoredPlace.fromJson(place);
+    } on FormatException catch (error) {
+      throw EventFormatException('field "$key": ${error.message}');
+    }
+  }
+
+  // PURPOSE: Read the [EventAnchor] stored at [key], on the same terms as [anchoredPlace].
+  // INPUTS: json — the payload object. key — the field the anchor is stored under.
+  // OUTPUTS: The anchor, or [EventFormatException] naming the malformed field.
+  // KEYWORDS: json-reading, anchor, failure-translation, single-reader
+  /// Reads the [EventAnchor] stored at [key].
+  static EventAnchor anchor(Map<String, Object?> json, String key) {
+    final Map<String, Object?> anchor = object(json, key);
+    try {
+      return EventAnchor.fromJson(anchor);
+    } on FormatException catch (error) {
+      throw EventFormatException('field "$key": ${error.message}');
+    }
+  }
+
   /// Describes [value] for a failure message, keeping null distinguishable from "wrong type".
   static String _describe(Object? value) {
     if (value == null) {

@@ -25,9 +25,15 @@ Section sectionOf(String id, String label, int count, TimeSignature meter) =>
         for (int index = 0; index < count; index++)
           Bar(
             timeSignature: meter,
-            chords: <BeatChord>[
-              BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
-              BeatChord(chord: Chord(root: ChordRoot(7)), beat: 2),
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
+                chord: Chord(root: ChordRoot(0)),
+              ),
+              ChordMark(
+                place: cellAt(2),
+                chord: Chord(root: ChordRoot(7)),
+              ),
             ],
           ),
       ],

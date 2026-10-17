@@ -908,7 +908,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             'text': cue.text,
             'sec': cue.place.anchor.sectionId,
             'bar': cue.place.anchor.bar,
-            'beat': cue.place.anchor.beat,
+            // The address is the bar and the position inside it is the offset: there is no beat to
+            // report, because a cue is a coordinate now and `dx` is that coordinate.
             'dx': cue.place.offsetX,
             'dy': cue.place.offsetY,
           },
@@ -919,8 +920,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             'id': stroke.id,
             'sec': stroke.anchor.sectionId,
             'bar': stroke.anchor.bar,
-            'beat': stroke.anchor.beat,
-            'step': stroke.anchor.step,
             'pts': stroke.points.length,
             'p0': <double>[stroke.points.first.x, stroke.points.first.y],
             't': stroke.points.last.t,

@@ -33,8 +33,11 @@ Song longChart(int bars) => Song(
       bars: <Bar>[
         for (int index = 0; index < bars; index++)
           Bar(
-            chords: <BeatChord>[
-              const BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
+                chord: Chord(root: ChordRoot(0)),
+              ),
             ],
           ),
       ],

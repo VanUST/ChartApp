@@ -26,17 +26,20 @@ Song melodyChart(int bars) => Song(
       bars: <Bar>[
         for (int index = 0; index < bars; index++)
           Bar(
-            chords: <BeatChord>[
-              const BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
+                chord: Chord(root: ChordRoot(0)),
+              ),
             ],
-            melody: <BeatNote>[
-              BeatNote(
+            melody: <NoteMark>[
+              NoteMark(
+                place: cellAt(0),
                 pitch: const PitchedNote(
                   note: WrittenNote(NoteLetter.g, 0),
                   octave: 4,
                 ),
                 value: const NoteValue.plain(NoteBase.quarter),
-                beat: 0,
               ),
             ],
           ),

@@ -97,20 +97,20 @@ Song repeatChart() => Song(
       bars: <Bar>[
         for (int index = 0; index < 4; index++)
           Bar(
-            chords: <BeatChord>[
-              BeatChord(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellPlace(_sectionId, index, 0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
-                beat: 0,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellPlace(_sectionId, index, 2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,
                 ),
-                beat: 2,
               ),
             ],
           ),
@@ -233,9 +233,9 @@ String _barSigns(Song song, String sectionId, int barIndex) {
       ? '(blank)'
       : bar.chords
             .map(
-              (BeatChord placed) =>
+              (ChordMark placed) =>
                   '${placed.chord.render(song.key, const SpellingTable())}'
-                  '@${placed.beat}',
+                  '@${placed.pseudoBeat}',
             )
             .join(',');
   return '$sectionId[$barIndex] open=${bar.openingBarline.name} '

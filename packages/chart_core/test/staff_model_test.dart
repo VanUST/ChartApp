@@ -10,27 +10,27 @@ import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
 /// A quarter-note middle C.
-const BeatNote middleCQuarter = BeatNote(
+NoteMark middleCQuarter = NoteMark(
+  place: cellAt(0),
   pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
   value: NoteValue.plain(NoteBase.quarter),
-  beat: 0,
 );
 
 /// A bar of one middle C quarter note.
-const Bar barWithOneNote = Bar(melody: <BeatNote>[middleCQuarter]);
+final Bar barWithOneNote = Bar(melody: <NoteMark>[middleCQuarter]);
 
 /// A bar with a kick and a snare on beats one and three.
-const Bar barWithDrums = Bar(
-  percussion: <PercussionHit>[
-    PercussionHit(
+Bar barWithDrums = Bar(
+  percussion: <PercussionMark>[
+    PercussionMark(
+      place: cellAt(0),
       instrument: 36,
       value: NoteValue.plain(NoteBase.quarter),
-      beat: 0,
     ),
-    PercussionHit(
+    PercussionMark(
+      place: cellAt(2),
       instrument: 38,
       value: NoteValue.plain(NoteBase.quarter),
-      beat: 2,
     ),
   ],
 );
@@ -286,12 +286,12 @@ void main() {
   group('melodyFillsBar', () {
     test('four quarters fill 4/4', () {
       expect(
-        melodyFillsBar(TimeSignature.fourFour, <BeatNote>[
+        melodyFillsBar(TimeSignature.fourFour, <NoteMark>[
           for (int beat = 0; beat < 4; beat++)
-            BeatNote(
+            NoteMark(
+              place: cellAt(beat),
               pitch: middleCQuarter.pitch,
               value: const NoteValue.plain(NoteBase.quarter),
-              beat: beat,
             ),
         ]),
         isTrue,
@@ -299,12 +299,12 @@ void main() {
     });
 
     test('three quarters do not fill 4/4 but do fill 3/4', () {
-      final List<BeatNote> three = <BeatNote>[
+      final List<NoteMark> three = <NoteMark>[
         for (int beat = 0; beat < 3; beat++)
-          BeatNote(
+          NoteMark(
+            place: cellAt(beat),
             pitch: middleCQuarter.pitch,
             value: const NoteValue.plain(NoteBase.quarter),
-            beat: beat,
           ),
       ];
       expect(melodyFillsBar(TimeSignature.fourFour, three), isFalse);
@@ -315,7 +315,7 @@ void main() {
       // Stated rather than left implicit: an empty melody could mean "not written yet" and a bar
       // that is genuinely full is a different claim.
       expect(
-        melodyFillsBar(TimeSignature.fourFour, const <BeatNote>[]),
+        melodyFillsBar(TimeSignature.fourFour, const <NoteMark>[]),
         isFalse,
       );
     });
@@ -327,9 +327,13 @@ void main() {
         base: NoteBase.half,
         tuplet: Tuplet.triplet,
       );
-      final List<BeatNote> notes = <BeatNote>[
+      final List<NoteMark> notes = <NoteMark>[
         for (int beat = 0; beat < 3; beat++)
-          BeatNote(pitch: middleCQuarter.pitch, value: halfTriplet, beat: beat),
+          NoteMark(
+            place: cellAt(beat),
+            pitch: middleCQuarter.pitch,
+            value: halfTriplet,
+          ),
       ];
       expect(melodyFillsBar(TimeSignature.fourFour, notes), isTrue);
       // And the same three notes do not fill 3/4, whose length is three quarters, not a whole.
@@ -337,11 +341,11 @@ void main() {
     });
 
     test('a whole note fills 4/4 but overfills 6/8, which is only three quarters long', () {
-      final List<BeatNote> whole = <BeatNote>[
-        BeatNote(
+      final List<NoteMark> whole = <NoteMark>[
+        NoteMark(
+          place: cellAt(0),
           pitch: middleCQuarter.pitch,
           value: const NoteValue.plain(NoteBase.whole),
-          beat: 0,
         ),
       ];
       expect(melodyFillsBar(TimeSignature.fourFour, whole), isTrue);
@@ -356,13 +360,13 @@ void main() {
       expect(barWithDrums == const Bar(), isFalse);
       expect(barWithDrums == barWithOneNote, isFalse);
       // A bar with both differs from either one alone.
-      const Bar both = Bar(
-        melody: <BeatNote>[middleCQuarter],
-        percussion: <PercussionHit>[
-          PercussionHit(
+      final Bar both = Bar(
+        melody: <NoteMark>[middleCQuarter],
+        percussion: <PercussionMark>[
+          PercussionMark(
+            place: cellAt(0),
             instrument: 36,
             value: NoteValue.plain(NoteBase.quarter),
-            beat: 0,
           ),
         ],
       );
@@ -375,22 +379,25 @@ void main() {
       () {
         // The addressing is common on purpose so that one anchor scheme covers every object a user
         // can point at; the objects themselves stay different kinds.
-        const Bar bar = Bar(
-          chords: <BeatChord>[
-            BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
+        final Bar bar = Bar(
+          chords: <ChordMark>[
+            ChordMark(
+              place: cellAt(0),
+              chord: Chord(root: ChordRoot(0)),
+            ),
           ],
-          melody: <BeatNote>[middleCQuarter],
-          percussion: <PercussionHit>[
-            PercussionHit(
+          melody: <NoteMark>[middleCQuarter],
+          percussion: <PercussionMark>[
+            PercussionMark(
+              place: cellAt(0),
               instrument: 36,
               value: NoteValue.plain(NoteBase.quarter),
-              beat: 0,
             ),
           ],
         );
-        expect(bar.chords.single.beat, 0);
-        expect(bar.melody.single.beat, 0);
-        expect(bar.percussion.single.beat, 0);
+        expect(bar.chords.single.pseudoBeat, 0);
+        expect(bar.melody.single.pseudoBeat, 0);
+        expect(bar.percussion.single.pseudoBeat, 0);
         expect(bar.toString(), contains('1 chord(s)'));
         expect(bar.toString(), contains('1 note(s)'));
         expect(bar.toString(), contains('1 hit(s)'));
@@ -398,10 +405,10 @@ void main() {
     );
 
     test('a tie points forward from the earlier note', () {
-      const BeatNote tied = BeatNote(
+      final NoteMark tied = NoteMark(
+        place: cellAt(0),
         pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
         value: NoteValue.plain(NoteBase.quarter),
-        beat: 0,
         tiedToNext: true,
       );
       expect(tied.tiedToNext, isTrue);

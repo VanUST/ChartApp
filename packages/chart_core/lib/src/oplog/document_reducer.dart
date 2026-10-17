@@ -39,32 +39,32 @@ abstract final class DocumentReducer {
     ChartEvent event,
   ) => switch (event) {
     final ChordInsertEvent e => state.copyWith(
-      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+      song: _mapBar(state.song, e.anchor.sectionId, e.anchor.bar, (Bar bar) {
         return _withChordInserted(bar, e.chord);
       }),
     ),
     final ChordUpdateEvent e => state.copyWith(
-      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+      song: _mapBar(state.song, e.anchor.sectionId, e.anchor.bar, (Bar bar) {
         return _withChordReplaced(bar, e.from, e.to);
       }),
     ),
     final ChordDeleteEvent e => state.copyWith(
-      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+      song: _mapBar(state.song, e.anchor.sectionId, e.anchor.bar, (Bar bar) {
         return _withChordRemoved(bar, e.removed);
       }),
     ),
     final NoteInsertEvent e => state.copyWith(
-      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+      song: _mapBar(state.song, e.anchor.sectionId, e.anchor.bar, (Bar bar) {
         return _withNoteInserted(bar, e.note);
       }),
     ),
     final NoteUpdateEvent e => state.copyWith(
-      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+      song: _mapBar(state.song, e.anchor.sectionId, e.anchor.bar, (Bar bar) {
         return _withNoteReplaced(bar, e.from, e.to);
       }),
     ),
     final NoteDeleteEvent e => state.copyWith(
-      song: _mapBar(state.song, e.sectionId, e.barIndex, (Bar bar) {
+      song: _mapBar(state.song, e.anchor.sectionId, e.anchor.bar, (Bar bar) {
         return _withNoteRemoved(bar, e.removed);
       }),
     ),
@@ -208,6 +208,13 @@ abstract final class DocumentReducer {
   }
 
   /// Returns [song] with the bar at ([sectionId], [barIndex]) transformed by [change].
+  ///
+  /// THE SECTION IS ANCHORED BEFORE [change] RUNS, not after it. A change looks a mark up BY ITS
+  /// PLACE, and a place carries its bar — so a mark whose anchor is stale cannot be found by the
+  /// place the caller named, and the edit is refused as "no chord at x=… in this bar". Anchoring
+  /// first makes every mark in the section say the bar it is in, and the change then finds what it
+  /// names. [_replaceSection] re-anchors afterwards as well, which is what covers the events that do
+  /// not go through here (`measure.insert` and the bar runs); on this path it is a no-op.
   static Song _mapBar(
     Song song,
     String sectionId,
@@ -221,170 +228,229 @@ abstract final class DocumentReducer {
         '(${section.bars.length} bar(s))',
       );
     }
-    final List<Bar> bars = List<Bar>.of(section.bars);
+    // A copy either way: [change] must not write into the list the old document still holds.
+    final List<Bar> bars = List<Bar>.of(_anchoredBars(section));
     bars[barIndex] = change(bars[barIndex]);
     return _replaceSection(song, sectionIndex, section.copyWith(bars: bars));
   }
 
   /// Returns [song] with section [index] replaced by [section].
+  ///
+  /// EVERY MARK'S ANCHOR IS REWRITTEN TO THE BAR THAT HOLDS IT HERE, in one place, for the whole
+  /// section. A chord or a note carries an [AnchoredPlace] whose anchor names its bar, and a bar's
+  /// address is an INDEX — so inserting a bar renumbers every bar after it, and a mark left pointing
+  /// at its old index would name somebody else's music the moment the insertion landed. Rewriting
+  /// them at the one point every song-mutating event passes through makes the invariant true by
+  /// construction rather than by remembering: after any event this reducer applies, a mark found in
+  /// bar n says n.
+  ///
+  /// WHY THIS IS NOT A SECOND SOURCE OF TRUTH, ALTHOUGH IT LOOKS LIKE ONE. The mark's anchor is
+  /// derived from the position the mark was FOUND at, so bar membership stays the single authority
+  /// and the anchor is a restatement of it that the reducer keeps honest. The alternative — a mark
+  /// that carries no bar at all — cannot be made to work while a bar has an index: `measure.insert`
+  /// would silently move every mark after it onto the wrong music, and the defect would be invisible
+  /// in the document and visible only on the page.
+  ///
+  /// THE COST IS PAID PER EVENT AND IS NIL. A section holds tens of bars and a bar a handful of
+  /// marks, so re-anchoring a whole section is a few hundred immutable value copies — far less than
+  /// one frame of engraving — and it is paid against a class of silent mis-addressing the project has
+  /// already paid for once with handwriting (A71 §6, A71 §13г). The check is skipped when nothing
+  /// needs it, which is every event after the first on a document this reducer produced.
   static Song _replaceSection(Song song, int index, Section section) {
     final List<Section> sections = List<Section>.of(song.sections);
-    sections[index] = section;
+    sections[index] = section.copyWith(bars: _anchoredBars(section));
     return song.copyWith(sections: sections);
   }
 
-  // --- Chords ---------------------------------------------------------------------------
-  /// Returns a copy of [bar] holding [chord], pushing later chords of the same beat one step up.
-  static Bar _withChordInserted(Bar bar, BeatChord chord) {
-    final List<BeatChord> chords = <BeatChord>[
-      for (final BeatChord existing in bar.chords)
-        if (existing.beat == chord.beat && existing.step >= chord.step)
-          _chordAtStep(existing, existing.step + 1)
-        else
-          existing,
-      chord,
+  /// Returns [section]'s bars with every mark anchored to the bar that holds it.
+  static List<Bar> _anchoredBars(Section section) {
+    if (!_needsAnchoring(section)) {
+      return section.bars;
+    }
+    return <Bar>[
+      for (int index = 0; index < section.bars.length; index++)
+        _reanchoredBar(section.bars[index], section.id, index),
     ];
-    chords.sort(_compareChordAddress);
-    return bar.copyWith(chords: chords);
   }
 
-  /// Returns a copy of [bar] without the chord at [removed]'s address, closing the gap.
-  static Bar _withChordRemoved(Bar bar, BeatChord removed) {
-    final List<BeatChord> chords = <BeatChord>[];
-    bool found = false;
-    for (final BeatChord existing in bar.chords) {
-      if (_sameChordAddress(existing, removed)) {
-        found = true;
-        continue;
+  /// Whether any bar of [section] holds a mark whose anchor is not its own address.
+  ///
+  /// The check exists so that a document that is already consistent — which is every document this
+  /// reducer produced — is returned without copying anything, and so that the rewrite is paid only
+  /// where an address actually moved.
+  static bool _needsAnchoring(Section section) {
+    for (int index = 0; index < section.bars.length; index++) {
+      final Bar bar = section.bars[index];
+      for (final ChordMark mark in bar.chords) {
+        if (mark.place.anchor.sectionId != section.id ||
+            mark.place.anchor.bar != index) {
+          return true;
+        }
       }
-      chords.add(
-        existing.beat == removed.beat && existing.step > removed.step
-            ? _chordAtStep(existing, existing.step - 1)
-            : existing,
-      );
-    }
-    if (!found) {
-      throw DocumentReducerException(
-        'no chord at beat ${removed.beat}.${removed.step} to delete',
-      );
-    }
-    return bar.copyWith(chords: chords);
-  }
-
-  /// Returns a copy of [bar] with the chord at [from]'s address replaced by [to].
-  static Bar _withChordReplaced(Bar bar, BeatChord from, BeatChord to) {
-    final List<BeatChord> chords = <BeatChord>[];
-    bool found = false;
-    for (final BeatChord existing in bar.chords) {
-      if (_sameChordAddress(existing, from)) {
-        chords.add(to);
-        found = true;
-      } else {
-        chords.add(existing);
+      for (final NoteMark note in bar.melody) {
+        if (note.place.anchor.sectionId != section.id ||
+            note.place.anchor.bar != index) {
+          return true;
+        }
+      }
+      for (final PercussionMark hit in bar.percussion) {
+        if (hit.place.anchor.sectionId != section.id ||
+            hit.place.anchor.bar != index) {
+          return true;
+        }
       }
     }
-    if (!found) {
-      throw DocumentReducerException(
-        'no chord at beat ${from.beat}.${from.step} to update',
-      );
-    }
+    return false;
+  }
+
+  /// Returns [bar] with every mark's anchor naming ([sectionId], [barIndex]).
+  ///
+  /// Only the anchor is replaced. The offsets are what the musician wrote and are left exactly as
+  /// they are: an inserted bar moves a mark to another index, never to another position inside its
+  /// own bar.
+  static Bar _reanchoredBar(Bar bar, String sectionId, int barIndex) {
+    final EventAnchor anchor = EventAnchor(sectionId: sectionId, bar: barIndex);
+    AnchoredPlace at(AnchoredPlace place) => AnchoredPlace(
+      anchor: anchor,
+      offsetX: place.offsetX,
+      offsetY: place.offsetY,
+    );
+    return bar.copyWith(
+      chords: <ChordMark>[
+        for (final ChordMark mark in bar.chords)
+          mark.copyWith(place: at(mark.place)),
+      ],
+      melody: <NoteMark>[
+        for (final NoteMark note in bar.melody)
+          note.copyWith(place: at(note.place)),
+      ],
+      percussion: <PercussionMark>[
+        for (final PercussionMark hit in bar.percussion)
+          hit.copyWith(place: at(hit.place)),
+      ],
+    );
+  }
+
+  // --- Chords ---------------------------------------------------------------------------
+  /// Returns a copy of [bar] that also holds [chord].
+  ///
+  /// NOTHING IS PUSHED AND NO GAP IS CLOSED. A chord is written where the musician wrote it, so two
+  /// chords that share an x are two chords that share an x; nudging one of them along a step to keep
+  /// a grid dense would be the grid returning through the side door. The list is kept ordered by
+  /// place so that a reader — and a test — can read the chord line left to right.
+  static Bar _withChordInserted(Bar bar, ChordMark chord) {
+    final List<ChordMark> chords = <ChordMark>[...bar.chords, chord]
+      ..sort(_compareChordPlace);
     return bar.copyWith(chords: chords);
   }
 
-  /// Returns [placed] with its step replaced by [step], keeping the chord and the size.
-  static BeatChord _chordAtStep(BeatChord placed, int step) => BeatChord(
-    chord: placed.chord,
-    beat: placed.beat,
-    step: step,
-    size: placed.size,
-  );
+  /// Returns a copy of [bar] without the chord written at [removed]'s place.
+  ///
+  /// THE MARK NAMED IS THE MARK REMOVED, matched by its whole value before its place is used. A
+  /// place is a coordinate and two chords may legitimately share one — nothing nudges them apart any
+  /// more — so a deletion that matched on the place alone could remove a different chord than the one
+  /// the inverse names, and an undo would then restore the wrong document. Matching the value first
+  /// makes the inverse exact; the place is the fallback for a caller that describes a mark slightly
+  /// differently, and a place nothing matches is still the reported failure it was.
+  static Bar _withChordRemoved(Bar bar, ChordMark removed) {
+    int at = bar.chords.indexWhere((ChordMark existing) => existing == removed);
+    if (at < 0) {
+      at = bar.chords.indexWhere(
+        (ChordMark existing) => existing.place == removed.place,
+      );
+    }
+    if (at < 0) {
+      throw DocumentReducerException(
+        'no chord at x=${removed.place.offsetX} in this bar to delete',
+      );
+    }
+    final List<ChordMark> chords = <ChordMark>[...bar.chords]..removeAt(at);
+    return bar.copyWith(chords: chords);
+  }
 
-  /// Whether two placements sit at the same (beat, step) address.
-  static bool _sameChordAddress(BeatChord left, BeatChord right) =>
-      left.beat == right.beat && left.step == right.step;
+  /// Returns a copy of [bar] with the chord at [from]'s place replaced by [to].
+  ///
+  /// [to] may sit at a DIFFERENT place in the same bar: moving a chord is exactly this event, now
+  /// that a chord's position is part of its value rather than an address that has to stay fixed. The
+  /// replaced mark is found by its whole value first, for the reason the deletion gives.
+  static Bar _withChordReplaced(Bar bar, ChordMark from, ChordMark to) {
+    int at = bar.chords.indexWhere((ChordMark existing) => existing == from);
+    if (at < 0) {
+      at = bar.chords.indexWhere(
+        (ChordMark existing) => existing.place == from.place,
+      );
+    }
+    if (at < 0) {
+      throw DocumentReducerException(
+        'no chord at x=${from.place.offsetX} in this bar to update',
+      );
+    }
+    final List<ChordMark> chords = <ChordMark>[...bar.chords];
+    chords[at] = to;
+    chords.sort(_compareChordPlace);
+    return bar.copyWith(chords: chords);
+  }
 
-  /// Orders two placements by beat and then by step.
-  static int _compareChordAddress(BeatChord left, BeatChord right) {
-    final int byBeat = left.beat.compareTo(right.beat);
-    return byBeat != 0 ? byBeat : left.step.compareTo(right.step);
+  /// Orders two chord marks by their place along the bar, then across it.
+  ///
+  /// The tie-break on the vertical offset matters only for two chords written at exactly the same x
+  /// — which a hand-edited file can hold and the palette can produce — and it exists so that the
+  /// order is total and a document compares equal to itself after a round trip.
+  static int _compareChordPlace(ChordMark left, ChordMark right) {
+    final int byX = left.place.offsetX.compareTo(right.place.offsetX);
+    return byX != 0 ? byX : left.place.offsetY.compareTo(right.place.offsetY);
   }
 
   // --- Notes ----------------------------------------------------------------------------
-  /// Returns a copy of [bar] holding [note], pushing later notes of the same beat one step up.
-  static Bar _withNoteInserted(Bar bar, BeatNote note) {
-    final List<BeatNote> melody = <BeatNote>[
-      for (final BeatNote existing in bar.melody)
-        if (existing.beat == note.beat && existing.step >= note.step)
-          _noteAtStep(existing, existing.step + 1)
-        else
-          existing,
-      note,
-    ];
-    melody.sort(_compareNoteAddress);
+  /// Returns a copy of [bar] that also holds [note], ordered by its place along the bar.
+  static Bar _withNoteInserted(Bar bar, NoteMark note) {
+    final List<NoteMark> melody = <NoteMark>[...bar.melody, note]
+      ..sort(_compareNotePlace);
     return bar.copyWith(melody: melody);
   }
 
-  /// Returns a copy of [bar] without the note at [removed]'s address, closing the gap.
-  static Bar _withNoteRemoved(Bar bar, BeatNote removed) {
-    final List<BeatNote> melody = <BeatNote>[];
-    bool found = false;
-    for (final BeatNote existing in bar.melody) {
-      if (_sameNoteAddress(existing, removed)) {
-        found = true;
-        continue;
-      }
-      melody.add(
-        existing.beat == removed.beat && existing.step > removed.step
-            ? _noteAtStep(existing, existing.step - 1)
-            : existing,
+  /// Returns a copy of [bar] without the note written at [removed]'s place.
+  ///
+  /// Matched by its whole value before its place, for the reason the chord deletion gives: two notes
+  /// may share a coordinate, and the inverse names one of them exactly.
+  static Bar _withNoteRemoved(Bar bar, NoteMark removed) {
+    int at = bar.melody.indexWhere((NoteMark existing) => existing == removed);
+    if (at < 0) {
+      at = bar.melody.indexWhere(
+        (NoteMark existing) => existing.place == removed.place,
       );
     }
-    if (!found) {
+    if (at < 0) {
       throw DocumentReducerException(
-        'no note at beat ${removed.beat}.${removed.step} to delete',
+        'no note at x=${removed.place.offsetX} in this bar to delete',
       );
     }
+    final List<NoteMark> melody = <NoteMark>[...bar.melody]..removeAt(at);
     return bar.copyWith(melody: melody);
   }
 
-  /// Returns a copy of [bar] with the note at [from]'s address replaced by [to].
-  static Bar _withNoteReplaced(Bar bar, BeatNote from, BeatNote to) {
-    final List<BeatNote> melody = <BeatNote>[];
-    bool found = false;
-    for (final BeatNote existing in bar.melody) {
-      if (_sameNoteAddress(existing, from)) {
-        melody.add(to);
-        found = true;
-      } else {
-        melody.add(existing);
-      }
+  /// Returns a copy of [bar] with the note at [from]'s place replaced by [to].
+  static Bar _withNoteReplaced(Bar bar, NoteMark from, NoteMark to) {
+    int at = bar.melody.indexWhere((NoteMark existing) => existing == from);
+    if (at < 0) {
+      at = bar.melody.indexWhere(
+        (NoteMark existing) => existing.place == from.place,
+      );
     }
-    if (!found) {
+    if (at < 0) {
       throw DocumentReducerException(
-        'no note at beat ${from.beat}.${from.step} to update',
+        'no note at x=${from.place.offsetX} in this bar to update',
       );
     }
+    final List<NoteMark> melody = <NoteMark>[...bar.melody];
+    melody[at] = to;
+    melody.sort(_compareNotePlace);
     return bar.copyWith(melody: melody);
   }
 
-  /// Returns [placed] with its step replaced by [step], keeping pitch, duration and tie.
-  static BeatNote _noteAtStep(BeatNote placed, int step) => BeatNote(
-    pitch: placed.pitch,
-    value: placed.value,
-    beat: placed.beat,
-    step: step,
-    tiedToNext: placed.tiedToNext,
-  );
-
-  /// Whether two note placements sit at the same (beat, step) address.
-  static bool _sameNoteAddress(BeatNote left, BeatNote right) =>
-      left.beat == right.beat && left.step == right.step;
-
-  /// Orders two note placements by beat and then by step.
-  static int _compareNoteAddress(BeatNote left, BeatNote right) {
-    final int byBeat = left.beat.compareTo(right.beat);
-    return byBeat != 0 ? byBeat : left.step.compareTo(right.step);
-  }
+  /// Orders two note marks by their place along the bar. The place's x is the note's time.
+  static int _compareNotePlace(NoteMark left, NoteMark right) =>
+      left.place.offsetX.compareTo(right.place.offsetX);
 
   // --- Measures -------------------------------------------------------------------------
   /// Returns [song] with [bar] inserted at [index] of section [sectionId].

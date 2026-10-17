@@ -79,7 +79,7 @@ String _notesOf(Song song, String sectionId, int barIndex) {
     return 'none';
   }
   return <String>[
-    for (final BeatNote note in bar.melody)
-      '${note.beat}.${note.step}:${note.pitch}',
+    for (final NoteMark note in bar.melody)
+      '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch}',
   ].join(',');
 }

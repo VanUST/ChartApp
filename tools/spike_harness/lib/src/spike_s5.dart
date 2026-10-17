@@ -61,10 +61,10 @@ String benchmarkSnapshotJson(Song song) {
                 'openingBarline': bar.openingBarline.name,
                 'closingBarline': bar.closingBarline.name,
                 'chords': <Map<String, Object?>>[
-                  for (final BeatChord placement in bar.chords)
+                  for (final ChordMark placement in bar.chords)
                     <String, Object?>{
-                      'beat': placement.beat,
-                      'step': placement.step,
+                      'beat': placement.pseudoBeat,
+                      'step': placement.pseudoStep,
                       'size': placement.size.name,
                       'symbol': placement.chord.render(song.key, table),
                     },

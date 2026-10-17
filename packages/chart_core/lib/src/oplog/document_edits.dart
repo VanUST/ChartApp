@@ -21,9 +21,9 @@ extension BarEditing on Bar {
   Bar copyWith({
     TimeSignature? timeSignature,
     BarSize? size,
-    List<BeatChord>? chords,
-    List<BeatNote>? melody,
-    List<PercussionHit>? percussion,
+    List<ChordMark>? chords,
+    List<NoteMark>? melody,
+    List<PercussionMark>? percussion,
     Barline? openingBarline,
     Barline? closingBarline,
     Volta? volta,

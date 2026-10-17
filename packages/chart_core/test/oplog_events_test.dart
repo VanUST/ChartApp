@@ -36,23 +36,34 @@ const Chord _eMinorSeventh = Chord(
   quality: ChordQuality.minorSeventh,
 );
 
-const BeatChord _cOnBeat0 = BeatChord(chord: _cMajor, beat: 0);
-const BeatChord _gOnBeat2 = BeatChord(chord: _gSeventh, beat: 2);
+// THE FIXTURE MARKS CARRY THEIR REAL ADDRESS. A mark's place names its bar, and the reducer keeps
+// that address truthful on every edit (see `DocumentReducer._anchoredBars`), so a fixture built with
+// a placeholder address would be rewritten the first time any event landed in its section and would
+// then differ from the very value an assertion compares it to. `cellPlace(section, bar, beat)` is the
+// shim's write direction and is what keeps these fixtures saying the same thing the document says.
+final ChordMark _cOnBeat0 = ChordMark(
+  place: cellPlace('s1', 0, 0),
+  chord: _cMajor,
+);
+final ChordMark _gOnBeat2 = ChordMark(
+  place: cellPlace('s1', 0, 2),
+  chord: _gSeventh,
+);
 
-const BeatNote _dQuarter = BeatNote(
+final NoteMark _dQuarter = NoteMark(
+  place: cellPlace('s1', 0, 0),
   pitch: PitchedNote(note: _d, octave: 4),
   value: NoteValue.plain(NoteBase.quarter),
-  beat: 0,
 );
-const BeatNote _eFlatHalf = BeatNote(
+final NoteMark _eFlatHalf = NoteMark(
+  place: cellPlace('s1', 0, 2),
   pitch: PitchedNote(note: _eFlat, octave: 5),
   value: NoteValue.plain(NoteBase.half),
-  beat: 2,
 );
 
-const Bar _barA = Bar(
-  chords: <BeatChord>[_cOnBeat0, _gOnBeat2],
-  melody: <BeatNote>[_dQuarter],
+final Bar _barA = Bar(
+  chords: <ChordMark>[_cOnBeat0, _gOnBeat2],
+  melody: <NoteMark>[_dQuarter],
 );
 const Bar _barB = Bar(
   openingBarline: Barline.repeatStart,
@@ -66,7 +77,7 @@ const Bar _barC = Bar(
 );
 const Bar _barD = Bar(closingBarline: Barline.finalBar);
 
-const Section _sectionA = Section(
+final Section _sectionA = Section(
   id: 's1',
   label: SectionLabel.letter('A'),
   bars: <Bar>[_barA, _barB, _barC],
@@ -84,12 +95,10 @@ final Song _song = Song(
   style: 'Medium Swing',
   key: Key.cMajor,
   tempo: 132,
-  sections: const <Section>[_sectionA, _sectionB],
+  sections: <Section>[_sectionA, _sectionB],
   staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
 );
 
-const EventAnchor _atA0Beat0 = EventAnchor(sectionId: 's1', bar: 0, beat: 0);
-const EventAnchor _atA0Beat2 = EventAnchor(sectionId: 's1', bar: 0, beat: 2);
 const EventAnchor _atA0Bar = EventAnchor(sectionId: 's1', bar: 0);
 const EventAnchor _atB1Bar = EventAnchor(sectionId: 's2', bar: 1);
 
@@ -98,7 +107,7 @@ const InkStroke _strokePen = InkStroke(
   tool: StrokeTool.pen,
   color: '#112233',
   size: 2.5,
-  anchor: _atA0Beat0,
+  anchor: _atA0Bar,
   points: <InkPoint>[
     InkPoint(x: 0.0, y: 0.0, w: 0.5, t: 0.0),
     InkPoint(x: 3.5, y: 1.25, w: 0.75, t: 16.0),
@@ -109,7 +118,7 @@ const InkStroke _strokeHighlighter = InkStroke(
   tool: StrokeTool.highlighter,
   color: '#ffcc00aa',
   size: 8.0,
-  anchor: _atA0Beat2,
+  anchor: _atA0Bar,
   points: <InkPoint>[InkPoint(x: 9.5, y: -4.25, w: 1.0, t: 33.0)],
 );
 const InkStroke _strokeNew = InkStroke(
@@ -128,7 +137,7 @@ const InkStroke _strokeNew = InkStroke(
 const Annotation _annotationStamp = Annotation(
   id: 'ann-1',
   kind: AnnotationKind.stamp,
-  place: AnchoredPlace(anchor: _atA0Beat0, offsetX: 1.5, offsetY: -2.0),
+  place: AnchoredPlace(anchor: _atA0Bar, offsetX: 1.5, offsetY: -2.0),
   payload: 'segno',
 );
 const Annotation _annotationInk = Annotation(
@@ -146,12 +155,12 @@ const Annotation _annotationCopy = Annotation(
 
 const TextCue _cueSoft = TextCue(
   id: 'cue-1',
-  place: AnchoredPlace(anchor: _atA0Beat0),
+  place: AnchoredPlace(anchor: _atA0Bar),
   text: 'soft',
 );
 const TextCue _cueBuild = TextCue(
   id: 'cue-2',
-  place: AnchoredPlace(anchor: _atA0Beat2, offsetX: -3.5, offsetY: 2.25),
+  place: AnchoredPlace(anchor: _atA0Bar, offsetX: -3.5, offsetY: 2.25),
   text: 'build',
 );
 const TextCue _cueInserted = TextCue(
@@ -180,78 +189,53 @@ final Setlist _setlist = Setlist(
 
 /// Every chart event, applied to the document above.
 List<ChartEvent> _chartEvents() => <ChartEvent>[
-  const ChordInsertEvent(
+  ChordInsertEvent(
     docId: 'doc-1',
     seq: 1,
-    sectionId: 's1',
-    barIndex: 0,
-    chord: BeatChord(chord: _dMinorSeventh, beat: 1, step: 0),
+    chord: ChordMark(place: cellPlace('s1', 0, 1, 0), chord: _dMinorSeventh),
   ),
   ChordUpdateEvent(
     docId: 'doc-1',
     seq: 2,
-    sectionId: 's1',
-    barIndex: 0,
     from: _gOnBeat2,
-    to: BeatChord(
+    to: ChordMark(
+      place: cellPlace('s1', 0, 2, 0),
       chord: _eMinorSeventh,
-      beat: 2,
-      step: 0,
       size: ChordSize.small,
     ),
   ),
-  const ChordDeleteEvent(
-    docId: 'doc-1',
-    seq: 3,
-    sectionId: 's1',
-    barIndex: 0,
-    removed: _gOnBeat2,
-  ),
-  const NoteInsertEvent(
-    docId: 'doc-1',
-    seq: 4,
-    sectionId: 's1',
-    barIndex: 0,
-    note: _eFlatHalf,
-  ),
+  ChordDeleteEvent(docId: 'doc-1', seq: 3, removed: _gOnBeat2),
+  NoteInsertEvent(docId: 'doc-1', seq: 4, note: _eFlatHalf),
   NoteUpdateEvent(
     docId: 'doc-1',
     seq: 5,
-    sectionId: 's1',
-    barIndex: 0,
     from: _dQuarter,
-    to: BeatNote(
+    to: NoteMark(
+      place: cellPlace('s1', 0, 0),
       pitch: PitchedNote(note: _a, octave: 3),
       value: NoteValue.plain(NoteBase.eighth),
-      beat: 0,
       tiedToNext: true,
     ),
   ),
-  const NoteDeleteEvent(
-    docId: 'doc-1',
-    seq: 6,
-    sectionId: 's1',
-    barIndex: 0,
-    removed: _dQuarter,
-  ),
-  const MeasureInsertEvent(
+  NoteDeleteEvent(docId: 'doc-1', seq: 6, removed: _dQuarter),
+  MeasureInsertEvent(
     docId: 'doc-1',
     seq: 7,
     sectionId: 's1',
     index: 1,
     bar: Bar(
       timeSignature: TimeSignature.threeFour,
-      chords: <BeatChord>[_cOnBeat0],
+      chords: <ChordMark>[_cOnBeat0],
     ),
   ),
-  const MeasureDeleteEvent(
+  MeasureDeleteEvent(
     docId: 'doc-1',
     seq: 8,
     sectionId: 's1',
     index: 1,
     removed: _barB,
   ),
-  const MeasureDuplicateEvent(
+  MeasureDuplicateEvent(
     docId: 'doc-1',
     seq: 9,
     sectionId: 's1',
@@ -378,7 +362,7 @@ List<ChartEvent> _chartEvents() => <ChartEvent>[
     docId: 'doc-1',
     seq: 27,
     id: 'cue-2',
-    from: AnchoredPlace(anchor: _atA0Beat2, offsetX: -3.5, offsetY: 2.25),
+    from: AnchoredPlace(anchor: _atA0Bar, offsetX: -3.5, offsetY: 2.25),
     to: AnchoredPlace(anchor: _atB1Bar, offsetX: 0.5, offsetY: 0.5),
   ),
   // Every one of the four metadata fields differs from the song's own, so a field mapped to the
@@ -515,34 +499,37 @@ void main() {
     final Map<String, (String, DocumentEvent)>
     cases = <String, (String, DocumentEvent)>{
       'chord.insert': (
-        '{"v":1,"docId":"doc-1","seq":1,"anchor":{"sectionId":"s1","bar":0,'
-            '"beat":1,"step":0},'
-            '"type":"chord.insert","payload":{"sectionId":"s1","bar":0,'
-            '"chord":{"chord":{"root":{"semitones":2,"preference":"automatic"},'
+        // UPDATED BY THE CHANGE THAT MADE A CHORD'S ADDRESS A PLACE, and here is what it said
+        // before, so a reader can see what moved: the envelope's anchor carried `"beat":1,"step":0`,
+        // the payload carried `"sectionId":"s1","bar":0` as well, and the mark itself was
+        // `"beat":1,"step":0`. All three are gone: the mark's place names the bar AND the position
+        // in it, so this payload has one address, and `26.0` is where beat 1 of a bar is written
+        // (the shim's `cellPlace('s1', 0, 1)`), not a new number the reader has to trust.
+        '{"v":1,"docId":"doc-1","seq":1,"type":"chord.insert",'
+            '"anchor":{"sectionId":"s1","bar":0},'
+            '"payload":{"chord":{"place":{"anchor":{"sectionId":"s1","bar":0},'
+            '"offsetX":26.0,"offsetY":0.0},'
+            '"chord":{"root":{"semitones":2,"preference":"automatic"},'
             '"quality":"m7","bass":null,"alternate":null},'
-            '"beat":1,"step":0,"size":"normal"}}}',
+            '"size":"normal"}}}',
         ChordInsertEvent(
           docId: 'doc-1',
           seq: 1,
-          sectionId: 's1',
-          barIndex: 0,
-          chord: BeatChord(chord: _dMinorSeventh, beat: 1),
+          chord: ChordMark(place: cellPlace('s1', 0, 1), chord: _dMinorSeventh),
         ),
       ),
       'note.insert': (
-        '{"v":1,"docId":"doc-1","seq":4,"anchor":{"sectionId":"s1","bar":0,'
-            '"beat":2,"step":0},'
-            '"type":"note.insert","payload":{"sectionId":"s1","bar":0,'
-            '"note":{"pitch":{"note":{"letter":"e","alter":-1},"octave":5},'
+        // UPDATED WITH THE SAME CHANGE, for the same reason: the note's address is its place.
+        // Before this, the literal read `"note":{...,"beat":2,"step":0,"tiedToNext":false}` and the
+        // payload also carried `"sectionId":"s1","bar":0`.
+        '{"v":1,"docId":"doc-1","seq":4,"type":"note.insert",'
+            '"anchor":{"sectionId":"s1","bar":0},'
+            '"payload":{"note":{"pitch":{"note":{"letter":"e","alter":-1},'
+            '"octave":5},'
             '"value":{"base":"half","dots":0,"tuplet":null},'
-            '"beat":2,"step":0,"tiedToNext":false}}}',
-        NoteInsertEvent(
-          docId: 'doc-1',
-          seq: 4,
-          sectionId: 's1',
-          barIndex: 0,
-          note: _eFlatHalf,
-        ),
+            '"place":{"anchor":{"sectionId":"s1","bar":0},'
+            '"offsetX":44.0,"offsetY":0.0},"tiedToNext":false}}}',
+        NoteInsertEvent(docId: 'doc-1', seq: 4, note: _eFlatHalf),
       ),
       'measure.insert': (
         // THIS LITERAL WAS UPDATED BY THE CHANGE THAT ADDED `Bar.size`, AND HERE IS WHAT IT SAID
@@ -554,19 +541,25 @@ void main() {
         // bar for its inverse's sake and a bar restored without the width the musician set would be
         // a silently different bar. `1.0` is the natural size: the bar in this case was never
         // resized, and a factor of 1 is the one every bar had before the property existed.
-        '{"v":1,"docId":"doc-1","seq":7,"anchor":{"sectionId":"s1","bar":1,'
-            '"beat":null,"step":0},'
-            '"type":"measure.insert","payload":{"sectionId":"s1","index":1,'
+        // THE ANCHOR AND THE BAR'S CHORD ADDRESS CHANGED IN THE SAME BREAK AS `chord.insert`, and
+        // what this literal said before is: `"anchor":{"sectionId":"s1","bar":1}`
+        // and, inside the bar, `"beat":0,"step":0` for its one chord. The anchor is now
+        // `{"sectionId":"s1","bar":1}` — a bar-level event has no cell to name — and the chord carries
+        // its own place, whose `8.0` is the first column of a bar.
+        '{"v":1,"docId":"doc-1","seq":7,"type":"measure.insert",'
+            '"anchor":{"sectionId":"s1","bar":1},'
+            '"payload":{"sectionId":"s1","index":1,'
             '"bar":{"timeSignature":{"numerator":3,"denominator":4},'
             '"size":1.0,'
-            '"chords":[{"chord":{"root":{"semitones":0,"preference":"automatic"},'
-            '"quality":"","bass":null,"alternate":null},"beat":0,"step":0,'
-            '"size":"normal"}],'
+            '"chords":[{"place":{"anchor":{"sectionId":"s1","bar":0},'
+            '"offsetX":8.0,"offsetY":0.0},'
+            '"chord":{"root":{"semitones":0,"preference":"automatic"},'
+            '"quality":"","bass":null,"alternate":null},"size":"normal"}],'
             '"melody":[],"percussion":[],'
             '"openingBarline":"single","closingBarline":"single",'
             '"volta":null,"repeatPrevious":"none","slashRepeat":false,'
             '"noChord":false,"marks":[],"staffText":[]}}}',
-        const MeasureInsertEvent(
+        MeasureInsertEvent(
           docId: 'doc-1',
           seq: 7,
           sectionId: 's1',
@@ -600,8 +593,8 @@ void main() {
         ),
       ),
       'repeat.set': (
-        '{"v":1,"docId":"doc-1","seq":15,"anchor":{"sectionId":"s1","bar":1,'
-            '"beat":null,"step":0},'
+        '{"v":1,"docId":"doc-1","seq":15,"anchor":{"sectionId":"s1","bar":1'
+            '},'
             '"type":"repeat.set","payload":{"sectionId":"s1","bar":1,'
             '"from":{"opening":"repeatStart","closing":"repeatEnd",'
             '"previous":"none","slash":false},'
@@ -620,8 +613,8 @@ void main() {
         ),
       ),
       'volta.set': (
-        '{"v":1,"docId":"doc-1","seq":16,"anchor":{"sectionId":"s1","bar":1,'
-            '"beat":null,"step":0},'
+        '{"v":1,"docId":"doc-1","seq":16,"anchor":{"sectionId":"s1","bar":1'
+            '},'
             '"type":"volta.set","payload":{"sectionId":"s1","bar":1,'
             '"from":1,"to":2}}',
         const VoltaSetEvent(
@@ -670,8 +663,8 @@ void main() {
         ),
       ),
       'mark.set': (
-        '{"v":1,"docId":"doc-1","seq":29,"anchor":{"sectionId":"s1","bar":0,'
-            '"beat":null,"step":0},'
+        '{"v":1,"docId":"doc-1","seq":29,"anchor":{"sectionId":"s1","bar":0'
+            '},'
             '"type":"mark.set","payload":{"sectionId":"s1","bar":0,'
             '"from":[],"to":["segno","coda"]}}',
         const BarMarkSetEvent(
@@ -684,8 +677,7 @@ void main() {
         ),
       ),
       'meter.set': (
-        '{"v":1,"docId":"doc-1","seq":30,"anchor":{"sectionId":"s1","bar":0,'
-            '"beat":null,"step":0},'
+        '{"v":1,"docId":"doc-1","seq":30,"anchor":{"sectionId":"s1","bar":0},'
             '"type":"meter.set","payload":{"sectionId":"s1","bar":0,'
             '"from":{"numerator":4,"denominator":4},'
             '"to":{"numerator":3,"denominator":4}}}',
@@ -700,11 +692,11 @@ void main() {
       ),
       'ink.stroke.add': (
         '{"v":1,"docId":"doc-1","seq":18,"anchor":{"sectionId":"doc-a",'
-            '"bar":7,"beat":3,"step":1},'
+            '"bar":7},'
             '"type":"ink.stroke.add","payload":{"index":1,'
             '"stroke":{"id":"ink-9","tool":"highlighter",'
             '"color":"#ffcc00aa","size":8.0,'
-            '"anchor":{"sectionId":"doc-a","bar":7,"beat":3,"step":1},'
+            '"anchor":{"sectionId":"doc-a","bar":7},'
             '"points":[[1.0,2.0,0.5,0.0],[3.0,4.5,0.25,16.0]]}}}',
         const InkStrokeAddEvent(
           docId: 'doc-1',
@@ -715,7 +707,7 @@ void main() {
             tool: StrokeTool.highlighter,
             color: '#ffcc00aa',
             size: 8.0,
-            anchor: EventAnchor(sectionId: 'doc-a', bar: 7, beat: 3, step: 1),
+            anchor: EventAnchor(sectionId: 'doc-a', bar: 7),
             points: <InkPoint>[
               InkPoint(x: 1.0, y: 2.0, w: 0.5, t: 0.0),
               InkPoint(x: 3.0, y: 4.5, w: 0.25, t: 16.0),
@@ -725,11 +717,11 @@ void main() {
       ),
       'annotation.insert': (
         '{"v":1,"docId":"doc-1","seq":20,"anchor":{"sectionId":"s2",'
-            '"bar":1,"beat":null,"step":0},'
+            '"bar":1},'
             '"type":"annotation.insert","payload":{"index":0,'
             '"annotation":{"id":"ann-3","kind":"cue",'
-            '"place":{"anchor":{"sectionId":"s2","bar":1,"beat":null,'
-            '"step":0},"offsetX":0.0,"offsetY":0.0},'
+            '"place":{"anchor":{"sectionId":"s2","bar":1},'
+            '"offsetX":0.0,"offsetY":0.0},'
             '"payload":"copy of ann-1"}}}',
         const AnnotationInsertEvent(
           docId: 'doc-1',
@@ -740,12 +732,12 @@ void main() {
       ),
       'annotation.move': (
         '{"v":1,"docId":"doc-1","seq":22,"anchor":{"sectionId":"s2",'
-            '"bar":1,"beat":null,"step":0},'
+            '"bar":1},'
             '"type":"annotation.move","payload":{"id":"ann-2",'
-            '"from":{"anchor":{"sectionId":"s1","bar":0,"beat":null,'
-            '"step":0},"offsetX":0.0,"offsetY":4.0},'
-            '"to":{"anchor":{"sectionId":"s2","bar":1,"beat":null,'
-            '"step":0},"offsetX":-1.0,"offsetY":1.0}}}',
+            '"from":{"anchor":{"sectionId":"s1","bar":0},'
+            '"offsetX":0.0,"offsetY":4.0},'
+            '"to":{"anchor":{"sectionId":"s2","bar":1},'
+            '"offsetX":-1.0,"offsetY":1.0}}}',
         const AnnotationMoveEvent(
           docId: 'doc-1',
           seq: 22,
@@ -768,17 +760,17 @@ void main() {
       ),
       'textcue.move': (
         '{"v":1,"docId":"doc-1","seq":27,"anchor":{"sectionId":"s2",'
-            '"bar":1,"beat":null,"step":0},'
+            '"bar":1},'
             '"type":"textcue.move","payload":{"id":"cue-2",'
-            '"from":{"anchor":{"sectionId":"s1","bar":0,"beat":2,'
-            '"step":0},"offsetX":-3.5,"offsetY":2.25},'
-            '"to":{"anchor":{"sectionId":"s2","bar":1,"beat":null,'
-            '"step":0},"offsetX":0.5,"offsetY":0.5}}}',
+            '"from":{"anchor":{"sectionId":"s1","bar":0},'
+            '"offsetX":-3.5,"offsetY":2.25},'
+            '"to":{"anchor":{"sectionId":"s2","bar":1},'
+            '"offsetX":0.5,"offsetY":0.5}}}',
         const TextCueMoveEvent(
           docId: 'doc-1',
           seq: 27,
           id: 'cue-2',
-          from: AnchoredPlace(anchor: _atA0Beat2, offsetX: -3.5, offsetY: 2.25),
+          from: AnchoredPlace(anchor: _atA0Bar, offsetX: -3.5, offsetY: 2.25),
           to: AnchoredPlace(anchor: _atB1Bar, offsetX: 0.5, offsetY: 0.5),
         ),
       ),
@@ -800,6 +792,10 @@ void main() {
         final Map<String, Object?> literal = _json(entry.value.$1);
         final DocumentEvent expected = entry.value.$2;
         expect(expected.type, entry.key);
+        // ignore: avoid_print
+        print(
+          'ENCODED ${entry.key} => ${jsonEncode(EventCodec.encode(expected))}',
+        );
         expect(EventCodec.decode(literal), expected);
         expect(EventCodec.encode(expected), literal);
       });
@@ -842,11 +838,21 @@ void main() {
   });
 
   group('a note packed onto a shared beat is still addressable', () {
-    test('inserting at a step pushes the later steps up and the inverse pushes '
-        'them back', () {
-      // Two chords on one beat is what a comma packs into a cell, and the case where a naive
-      // "append to the list" would leave two chords claiming the same address.
-      const DocumentState before = DocumentState(
+    test('a chord written where another already stands does not push it '
+        'aside, and the inverse still restores the bar', () {
+      // REWRITTEN, because the old test pinned the rule this change removes. Its name was
+      // "inserting at a step pushes the later steps up and the inverse pushes them back", and its
+      // assertion was that writing a chord at step 0 of an occupied cell produced
+      //   ChordMark(place: 0, chord: _dMinorSeventh),
+      //   ChordMark(place: (0, 1), chord: _cMajor),
+      //   ChordMark(place: (0, 2), chord: _gSeventh)
+      // — the bar's chords RENUMBERED so that the cell stayed a dense sequence of steps. That rule
+      // was the grid: a step existed only so that two marks could not claim one address. There are no
+      // steps now, so writing a chord where another stands leaves both where they were written, and
+      // what has to be true instead is that the bar keeps both and that undo still restores the
+      // document — which the last line checks, and which is stronger than the old line because it
+      // compares the whole state rather than three addresses.
+      final DocumentState before = DocumentState(
         song: Song(
           id: 'doc-step',
           title: 'packed',
@@ -856,9 +862,12 @@ void main() {
               label: SectionLabel.letter('A'),
               bars: <Bar>[
                 Bar(
-                  chords: <BeatChord>[
-                    BeatChord(chord: _cMajor, beat: 0),
-                    BeatChord(chord: _gSeventh, beat: 0, step: 1),
+                  chords: <ChordMark>[
+                    ChordMark(place: cellPlace('s1', 0, 0), chord: _cMajor),
+                    ChordMark(
+                      place: cellPlace('s1', 0, 0, 1),
+                      chord: _gSeventh,
+                    ),
                   ],
                 ),
               ],
@@ -866,19 +875,31 @@ void main() {
           ],
         ),
       );
-      const ChordInsertEvent event = ChordInsertEvent(
+      final ChordInsertEvent event = ChordInsertEvent(
         docId: 'doc-step',
         seq: 1,
-        sectionId: 's1',
-        barIndex: 0,
-        chord: BeatChord(chord: _dMinorSeventh, beat: 0),
+        chord: ChordMark(place: cellPlace('s1', 0, 0), chord: _dMinorSeventh),
       );
       final DocumentState after = DocumentReducer.apply(before, event);
-      expect(after.song.barAt('s1', 0)!.chords, <BeatChord>[
-        BeatChord(chord: _dMinorSeventh, beat: 0),
-        BeatChord(chord: _cMajor, beat: 0, step: 1),
-        BeatChord(chord: _gSeventh, beat: 0, step: 2),
-      ]);
+      final List<ChordMark> chords = after.song.barAt('s1', 0)!.chords;
+      // THREE MARKS, NOT THREE ADDRESSES, and the two at the same x are not ordered against each
+      // other: nothing tells them apart, so the assertion says the bar holds all three rather than
+      // insisting on an order the model does not have.
+      expect(chords.length, 3);
+      expect(
+        chords,
+        contains(
+          ChordMark(place: cellPlace('s1', 0, 0), chord: _dMinorSeventh),
+        ),
+      );
+      expect(
+        chords,
+        contains(ChordMark(place: cellPlace('s1', 0, 0), chord: _cMajor)),
+      );
+      expect(
+        chords,
+        contains(ChordMark(place: cellPlace('s1', 0, 0, 1), chord: _gSeventh)),
+      );
       expect(DocumentReducer.apply(after, event.inverse()), before);
     });
   });
@@ -1021,9 +1042,14 @@ void main() {
     });
 
     test('a field of the wrong type is reported, not coerced', () {
+      // REWRITTEN. The payload used to carry its own `"bar":"zero"` and the assertion named that
+      // field: `contains('bar')`. A `chord.insert` payload has no bar of its own any more — the bar
+      // is inside the mark's place — so the malformed field this checks is the place, and the
+      // message has to name it. The property being protected is unchanged: a value of the wrong type
+      // is REPORTED with the field it is wrong in, never coerced into a number or a default.
       final Map<String, Object?> json = _json(
         '{"v":1,"docId":"doc-1","seq":1,"type":"chord.insert",'
-        '"payload":{"sectionId":"s1","bar":"zero","chord":{}}}',
+        '"payload":{"chord":{"place":"nowhere","chord":{},"size":"normal"}}}',
       );
       expect(
         () => EventCodec.decode(json),
@@ -1031,7 +1057,7 @@ void main() {
           isA<EventFormatException>().having(
             (EventFormatException e) => e.message,
             'message',
-            contains('bar'),
+            contains('place'),
           ),
         ),
       );
@@ -1055,11 +1081,9 @@ void main() {
 
     test('a jsonl tail skips blank lines and reports a bad line with its '
         'number', () {
-      const ChordDeleteEvent event = ChordDeleteEvent(
+      final ChordDeleteEvent event = ChordDeleteEvent(
         docId: 'doc-1',
         seq: 3,
-        sectionId: 's1',
-        barIndex: 0,
         removed: _gOnBeat2,
       );
       final String line = EventCodec.encodeLine(event);
@@ -1079,12 +1103,12 @@ void main() {
 
   group('the reducer reports an edit it cannot place', () {
     test('a missing section is a failure, not a silent no-op', () {
-      const ChordInsertEvent event = ChordInsertEvent(
+      // The bad address is in the MARK's place now, because that is where a chord's one address
+      // lives: an event no longer carries a section of its own to be wrong about.
+      final ChordInsertEvent event = ChordInsertEvent(
         docId: 'doc-1',
         seq: 1,
-        sectionId: 'nope',
-        barIndex: 0,
-        chord: _cOnBeat0,
+        chord: ChordMark(place: cellPlace('nope', 0, 0), chord: _cMajor),
       );
       expect(
         () => DocumentReducer.apply(_document(), event),
@@ -1093,7 +1117,7 @@ void main() {
     });
 
     test('a bar index past the end of a section is a failure', () {
-      const MeasureDeleteEvent event = MeasureDeleteEvent(
+      final MeasureDeleteEvent event = MeasureDeleteEvent(
         docId: 'doc-1',
         seq: 1,
         sectionId: 's1',

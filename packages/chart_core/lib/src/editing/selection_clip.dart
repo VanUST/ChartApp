@@ -460,12 +460,9 @@ SelectionReport selectionReportOf({
               stroke.anchor.bar == barIndex,
         )
         .toList();
-    final List<InkStroke> atBarLevel = onBar
-        .where((InkStroke stroke) => stroke.anchor.isBarLevel)
-        .toList();
-    final InkFragment? atBar = atBarLevel.isEmpty
+    final InkFragment? atBar = onBar.isEmpty
         ? null
-        : InkFragment.ofStrokes(atBarLevel);
+        : InkFragment.ofStrokes(onBar);
     rows.add(
       BarFragment(
         barIndex: barIndex,
@@ -489,17 +486,36 @@ SelectionReport selectionReportOf({
 //          document and not of the page on screen.
 // INPUTS: selection — the address. strokes — the document's strokes.
 // OUTPUTS: The strokes whose anchor lies inside the selection, in document render order. A bar-deep
-//          selection carries every stroke anchored anywhere in those bars, at the bar or in a cell.
-//          A beat window carries only strokes anchored to a CELL inside the window: a stroke
-//          anchored to the bar has no beat, and this function does not invent one from its geometry.
-//          That refusal is the decision, and it is stated here because it is the only place it can
-//          be checked: the alternative — decide membership from the ink's position on the page —
-//          would make the same gesture carry different ink at a different zoom or a different page
-//          mode, since the rectangle it measured against would have moved.
-// KEYWORDS: stroke-membership, address-decides, no-geometry-guess, order-preserving, total-function
+//          selection carries every stroke anchored to those bars. A beat window carries only the
+//          strokes WRITTEN INSIDE ITS COLUMNS, decided from the stroke's own stored x — which is a
+//          coordinate in the document, not a measurement of the page.
+//
+//          WHY THE WINDOW RULE CHANGED, AND WHY IT IS STILL NOT A GEOMETRY GUESS. A beat window used
+//          to carry only strokes anchored TO A CELL inside it, and to refuse a bar-anchored stroke
+//          because inventing a beat for it from its position would be a guess. Nothing is
+//          cell-anchored any more: a stroke is written beside its bar and its own points say where,
+//          which is exactly the fact the old rule refused to infer from the PAGE. The distinction
+//          that matters is preserved — a stored point does not move when the zoom or the page mode
+//          does, while a rectangle measured from the screen would — so the membership is still a
+//          property of the document. What is lost is the old ability to say "this stroke belongs to
+//          beat 2" as an ADDRESS; the shim's columns are used here to turn the window into a range of
+//          x, and that use dies with the shim.
+// KEYWORDS: stroke-membership, address-decides, stored-coordinate, order-preserving, total-function,
+//           pseudo-grid
 /// Returns the strokes a selection carries, decided by their addresses alone.
 List<InkStroke> strokesOf(ChartSelection selection, List<InkStroke> strokes) {
   final List<InkStroke> carried = <InkStroke>[];
+  // The window's own extent in bar-local pixels, so a stroke is judged by one comparison rather than
+  // by a cell index it no longer has. The window covers every column from its first beat to its last,
+  // which is a half-open interval: a stroke exactly on the next beat's column start belongs to that
+  // beat and not to this one.
+  final bool window = selection.isBeatWindow;
+  final double windowFromX = window
+      ? PseudoGrid.xOf(selection.firstBeat!, 0)
+      : 0;
+  final double windowToX = window
+      ? PseudoGrid.xOf(selection.lastBeat! + 1, 0)
+      : 0;
   for (final InkStroke stroke in strokes) {
     if (stroke.anchor.sectionId != selection.sectionId) {
       continue;
@@ -508,11 +524,12 @@ List<InkStroke> strokesOf(ChartSelection selection, List<InkStroke> strokes) {
     if (bar < selection.firstBar || bar > selection.lastBar) {
       continue;
     }
-    if (selection.isBeatWindow) {
-      final int? beat = stroke.anchor.beat;
-      if (beat == null ||
-          beat < selection.firstBeat! ||
-          beat > selection.lastBeat!) {
+    if (window) {
+      // A stroke is in the window when it STARTS in it: a mark begun inside the window and finished
+      // in the next one belongs to the beat it was begun on, which is where the musician's hand was
+      // when he wrote it.
+      final double first = stroke.points.first.x;
+      if (first < windowFromX || first >= windowToX) {
         continue;
       }
     }
@@ -658,13 +675,14 @@ ChartClip? chartClipOf({
           tool: stroke.tool,
           color: stroke.color,
           size: stroke.size,
+          // THE CLIP REBASES THE BAR AND NOTHING ELSE. A stroke's position along its bar is in its
+          // own points, so a clip taken out of bar 5 carries a stroke whose anchor says bar 0 and
+          // whose points still say where in the bar it was written; pasting re-attaches those points
+          // to the target bar. There used to be a beat and a step to rebase here as well, and both
+          // were a second copy of a position the points already held.
           anchor: EventAnchor(
             sectionId: stroke.anchor.sectionId,
             bar: stroke.anchor.bar - selection.firstBar,
-            beat: selection.isBeatWindow
-                ? stroke.anchor.beat! - selection.firstBeat!
-                : stroke.anchor.beat,
-            step: stroke.anchor.step,
           ),
           points: stroke.points,
         ),

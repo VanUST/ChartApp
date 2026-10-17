@@ -329,8 +329,8 @@ void main() {
           final Bar bar = section.bars[index];
           final String chords = bar.chords
               .map(
-                (BeatChord placed) =>
-                    '${placed.beat}.${placed.step}'
+                (ChordMark placed) =>
+                    '${placed.pseudoBeat}.${placed.pseudoStep}'
                     '=${placed.chord.render(shown.key, renderTable)}',
               )
               .join(' ');

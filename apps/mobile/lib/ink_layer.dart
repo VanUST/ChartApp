@@ -344,7 +344,7 @@ class InkCaptureLayer {
   /// the note it became.
   ///
   /// IT IS SESSION STATE AND NOT THE FILE, AND THAT IS A NAMED LIMIT rather than an oversight: a
-  /// recognised note stores no stroke id (`BeatNote` is the model's own note and has nowhere to put
+  /// recognised note stores no stroke id (`NoteMark` is the model's own note and has nowhere to put
   /// one), so after a reload the application knows the notes and the ink but not that they are the
   /// same mark. The hiding is therefore rebuilt by the whole-page pass when recognition is switched
   /// on, and a chart reopened with recognition on shows both layers until that pass runs. Storing the
@@ -1471,10 +1471,10 @@ class InkCaptureLayer {
         'refused=${reading.refusals.length} '
         'ink=${accepted.fold<int>(0, (int sum, MelodyNoteHead head) => sum + head.strokeIds.length)}',
       );
-      for (final BeatNote note in write.written) {
+      for (final NoteMark note in write.written) {
         debugPrint(
           'note.found section=${placed.sectionId} bar=${placed.barIndex} '
-          'beat=${note.beat} step=${note.step} pitch=${note.pitch} '
+          'beat=${note.pseudoBeat} step=${note.pseudoStep} pitch=${note.pitch} '
           'value=${note.value} accidental=none duration=not-read',
         );
       }
@@ -1486,8 +1486,8 @@ class InkCaptureLayer {
         );
       }
       total = MelodyNoteWrite(
-        written: <BeatNote>[...total.written, ...write.written],
-        alreadyPresent: <BeatNote>[
+        written: <NoteMark>[...total.written, ...write.written],
+        alreadyPresent: <NoteMark>[
           ...total.alreadyPresent,
           ...write.alreadyPresent,
         ],
@@ -2066,17 +2066,21 @@ class InkCaptureLayer {
 
   // PURPOSE: Give a committed stroke an identity that is unique in its document.
   // INPUTS: assembler — the stroke being committed, read for its anchor and the time it began.
-  // OUTPUTS: A string id built from the anchor and the stroke's own start time, so it is unique
-  //          across two runs of the application — an id that counted from one would collide with a
-  //          stroke an opened file already carried, and the reducer refuses a duplicate. Readable
-  //          rather than random because the identity is written to a file and a support log is
-  //          diagnosable when it can be read.
+  // OUTPUTS: A string id built from the bar the stroke is anchored to and the stroke's own start
+  //          time, so it is unique across two runs of the application — an id that counted from one
+  //          would collide with a stroke an opened file already carried, and the reducer refuses a
+  //          duplicate. Readable rather than random because the identity is written to a file and a
+  //          support log is diagnosable when it can be read.
+  //
+  //          THE CELL IS NOT PART OF THE ID ANY MORE. A stroke is anchored to a bar and its position
+  //          inside that bar is in its own points, so there is no beat or step to name; the start
+  //          time is what tells two strokes of one bar apart, and it always did.
   // KEYWORDS: stroke-id, uniqueness, readable, anchor-derived, start-time
   String _nextStrokeId(InkStrokeAssembler assembler) {
     final EventAnchor anchor =
         assembler.anchor ?? const EventAnchor(sectionId: 'unresolved', bar: 0);
-    return 'ink-${anchor.sectionId}-${anchor.bar}-${anchor.beat ?? -1}-'
-        '${anchor.step}-${assembler.startTime.round()}';
+    return 'ink-${anchor.sectionId}-${anchor.bar}-'
+        '${assembler.startTime.round()}';
   }
 }
 

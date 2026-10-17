@@ -39,7 +39,7 @@ InkStroke _stroke({
   tool: StrokeTool.pen,
   color: '#102a43',
   size: 3,
-  anchor: EventAnchor(sectionId: _section, bar: bar, beat: beat),
+  anchor: EventAnchor(sectionId: _section, bar: bar),
   points: <InkPoint>[
     InkPoint(x: x, y: y, w: 0.4, t: 0),
     InkPoint(x: x + 24, y: y + 9, w: 0.6, t: 55),
@@ -52,13 +52,13 @@ String _chord(Song song, int bar, int beat) => song
     .first
     .bars[bar]
     .chords
-    .firstWhere((BeatChord placed) => placed.beat == beat)
+    .firstWhere((ChordMark placed) => placed.pseudoBeat == beat)
     .chord
     .render(song.key, const SpellingTable());
 
 /// The melody pitch written on beat 0 of [bar], as a written note and octave.
 String _melody(Song song, int bar) {
-  final BeatNote note = song.sections.first.bars[bar].melody.first;
+  final NoteMark note = song.sections.first.bars[bar].melody.first;
   return '${note.pitch.note}${note.pitch.octave}';
 }
 

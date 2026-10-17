@@ -1,4 +1,4 @@
-﻿// PURPOSE: Produce the ONE picture and the exact numbers that decide whether two notes on adjacent
+// PURPOSE: Produce the ONE picture and the exact numbers that decide whether two notes on adjacent
 //          beats can be told apart on the page. `LayoutStyle.minCellWidth` decides how far apart
 //          they are engraved and a notehead is a fixed 1.2 staff spaces, so the margin between two
 //          noteheads is `minCellWidth − noteheadWidth` — and until this change the engine's DEFAULT
@@ -150,20 +150,20 @@ Song _fixture() => Song(
       label: const SectionLabel.letter('A'),
       bars: <Bar>[
         Bar(
-          melody: <BeatNote>[
+          melody: <NoteMark>[
             for (final (int, int, int) written in <(int, int, int)>[
               (0, 4, 2), // E4, the staff's bottom line
               (1, 4, 3), // F4
               (2, 4, 4), // G4
               (3, 4, 5), // A4
             ])
-              BeatNote(
+              NoteMark(
+                place: cellAt(written.$1),
                 pitch: PitchedNote(
                   note: WrittenNote(NoteLetter.values[written.$3], 0),
                   octave: written.$2,
                 ),
                 value: const NoteValue.plain(NoteBase.quarter),
-                beat: written.$1,
               ),
           ],
         ),

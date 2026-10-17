@@ -53,13 +53,13 @@ Song inkChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 6; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
               ],
             ),
@@ -91,13 +91,13 @@ Song longInkChart() => Song(
         bars: <Bar>[
           for (int index = 0; index < 16; index++)
             Bar(
-              chords: <BeatChord>[
-                BeatChord(
+              chords: <ChordMark>[
+                ChordMark(
+                  place: cellAt(0),
                   chord: Chord(
                     root: ChordRoot(index % 12),
                     quality: ChordQuality.majorSeventh,
                   ),
-                  beat: 0,
                 ),
               ],
             ),
@@ -277,11 +277,21 @@ void main() {
     expect(drawn.stroke.points.length, greaterThan(1));
     expect(drawn.stroke.anchor.sectionId, 'A');
     expect(drawn.stroke.anchor.bar, 3);
-    expect(drawn.stroke.anchor.beat, 0);
+    // REWRITTEN, and the old assertion is quoted because it pinned a cell address the model no
+    // longer has: `expect(drawn.stroke.anchor.beat, 0);` — a stroke's anchor used to name the beat it
+    // was drawn in, so this line asserted "the pen went down on beat one". The anchor is now the BAR
+    // alone and the position inside the bar is in the stroke's own points, so what has to be checked
+    // is that the stroke starts where the pen touched, which the block below does in pixels rather
+    // than in a cell index. What the old line protected — that the stroke is not silently moved to
+    // another place on the page — is preserved by that comparison and is stronger.
+    expect(
+      drawn.stroke.anchor == const EventAnchor(sectionId: 'A', bar: 3),
+      isTrue,
+    );
 
-    // The stored points are measured from the cell's own top-left corner, and the first one is the
+    // The stored points are measured from the BAR's own top-left corner, and the first one is the
     // point the pen touched — which is what makes the stroke independent of where the page is.
-    final Offset origin = Offset(cell.bounds.left, cell.bounds.top);
+    final Offset origin = Offset(bar.bounds.left, bar.bounds.top);
     final InkPoint first = drawn.stroke.points.first;
     expect(first.x, closeTo(startPage.dx - origin.dx, 1e-6));
     expect(first.y, closeTo(startPage.dy - origin.dy, 1e-6));
@@ -455,13 +465,19 @@ void main() {
       onPlain.stroke.points.first.y,
     );
     final Offset plainOrigin = Offset(onPlain.origin.x, onPlain.origin.y);
+    // REWRITTEN, and the two expectations below used to read
+    //   expect(plainOffset.dx, closeTo(plainCell.bounds.size.width / 2 - aim, 1e-6));
+    //   expect(plainOffset.dy, closeTo(plainCell.bounds.size.height / 2 - aim, 1e-6));
+    // — the stored point measured from the CELL's corner. A stroke is anchored to its BAR now, so the
+    // origin is the bar's corner and the same quantity is the pen's own position in the bar. The claim
+    // is unchanged: the stored point is where the pen went, expressed in the music's own pixels.
     expect(
       plainOffset.dx,
-      closeTo(plainCell.bounds.size.width / 2 - aim, 1e-6),
+      closeTo(plainCentre.dx - plainBar.bounds.left - aim, 1e-6),
     );
     expect(
       plainOffset.dy,
-      closeTo(plainCell.bounds.size.height / 2 - aim, 1e-6),
+      closeTo(plainCentre.dy - plainBar.bounds.top - aim, 1e-6),
     );
 
     // FIT: the page is re-engraved larger and drawn smaller, so the anchor's origin on the page is a
@@ -594,7 +610,7 @@ void main() {
       tool: StrokeTool.pen,
       color: '#102a43',
       size: 3,
-      anchor: EventAnchor(sectionId: 'A', bar: 3, beat: 0),
+      anchor: EventAnchor(sectionId: 'A', bar: 3),
       points: <InkPoint>[
         InkPoint(x: 5, y: -2, w: 0.25, t: 0),
         InkPoint(x: 9, y: 4, w: 0.75, t: 17),

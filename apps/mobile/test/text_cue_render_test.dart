@@ -83,20 +83,20 @@ Song textCueChart() => Song(
       bars: <Bar>[
         for (int index = 0; index < 4; index++)
           Bar(
-            chords: <BeatChord>[
-              BeatChord(
+            chords: <ChordMark>[
+              ChordMark(
+                place: cellAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
-                beat: 0,
               ),
-              BeatChord(
+              ChordMark(
+                place: cellAt(2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,
                 ),
-                beat: 2,
               ),
             ],
           ),
@@ -352,8 +352,10 @@ Future<File> _renderCase({
     );
     stdout.writeln(
       'cue.placed id=${cue.id} text="${cue.text}" '
-      'anchor=${cue.place.anchor.sectionId}[${cue.place.anchor.bar}]'
-      '${cue.place.anchor.beat == null ? '' : '.${cue.place.anchor.beat}'} '
+      'anchor=${cue.place.anchor.sectionId}[${cue.place.anchor.bar}] '
+      // The cell the cue names is read from its own x through the shim, because an anchor is a bar
+      // and the position inside it is the offset printed on the next line.
+      'cell=${cue.place.pseudoBeat} '
       'offset=(${cue.place.offsetX},${cue.place.offsetY}) '
       'origin_engraved=(${placed.origin.x.toStringAsFixed(2)},'
       '${placed.origin.y.toStringAsFixed(2)}) '
@@ -710,7 +712,7 @@ void main() {
       'anchor=${transposedCue.cue.place.anchor} '
       'origin_engraved=(${transposedCue.origin.x.toStringAsFixed(2)},'
       '${transposedCue.origin.y.toStringAsFixed(2)}) '
-      'bar_chords=${transposedBar.chords.map((BeatChord placed) => placed.chord.render(transposed.key, const SpellingTable())).toList()}',
+      'bar_chords=${transposedBar.chords.map((ChordMark placed) => placed.chord.render(transposed.key, const SpellingTable())).toList()}',
     );
     expect(transposedCue.cue.place.anchor.sectionId, _section);
     expect(transposedCue.cue.place.anchor.bar, 1);
