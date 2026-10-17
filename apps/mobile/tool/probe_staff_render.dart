@@ -1,4 +1,4 @@
-﻿// PURPOSE: Produce the numbers and the pictures that answer owner decision D29 and the beat half of
+// PURPOSE: Produce the numbers and the pictures that answer owner decision D29 and the beat half of
 //          D28: whether a staff exists because the chart DECLARED it, what a musician sees that
 //          tells him which beat he is choosing, and whether a chord-symbol chart is unaffected.
 //          Four claims that would otherwise be impressions become files and figures here:
@@ -1110,6 +1110,337 @@ void main() {
       isEmpty,
       reason: 'an eighth with no neighbour in its beat is flagged, not beamed',
     );
+  });
+
+  // PURPOSE: Answer, in one run, the two questions about a cell that holds several notes: does a run
+  //          typed LEFT TO RIGHT come out left to right on the staff, and on which side of its
+  //          noteheads does the arch of a tie hang.
+  //
+  //          WHY IT IS THE COLUMN AND NOT THE MODEL THAT PUTS IT IN QUESTION. A note's place in time
+  //          inside one beat is its `BeatNote.step` — a dense ordinal, 0 for the first note of the
+  //          cell, 1 for the second — and the engraver draws step `k` at `cellX + k * stride`, which
+  //          is the same left-to-right order. So the ORDER the model holds and the order the staff
+  //          draws are one order, and an insertion that puts a new note at step 0 of a cell that
+  //          already holds notes therefore reverses what a musician typed. That is A74 §10(a), named
+  //          there and not fixed; this case is what makes it a measurement instead of a suspicion.
+  //
+  //          The write path is the REAL one: every note is written through `EditSession.insertNote`
+  //          with no `step`, which is exactly the call the note palette makes, so what is measured
+  //          is the arrival order a finger produces and not a fixture's opinion.
+  // INPUTS: The font and the style the other cases use. Four one-bar cases, each chosen because it
+  //         is the shape of the defect: a sixteenth run typed C-D-E-F; two ties, one on a note whose
+  //         stem points up and one whose stem points down; the same pitch twice in one cell, which
+  //         is the case a model with no sub-beat address could not hold; and an eighth followed by
+  //         two sixteenths, whose spacing tells uniform stride from accumulated durations.
+  // OUTPUTS: `probe.writer.model` — the cell as the MODEL holds it, in storage order;
+  //          `probe.writer.drawn` — the same notes read off the picture LEFT TO RIGHT with the x each
+  //          one was drawn at; `probe.writer.tie` — each tie's two ends and its control point, with
+  //          the side it bulges to and the direction of the stem it must stay clear of;
+  //          `probe.writer.spacing` — the horizontal gaps of eighth-sixteenth-sixteenth; and two
+  //          magnified PNGs, because an arch drawn on the wrong side is a thing the eye settles and a
+  //          number only reports.
+  // KEYWORDS: probe, writer, insert-order, left-to-right, sixteenths, tie, arch-side, stem,
+  //           sub-beat-address, spacing, png, crop
+  test('a run typed left to right is drawn left to right, and a tie hangs opposite its stem', () async {
+    final String? family = await _loadFont();
+    expect(
+      family,
+      isNotNull,
+      reason: 'the chord symbols must be letters, not boxes',
+    );
+    final FlutterTextMetrics metrics = _metricsFor(family!);
+    final LayoutStyle style = _styleFor(metrics);
+    final LayoutEngine engine = LayoutEngine(style: style);
+    final String outDir =
+        Platform.environment['STAFF_PROBE_OUT'] ?? staffProbeDirectory;
+    Directory(outDir).createSync(recursive: true);
+
+    /// Four empty bars of C major that declare a pitched staff, each carrying the chord symbols
+    /// that give a real chart's bar its width.
+    Song emptyWithStaff() => Song(
+      id: 'chartapp-writer-probe',
+      title: 'Writer probe',
+      composer: 'ChartApp',
+      style: 'Medium Swing',
+      key: Key.cMajor,
+      tempo: 120,
+      staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
+      sections: <Section>[
+        Section(
+          id: 'A',
+          label: const SectionLabel.letter('A'),
+          bars: <Bar>[
+            for (int index = 0; index < 4; index++) Bar(chords: _probeChords()),
+          ],
+        ),
+      ],
+    );
+
+    /// One written pitch in the fourth octave, which is the register a melody is written in.
+    PitchedNote pitch(NoteLetter letter) =>
+        PitchedNote(note: WrittenNote(letter, 0), octave: 4);
+
+    /// The notes of one bar as the MODEL holds them, in the bar's own storage order.
+    String modelOf(Song song, int barIndex) => <String>[
+      for (final BeatNote note in song.barsInReadingOrder[barIndex].melody)
+        '${note.beat}.${note.step}:${note.pitch}',
+    ].join(' ');
+
+    final EditSession session = EditSession(
+      document: DocumentState(song: emptyWithStaff()),
+    );
+
+    // --- THE RUN, TYPED LEFT TO RIGHT THROUGH THE WRITER THE PALETTE USES ---------------------
+    const List<NoteLetter> typed = <NoteLetter>[
+      NoteLetter.c,
+      NoteLetter.d,
+      NoteLetter.e,
+      NoteLetter.f,
+    ];
+    for (final NoteLetter letter in typed) {
+      session.insertNote(
+        sectionId: 'A',
+        barIndex: 0,
+        beat: 0,
+        pitch: pitch(letter),
+        value: NoteValue.plain(NoteBase.sixteenth),
+      );
+    }
+
+    // --- TWO TIES, one hanging from a note BELOW the middle line and one from a note ABOVE it ----
+    // E4 is step 0 on a treble staff, so its stem points UP and its tie must hang BELOW the
+    // noteheads. B4 is step 6, so its stem points DOWN and its tie must arch ABOVE them. A tie on
+    // the stem's own side is read as a beam, and one that collides with a stem is read as a mistake.
+    for (final int beat in <int>[0, 2]) {
+      session.insertNote(
+        sectionId: 'A',
+        barIndex: 1,
+        beat: beat,
+        pitch: pitch(beat == 0 ? NoteLetter.e : NoteLetter.b),
+        value: const NoteValue.plain(NoteBase.quarter),
+        tiedToNext: true,
+      );
+      session.insertNote(
+        sectionId: 'A',
+        barIndex: 1,
+        beat: beat + 1,
+        pitch: pitch(beat == 0 ? NoteLetter.e : NoteLetter.b),
+        value: const NoteValue.plain(NoteBase.quarter),
+      );
+    }
+
+    // --- THE SAME PITCH TWICE IN ONE CELL, which is what a model without a sub-beat address -------
+    // --- could not hold. Written through the writer, so the address is the one a musician's -------
+    // --- two taps produce.                                                                      ----
+    for (int tap = 0; tap < 2; tap++) {
+      session.insertNote(
+        sectionId: 'A',
+        barIndex: 2,
+        beat: 0,
+        pitch: pitch(NoteLetter.b),
+        value: NoteValue.plain(NoteBase.sixteenth),
+      );
+    }
+
+    // --- AN EIGHTH AND TWO SIXTEENTHS: the case where "each note starts at the sum of the previous
+    // durations" and "each note is one stride further right" are DIFFERENT pictures.
+    session.insertNote(
+      sectionId: 'A',
+      barIndex: 3,
+      beat: 0,
+      pitch: pitch(NoteLetter.g),
+      value: const NoteValue.plain(NoteBase.eighth),
+    );
+    for (final NoteLetter letter in <NoteLetter>[NoteLetter.a, NoteLetter.b]) {
+      session.insertNote(
+        sectionId: 'A',
+        barIndex: 3,
+        beat: 0,
+        pitch: pitch(letter),
+        value: NoteValue.plain(NoteBase.sixteenth),
+      );
+    }
+
+    final Song song = session.song;
+    for (int barIndex = 0; barIndex < 4; barIndex++) {
+      stdout.writeln(
+        'probe.writer.model bar=$barIndex ${modelOf(song, barIndex)}',
+      );
+    }
+
+    final List<PageLayout> pages = engine.layout(
+      song,
+      pageWidth: _pageWidth,
+      pageHeight: _pageHeight,
+    );
+    final PageLayout page = pages.first;
+    stdout.writeln(
+      'probe.writer.layout bars=${page.bars.length} systems=${page.systems.length}',
+    );
+    expect(
+      page.bars.length,
+      4,
+      reason: 'all four written cases must be on the page this case measures',
+    );
+
+    /// The noteheads of one bar, in the order they were emitted, which is the model's own order.
+    List<MelodyGlyph> headsOf(int barIndex) => <MelodyGlyph>[
+      for (final MelodyGlyph glyph in page.bars[barIndex].melody.glyphs)
+        if (glyph.kind == MelodyGlyphKind.notehead) glyph,
+    ];
+
+    /// The stems of one bar, in the order they were emitted: one per note, because no case here
+    /// beams anything (a sixteenth run of ONE beat with no neighbour is beamed, so the run's stems
+    /// are the beam's — the pairing used below is by index and is checked by printing both lists).
+    List<MelodyGlyph> stemsOf(int barIndex) => <MelodyGlyph>[
+      for (final MelodyGlyph glyph in page.bars[barIndex].melody.glyphs)
+        if (glyph.kind == MelodyGlyphKind.stem) glyph,
+    ];
+
+    /// The x of a glyph's centre, which for a notehead is the notehead's own position.
+    double centreX(MelodyGlyph glyph) =>
+        glyph.bounds.left + glyph.bounds.size.width / 2;
+
+    /// The pitches of one bar in the order a reader meets them LEFT TO RIGHT, which is the only
+    /// order a picture can be read in. Taken from the noteheads' own x, not from the model: the
+    /// model's order and the picture's order are the two things this case holds apart. A notehead is
+    /// paired with its note BY POSITION IN THE GLYPH LIST, which is the order [_addNoteGlyphs] emits
+    /// them — one notehead per note, in the model's order.
+    List<String> readingOrder(int barIndex) {
+      final List<MelodyGlyph> heads = headsOf(barIndex);
+      final List<int> order = List<int>.generate(
+        heads.length,
+        (int i) => i,
+      )..sort((int a, int b) => centreX(heads[a]).compareTo(centreX(heads[b])));
+      return <String>[
+        for (final int index in order)
+          song.barsInReadingOrder[barIndex].melody[index].pitch.toString(),
+      ];
+    }
+
+    stdout.writeln(
+      'probe.writer.drawn bar=0 order=${readingOrder(0).join(",")} '
+      'x=${<String>[for (final MelodyGlyph head in headsOf(0)) centreX(head).toStringAsFixed(1)].join(",")}',
+    );
+    stdout.writeln('probe.writer.same-pitch bar=2 ${modelOf(song, 2)}');
+
+    // --- THE TIES, AND THE SIDE THEY HANG ON --------------------------------------------------
+    final List<MelodyGlyph> ties = <MelodyGlyph>[
+      for (final MelodyGlyph glyph in page.bars[1].melody.glyphs)
+        if (glyph.kind == MelodyGlyphKind.tie) glyph,
+    ];
+    final List<MelodyGlyph> tieStems = stemsOf(1);
+    final List<MelodyGlyph> tieHeads = headsOf(1);
+    for (int index = 0; index < ties.length; index++) {
+      final MelodyGlyph tie = ties[index];
+      // The tie leaves the FIRST note of its pair, and the pairs are (1,2) and (3,4) of the bar's
+      // four notes, so the tie's own stem is that note's: `2 * index` in the drawn order.
+      final MelodyGlyph stem = tieStems[2 * index];
+      final bool stemUp = stem.stemUp;
+      final String side = tie.control.y < tie.from.y ? 'above' : 'below';
+      stdout.writeln(
+        'probe.writer.tie index=$index '
+        'note=${song.barsInReadingOrder[1].melody[2 * index].pitch} '
+        'head_y=${tie.from.y.toStringAsFixed(2)} '
+        'control_y=${tie.control.y.toStringAsFixed(2)} '
+        'to_y=${tie.to.y.toStringAsFixed(2)} side=$side stem_up=$stemUp',
+      );
+    }
+
+    // --- THE SPACING, WHICH A74 §2 RECORDED AS "THE SUM OF THE PREVIOUS DURATIONS" --------------
+    // An eighth followed by two sixteenths is the case that separates the two readings: the model's
+    // second note starts half a beat after the first and the third a further sixteenth later, so a
+    // time-proportional row has TWO DIFFERENT gaps, and a uniform stride has ONE. Only a printed
+    // number can say which the page holds.
+    final List<MelodyGlyph> spacingHeads = headsOf(3);
+    final List<double> gaps = <double>[
+      for (int index = 1; index < spacingHeads.length; index++)
+        centreX(spacingHeads[index]) - centreX(spacingHeads[index - 1]),
+    ];
+    stdout.writeln(
+      'probe.writer.spacing bar=3 gaps=${<String>[for (final double gap in gaps) gap.toStringAsFixed(3)].join(",")} '
+      'values=${song.barsInReadingOrder[3].melody.map((BeatNote n) => '${n.value}').join(",")}',
+    );
+
+    // --- THE PICTURES --------------------------------------------------------------------------
+    for (final int barIndex in <int>[0, 1]) {
+      final LayoutRect staff = page.bars[barIndex].melody.bounds;
+      final double space = staff.size.height / 4;
+      final int zoom = barIndex == 0 ? 5 : 6;
+      final String name = barIndex == 0 ? 'writer-run' : 'writer-ties';
+      final List<int> bytes = await _renderCrop(
+        page,
+        song,
+        metrics,
+        File('$outDir${Platform.pathSeparator}$name@${zoom}x.png'),
+        region: LayoutRect.fromLTWH(
+          staff.left - 2,
+          staff.top - 4 * space,
+          staff.size.width + 16,
+          staff.size.height + 8 * space,
+        ),
+        zoom: zoom.toDouble(),
+      );
+      stdout.writeln(
+        'probe.writer.crop name=$name file=$name@${zoom}x.png '
+        'bytes=${bytes.length} zoom=$zoom '
+        'bar_x=[${staff.left.toStringAsFixed(1)}..${staff.right.toStringAsFixed(1)}]',
+      );
+    }
+
+    // --- THE CLAIMS, now that the numbers and the pictures are on the record ---------------------
+    //
+    // THE MUSICAL FACT, STATED AS A SENTENCE ABOUT MUSIC: what the musician typed left to right is
+    // what the reader reads left to right. A run that comes out backwards is a different bar.
+    expect(
+      readingOrder(0),
+      <String>['C4', 'D4', 'E4', 'F4'],
+      reason:
+          'four sixteenths typed C, D, E, F into one beat must be DRAWN C, D, E, F from left to '
+          'right — a run in the model reversed is drawn right to left and reads as the wrong music',
+    );
+
+    // THE SAME PITCH TWICE: the model holds both, at two steps of the same cell.
+    expect(
+      modelOf(song, 2),
+      '0.0:B4 0.1:B4',
+      reason:
+          'a cell can hold two notes of ONE pitch, which is what makes the missing sub-beat '
+          'address a smaller gap than it looks: the second note is not a duplicate, it is `step 1`',
+    );
+
+    expect(
+      ties.length,
+      2,
+      reason: 'two tied pairs were written, so the staff must draw two ties',
+    );
+    for (int index = 0; index < ties.length; index++) {
+      final MelodyGlyph tie = ties[index];
+      final bool stemUp = tieStems[2 * index].stemUp;
+      expect(
+        tie.to.y,
+        closeTo(tie.from.y, 1e-9),
+        reason: 'a tied pair on one line starts and ends at the same height',
+      );
+      // THE RULE OF NOTATION, NOT OF THIS ENGRAVER: a tie is drawn on the side AWAY from the stems,
+      // because a curve on the stem's own side is read as a beam or as a slur onto the stem.
+      expect(
+        tie.control.y < tie.from.y,
+        !stemUp,
+        reason:
+            'a tie hangs OPPOSITE its stem: with the stems up the arch is below the noteheads and '
+            'with them down it is above (measured on '
+            '${song.barsInReadingOrder[1].melody[2 * index].pitch}, '
+            'whose stem points ${stemUp ? 'up' : 'down'})',
+      );
+      // And the tie is not drawn through a notehead: it leaves from inside one notehead and reaches
+      // into the next, which is what [MelodyMetrics.tieClearance] is for.
+      expect(
+        centreX(tieHeads[2 * index]) < tie.from.x,
+        isTrue,
+        reason: 'the tie leaves the first notehead on its right-hand side',
+      );
+    }
   });
 }
 

@@ -1029,6 +1029,7 @@ PlacedMelodyStaff placeMelodyStaff({
   _addTies(
     glyphs: glyphs,
     notes: notes,
+    stems: beams.stems,
     staffSpace: staffSpace,
     metrics: metrics,
   );
@@ -1407,16 +1408,29 @@ void _addNoteGlyphs({
 // PURPOSE: Join a note to the next one when the model says the sound is tied, which is how one
 //          sound is written across a beat or a barline.
 // INPUTS: glyphs — the list to append to. notes — the placed notes of this bar, in storage order.
-//         staffSpace — the distance between two staff lines. metrics — the glyph proportions.
-// OUTPUTS: Nothing; [glyphs] gains one tie per adjacent pair the model ties. Only a pair inside ONE
-//          BAR is joined: a tie whose next note is in the next bar would need that bar's geometry,
-//          which this bar does not have. That limitation is named in the decision record rather than
-//          hidden, and the earlier note still carries its own ledger lines, stem and accidental, so
-//          a cross-bar tie is drawn as an untied pair and is not mistaken for anything else.
-// KEYWORDS: tie, adjacent-pair, bar-local, named-limitation, curve-endpoints
+//         stems — the stem each note is drawn with when it belongs to a beamed group, so that a tie
+//         hangs on the side the STEM actually took rather than on the side the per-note rule would
+//         have taken; see the comment on the arch below. staffSpace — the distance between two staff
+//         lines. metrics — the glyph proportions.
+// OUTPUTS: Nothing; [glyphs] gains one tie per adjacent pair the model ties, each arching on the
+//          side AWAY from its notes' stems. Only a pair inside ONE BAR is joined: a tie whose next
+//          note is in the next bar would need that bar's geometry, which this bar does not have.
+//          That limitation is named in the decision record rather than hidden, and the earlier note
+//          still carries its own ledger lines, stem and accidental, so a cross-bar tie is drawn as
+//          an untied pair and is not mistaken for anything else.
+//
+//          THE ARCH USED TO BE ON THE STEM SIDE FOR EVERY NOTE, AND THE SIGN OF ONE FACTOR WAS THE
+//          WHOLE OF IT. The control point was offset by `from.step < 4 ? -1 : 1` and a PAGE'S Y GROWS
+//          DOWNWARD, so "below the middle line" — which is exactly where a stem points UP — moved the
+//          control point to a SMALLER y, that is ABOVE the noteheads, which is the stem's own side.
+//          Measured on a tied E4 (stems up) and a tied B4 (stems down): `control_y=228.24` against
+//          `head_y=248.00` for the first and `control_y=246.67` against `head_y=222.00` for the
+//          second, so both arches were on the stem side, and notation wants them on the other.
+// KEYWORDS: tie, arch-side, opposite-the-stem, page-y-grows-down, curve-endpoints, bar-local
 void _addTies({
   required List<MelodyGlyph> glyphs,
   required List<_MelodyNote> notes,
+  required List<_NoteStem?> stems,
   required double staffSpace,
   required MelodyMetrics metrics,
 }) {
@@ -1444,9 +1458,20 @@ void _addTies({
     if (span <= 0) {
       continue;
     }
-    // The curve bulges away from the line between the notes on the side the eye expects a tie to
-    // hang on — opposite the stems — so a tie is never read as a beam.
-    final double arch = span * metrics.tieArch * (from.step < 4 ? -1 : 1);
+    // THE TIE HANGS ON THE SIDE AWAY FROM THE STEM, WHICH IS THE RULE THE READER READS BY. A curve
+    // on the stem's own side is read as a beam or as a slur onto the stem, and an engraver who drew
+    // it there has written something else. The direction is taken from the STEM GLYPH the note
+    // actually draws when its beam group decided one, because a group's stems all turn together and
+    // a note high on the staff can therefore be drawn with a stem pointing UP: reading the note's own
+    // pitch there would put the tie back on the stem's side for that note alone. When the note is
+    // not beamed nothing decided it, and the per-note rule (below the middle line the stem points up)
+    // is what the stem will be drawn by.
+    //
+    // AND THE SIGN IS THE OPPOSITE OF THE ONE THIS FUNCTION SHIPPED WITH, because a page's y axis
+    // points DOWN: a POSITIVE arch raises `control.y` and therefore puts the bulge BELOW the
+    // noteheads. So positive means "below", and "below" is what a stem pointing UP asks for.
+    final bool stemUp = stems[index]?.up ?? from.step < 4;
+    final double arch = span * metrics.tieArch * (stemUp ? 1 : -1);
     final LayoutOffset control = LayoutOffset(
       (start.x + end.x) / 2,
       (start.y + end.y) / 2 + arch,

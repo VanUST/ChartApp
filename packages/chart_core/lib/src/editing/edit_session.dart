@@ -1829,13 +1829,28 @@ class EditSession {
   // or two voices — and the reducer keeps them a DENSE sequence: an insertion at a step pushes the
   // notes already AT OR AFTER that step one place up, the cell is then sorted by `(beat, step)`, and
   // a deletion closes the gap (see `_withNoteInserted` and `_withNoteRemoved` in
-  // `document_reducer.dart`). That is why [insertNote] defaults to `step: 0`: the note just written
-  // takes the front of the cell and the notes already there move up one place, so a caller adding a
-  // second note to a beat writes no step arithmetic and disturbs nothing it did not point at.
-  // Measured rather than reasoned: the probe prints `0.0:E4 quarter` followed by
-  // `0.0:G4 half, 0.1:E4 quarter` for two insertions at step 0 in that order — the SECOND note is
-  // at step 0. A first reading of `_withNoteInserted` suggests the opposite, because the note is
-  // appended to the list before the sort reorders it; the printed case is what settled it.
+  // `document_reducer.dart`).
+  //
+  // `step` IS THE ORDER OF THE CELL IN TIME, AND IT IS NOT A PITCH. It is an ordinal — 0 for the
+  // first note of the beat, 1 for the second — and the engraver draws it as one: `_notesOf` places
+  // the note at `cellX + step * stride`, so step 0 is the LEFTMOST note of the cell and a higher
+  // step is a later one. The staff has a second number that is also called `step` and is a different
+  // thing entirely — the DIATONIC STAFF STEP of a pitch, from `melodyStepOf`, 0 meaning E4 on a
+  // treble staff. That one decides how HIGH a notehead is drawn and this one decides how far RIGHT
+  // it is drawn, so confusing them makes the writer look wrong when the engraver is and the other way
+  // round: both are stated here because their names alone do not tell them apart.
+  //
+  // WHY THE DEFAULT IS NOW "AFTER THE LAST NOTE OF THE CELL" AND WAS "AT THE FRONT OF IT". The
+  // reducer pushes a cell's later notes up when something is inserted before them, which is right
+  // for an insertion at an address a caller names. It was also the DEFAULT, and that made the
+  // ordinary gesture wrong: a musician writing four sixteenths into one beat inserts four times, and
+  // an insert at step 0 makes each new note the FIRST of the cell — so C then D then E then F came
+  // out F, E, D, C, and since the engraver draws step order left to right, the page showed the run
+  // right to left while the musician had written it left to right. The measurement is A75's
+  // `probe.writer.model bar=0 0.0:F4 0.1:E4 0.2:D4 0.3:C4` against the typed C D E F. The default is
+  // therefore the APPEND, and a caller that wants a note in front of the cell's others says
+  // `step: 0` — which is the same distinction the note palette already draws between its "New note"
+  // row and the row of a note already written.
 
   // PURPOSE: Report the notes a beat already carries, so a surface can show what is there and name
   //          which of them an edit acts on — the question that makes several notes on one beat
@@ -1895,22 +1910,23 @@ class EditSession {
   //          from a surface.
   // INPUTS: sectionId and barIndex — the bar, in the model's own address. beat — the cell inside
   //         that bar, the same address a chord is written at. pitch — the written pitch and octave.
-  //         value — the written duration. step — where in the cell's dense sequence the note lands,
-  //         defaulting to the front; see the region note above for why the front is the right
-  //         default and what it does to a note already there. tiedToNext — whether the note is tied
-  //         into the next one as well as inserted.
+  //         value — the written duration. step — where in the cell's dense sequence the note lands:
+  //         0 puts it IN FRONT of everything the cell already holds, 1 after the first note, and
+  //         NULL — the default — means AFTER THE LAST NOTE THE CELL ALREADY HOLDS. tiedToNext —
+  //         whether the note is tied into the next one as well as inserted.
   // OUTPUTS: True when an insertion was appended, false in three cases, none of which writes
-  //          anything. A [beat] or [step] below zero; a [beat] past the LAST cell the bar has, since
-  //          [LayoutEngine] drops a note it has no cell for exactly as it drops a chord at the same
-  //          address (`placeMelodyStaff`) so the edit would be a log row nothing can see; and a
-  //          [value] longer than the whole bar, for the same reason at the other end. The input
-  //          document is not mutated in any of the three: the guard runs before [apply].
+  //          anything. A [beat] below zero, or an explicit [step] below zero; a [beat] past the LAST
+  //          cell the bar has, since [LayoutEngine] drops a note it has no cell for exactly as it
+  //          drops a chord at the same address (`placeMelodyStaff`) so the edit would be a log row
+  //          nothing can see; and a [value] longer than the whole bar, for the same reason at the
+  //          other end. The input document is not mutated in any of the three: the guard runs before
+  //          [apply].
   //
   //          The upper beat bound is kept HERE and not delegated to the reducer, deliberately:
   //          `_withNoteInserted` has no opinion about the meter — the number of cells a bar has is
   //          the layout engine's rule — and a chart READ BACK with a note past its meter must still
   //          load. This is the caller-side guard on NEW edits, not a rule of the model.
-  // KEYWORDS: melody, note-insert, cell-address, dense-step, stacked-notes, guard, undoable
+  // KEYWORDS: melody, note-insert, cell-address, dense-step, stacked-notes, append, guard, undoable
   /// Inserts [pitch] of [value] into the cell at ([sectionId], [barIndex], [beat]).
   bool insertNote({
     required String sectionId,
@@ -1918,11 +1934,11 @@ class EditSession {
     required int beat,
     required PitchedNote pitch,
     required NoteValue value,
-    int step = 0,
+    int? step,
     bool tiedToNext = false,
   }) {
     final Bar? bar = _document.song.barAt(sectionId, barIndex);
-    if (bar == null || beat < 0 || step < 0) {
+    if (bar == null || beat < 0 || (step != null && step < 0)) {
       return false;
     }
     if (beat >= bar.timeSignature.cellsPerBar) {
@@ -1941,7 +1957,11 @@ class EditSession {
           pitch: pitch,
           value: value,
           beat: beat,
-          step: step,
+          // THE NOTE ARRIVES AT THE END OF THE CELL UNLESS THE CALLER NAMED A PLACE. The reducer
+          // pushes a cell's later notes up for an insertion in front of them, so naming a step is
+          // how a note is put BEFORE others; omitting it is how a musician's next note goes after
+          // the one he just wrote. See the region note for the measurement behind that.
+          step: step ?? _stepAfterCell(bar, beat),
           tiedToNext: tiedToNext,
         ),
       ),
@@ -2101,6 +2121,28 @@ class EditSession {
       }
     }
     return const NoteValue.plain(NoteBase.thirtySecond);
+  }
+
+  // PURPOSE: Report the step a note that ARRIVES at a cell must take, so that "the end of the
+  //          cell's sequence" is one rule instead of arithmetic the caller repeats — and so that a
+  //          caller adding the next note of a run writes no step at all.
+  // INPUTS: bar — the bar the note is going into. beat — the cell it is being written at.
+  // OUTPUTS: One past the HIGHEST step the bar already uses at [beat], and 0 when the cell is empty.
+  //          One past the highest and NOT the number of notes there, because a bar read back from a
+  //          file may carry a cell whose steps are not dense: with steps 3 and 4 present, the note
+  //          count is 2 and an insertion at 2 would push BOTH of them up and land in FRONT of them,
+  //          which is the reversal this whole path exists to avoid. The number returned is the
+  //          insertion point `_withNoteInserted` takes, and since it is past every step present,
+  //          nothing is pushed and the new note is last.
+  // KEYWORDS: melody, step, append, insertion-point, dense-sequence, non-dense-input, total-function
+  int _stepAfterCell(Bar bar, int beat) {
+    int next = 0;
+    for (final BeatNote note in bar.melody) {
+      if (note.beat == beat && note.step >= next) {
+        next = note.step + 1;
+      }
+    }
+    return next;
   }
 
   // --- Ink: the strokes a musician wrote on the chart -------------------------------------------

@@ -179,19 +179,32 @@ void _stackedNotesAndInverse() {
     value: const NoteValue.plain(NoteBase.half),
   );
   final DocumentState bothNotes = session.document;
-  // THE SECOND INSERTION TAKES STEP 0 AND PUSHES THE FIRST NOTE UP. An insertion at a step pushes
-  // the notes already AT OR AFTER that step one place up and then the cell is sorted by
-  // `(beat, step)`, so the note just written is the one at the front. This is read off the run
-  // rather than argued: it is the opposite of what a first reading of `_withNoteInserted` suggests,
-  // and the probe prints the case so the two orders can never be confused again.
+  // THE SECOND INSERTION LANDS AFTER THE FIRST, BECAUSE THAT IS THE ORDER THE MUSICIAN TYPED THEM.
+  //
+  // THIS CHECK ONCE ASSERTED THE OPPOSITE, AND THE OLD ASSERTION IS QUOTED HERE SO THE CHANGE IS
+  // VISIBLE RATHER THAN SILENT. It read:
+  //
+  //     _same(
+  //       'the note just written is at step 0, and the one before it moved up',
+  //       <String>['0.0:G4 half', '0.1:E4 quarter'],
+  //       _notes(session.document),
+  //     );
+  //
+  // and it was TRUE: `insertNote` defaulted to `step: 0`, the reducer pushes a cell's notes at or
+  // after the inserted step one place up, so the note just written took the front of the cell. The
+  // measurement was right and the behaviour was wrong. A cell's notes are a SEQUENCE IN TIME in
+  // `step` order — the engraver draws step `k` at `cellX + k * stride`, so step 0 is the leftmost
+  // note — which makes "the new note goes to step 0" the same statement as "a run typed left to
+  // right is drawn right to left". So the default is now the APPEND (A75), and the assertion that
+  // pinned the reversal is the one below.
   _same(
-    'the note just written is at step 0, and the one before it moved up',
-    <String>['0.0:G4 half', '0.1:E4 quarter'],
+    'a second note on one beat lands AFTER the first, in the order they were written',
+    <String>['0.0:E4 quarter', '0.1:G4 half'],
     _notes(session.document),
   );
   _same(
     'the cell reports both, by step',
-    <String>['0.0:G4 half', '0.1:E4 quarter'],
+    <String>['0.0:E4 quarter', '0.1:G4 half'],
     <String>[
       for (final BeatNote note in session.existingNotesAt(
         sectionId: 's1',
@@ -214,8 +227,8 @@ void _stackedNotesAndInverse() {
     session.song.barsInReadingOrder.first.melody.length,
   );
   _same('the two notes are dense: steps 0 and 1', <String>[
-    '0.0:G4 half',
-    '0.1:E4 quarter',
+    '0.0:E4 quarter',
+    '0.1:G4 half',
   ], _notes(session.document));
 
   // Delete the note at step 0. The gap closes, so the surviving note moves DOWN to step 0; the  // inverse has to push it back up, which is exactly the case a delta-based inverse gets wrong.
@@ -227,7 +240,7 @@ void _stackedNotesAndInverse() {
   );
   _same('delete returns true', true, deleted);
   _same('the surviving note closed the gap and is now at step 0', <String>[
-    '0.0:E4 quarter',
+    '0.0:G4 half',
   ], _notes(session.document));
   final bool undone = session.undo();
   _same('undo returns true', true, undone);
@@ -238,7 +251,7 @@ void _stackedNotesAndInverse() {
   );
   _same(
     'the deleted note is back at step 0 and its neighbour back at step 1',
-    <String>['0.0:G4 half', '0.1:E4 quarter'],
+    <String>['0.0:E4 quarter', '0.1:G4 half'],
     _notes(session.document),
   );
 
@@ -249,11 +262,7 @@ void _stackedNotesAndInverse() {
     beat: 0,
     step: 1,
   );
-  _same(
-    'the note at 0.1 is E4 quarter',
-    '0.1:E4 quarter',
-    _renderNote(atStepOne),
-  );
+  _same('the note at 0.1 is G4 half', '0.1:G4 half', _renderNote(atStepOne));
   final bool updated = session.updateNote(
     sectionId: 's1',
     barIndex: 0,
@@ -263,8 +272,8 @@ void _stackedNotesAndInverse() {
   );
   _same('update returns true', true, updated);
   _same('only the value changed', <String>[
-    '0.0:G4 half',
-    '0.1:E4 eighth',
+    '0.0:E4 quarter',
+    '0.1:G4 eighth',
   ], _notes(session.document));
   _same('the event is note.update', 'note.update', session.log.last.type);
   session.undo();
@@ -284,8 +293,8 @@ void _stackedNotesAndInverse() {
   );
   _same('the tie was set', true, tied);
   _same('the tie is on the note, not beside it', <String>[
-    '0.0:G4 half',
-    '0.1:E4 quarter~',
+    '0.0:E4 quarter',
+    '0.1:G4 half~',
   ], _notes(session.document));
   _same(
     'setting it again is refused',

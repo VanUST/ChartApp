@@ -193,11 +193,25 @@ void main() {
       await tapPalette(tester, 'note-palette-new');
       await tapPalette(tester, 'note-palette-base-quarter');
       await tapPalette(tester, 'note-palette-degree-e');
+      // THE SECOND NOTE LANDS AFTER THE FIRST, WHICH IS THE ORDER THE MUSICIAN TAPPED THEM IN.
+      //
+      // THIS EXPECTATION ONCE READ THE OTHER WAY ROUND, AND THE OLD LINE IS QUOTED SO THE CHANGE IS
+      // VISIBLE RATHER THAN SILENT. It was:
+      //
+      //     <String>['A[0] 0.0:E4 quarter', 'A[0] 0.1:B4 whole']
+      //
+      // and the reason beside it — "a second note on one beat must be added, not replace the first"
+      // — was and remains true; what it did not name was WHICH END it was added to. The cell's notes
+      // are a sequence in `step` order and the staff draws step `k` at `cellX + k * stride`, so step
+      // 0 is the leftmost note; asserting that the note written second is at step 0 was asserting
+      // that a run typed left to right is engraved right to left (A75). The assertion that replaces
+      // it is the same claim about not replacing, stated with its order.
       expect(
         notesOnPage(tester),
-        <String>['A[0] 0.0:E4 quarter', 'A[0] 0.1:B4 whole'],
+        <String>['A[0] 0.0:B4 whole', 'A[0] 0.1:E4 quarter'],
         reason:
-            'a second note on one beat must be added, not replace the first',
+            'a second note on one beat must be added, not replace the first — and it must be added '
+            'AFTER it, because the first tap came first',
       );
 
       // --- BAR 1 BEAT 2: an eighth note, tied forward --------------------------------------
@@ -207,8 +221,8 @@ void main() {
       await tapPalette(tester, 'note-palette-degree-a');
       await tapPalette(tester, 'note-palette-tie');
       expect(notesOnPage(tester), <String>[
-        'A[0] 0.0:E4 quarter',
-        'A[0] 0.1:B4 whole',
+        'A[0] 0.0:B4 whole',
+        'A[0] 0.1:E4 quarter',
         'A[0] 1.0:A4 eighth~',
       ], reason: 'the tie is one field of the note the palette just wrote');
 
@@ -219,8 +233,8 @@ void main() {
       await tapPalette(tester, 'note-palette-octave-up');
       await tapPalette(tester, 'note-palette-degree-c');
       expect(notesOnPage(tester), <String>[
-        'A[0] 0.0:E4 quarter',
-        'A[0] 0.1:B4 whole',
+        'A[0] 0.0:B4 whole',
+        'A[0] 0.1:E4 quarter',
         'A[0] 1.0:A4 eighth~',
         'A[1] 0.0:C5 half',
       ], reason: 'the octave control must move the written octave');
@@ -242,8 +256,8 @@ void main() {
       expect(
         notesOnPage(tester),
         <String>[
-          'A[0] 0.0:E4 quarter',
-          'A[0] 0.1:B4 whole',
+          'A[0] 0.0:B4 whole',
+          'A[0] 0.1:E4 quarter',
           'A[0] 1.0:A4 eighth~',
         ],
         reason: 'removal must take exactly the selected note and nothing else',

@@ -1415,4 +1415,100 @@ void main() {
       );
     });
   });
+
+  group('the tie, which hangs on the side AWAY from its stem', () {
+    /// One tied pair of [pitch] across two beats of the bar, as a bar of two quarter notes.
+    ///
+    /// The tie is the model's `BeatNote.tiedToNext` on the FIRST note, which is where the model keeps
+    /// it: a tie always points forward, so it is a field of the earlier note and not a pair id.
+    PlacedMelodyStaff tiedPair(Written pitch) => _engrave(<BeatNote>[
+      BeatNote(
+        pitch: PitchedNote(
+          note: WrittenNote(pitch.letter, pitch.alter),
+          octave: pitch.octave,
+        ),
+        value: const NoteValue.plain(NoteBase.quarter),
+        beat: 0,
+        tiedToNext: true,
+      ),
+      BeatNote(
+        pitch: PitchedNote(
+          note: WrittenNote(pitch.letter, pitch.alter),
+          octave: pitch.octave,
+        ),
+        value: const NoteValue.plain(NoteBase.quarter),
+        beat: 1,
+      ),
+    ]);
+
+    test('the arch is drawn below an up-stem and above a down-stem', () {
+      // WHAT NOTATION REQUIRES, AND WHY IT IS A RULE AND NOT A PREFERENCE. A tie is drawn on the side
+      // away from the stems, because a curve on the stem's own side is read as a beam, or as a slur
+      // onto the stem. So a note whose stem points up carries its tie BELOW the noteheads and one
+      // whose stem points down carries it ABOVE — and the middle line is not a third case, because a
+      // note on it takes a stem DOWN (A70) and therefore a tie above.
+      //
+      // THIS CASE EXISTS BECAUSE THE SIGN WAS WRONG AND NO TEST ASKED. The control point was offset
+      // by `from.step < 4 ? -1 : 1`, and a PAGE'S Y GROWS DOWNWARD, so "below the middle line" —
+      // exactly where a stem points UP — moved the arch ABOVE the noteheads, onto the stem's side, in
+      // both directions. A74 §10(b) suspected it and left it; the run that fixed it printed
+      // `control_y=228.24` against `head_y=248.00` for a tied E4 and `control_y=246.67` against
+      // `head_y=222.00` for a tied B4, that is, both arched the wrong way.
+      //
+      // E4 is the treble staff's bottom line (step 0) and B4 is its middle line (step 4), so the pair
+      // covers one note well below the middle and one exactly on it: the two ends of the stem rule.
+      for (final Written pitch in <Written>[
+        const Written(NoteLetter.e, 4),
+        const Written(NoteLetter.b, 4),
+      ]) {
+        final PlacedMelodyStaff staff = tiedPair(pitch);
+        final MelodyGlyph tie = _oneOf(staff, MelodyGlyphKind.tie);
+        final MelodyGlyph head = _glyphsOf(
+          staff,
+          MelodyGlyphKind.notehead,
+        ).first;
+        final MelodyGlyph stem = _stemOf(staff, head);
+        // The staff's own rule for an unbeamed note (A70): below the middle line the stem points up.
+        final bool stemUp = pitch.stepOn('treble') < 4;
+        // The arch, as a signed distance from the straight line between the tie's ends: POSITIVE
+        // means the control point is BELOW that line on the page, because page y grows downward.
+        final double arch = tie.control.y - tie.from.y;
+        stdout.writeln(
+          'notation.tie note=$pitch step=${pitch.stepOn('treble')} '
+          'stem_up=$stemUp drawn_stem_up=${stem.stemUp} '
+          'head_y=${tie.from.y.toStringAsFixed(2)} '
+          'control_y=${tie.control.y.toStringAsFixed(2)} '
+          'arch=${arch.toStringAsFixed(3)} side=${arch > 0 ? 'below' : 'above'}',
+        );
+        expect(
+          stem.stemUp,
+          stemUp,
+          reason: 'the premise of this case: a note below the middle line takes a stem up',
+        );
+        // THE RULE, ASSERTED AS A DIRECTION AND THEN AS AN EXACT DISTANCE — never as "small enough".
+        // The sign is the whole of what was wrong, and the magnitude is [MelodyMetrics.tieArch] of the
+        // span between the two endpoints, so an exact number is available and a tolerance would only
+        // be able to hide a defect the size of the arch.
+        expect(
+          arch > 0,
+          stemUp,
+          reason:
+              'a tie hangs OPPOSITE its stem: $pitch has its stem pointing ${stemUp ? 'up' : 'down'}, '
+              'so the arch must be ${stemUp ? 'below' : 'above'} its noteheads',
+        );
+        expect(
+          arch.abs(),
+          closeTo((tie.to.x - tie.from.x).abs() * 0.5, 1e-9),
+          reason:
+              'the arch is half the distance between the tie\'s own endpoints — MelodyMetrics.tieArch '
+              'is 0.5 — so the side is the only thing that changed and the shape did not',
+        );
+        expect(
+          tie.to.y,
+          tie.from.y,
+          reason: 'a tied pair on one line begins and ends at the same height',
+        );
+      }
+    });
+  });
 }

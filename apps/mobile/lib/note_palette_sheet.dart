@@ -263,7 +263,11 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       }
       HapticFeedback.selectionClick();
       final List<BeatNote> after = _notesHere();
-      setState(() => _editingStep = after.isEmpty ? null : after.first.step);
+      // THE NOTE JUST WRITTEN IS THE LAST OF THE CELL, because `insertNote` appends unless it is
+      // given a step — the oldest note keeps step 0 and the new one takes the highest step. The
+      // sheet selects it so a following tap CORRECTS the note he just wrote instead of adding a
+      // third one; selecting `first` here would aim the next tap at the note he wrote first.
+      setState(() => _editingStep = after.isEmpty ? null : after.last.step);
       widget.onChanged?.call();
       return;
     }
