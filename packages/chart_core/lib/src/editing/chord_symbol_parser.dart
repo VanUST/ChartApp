@@ -105,7 +105,12 @@ enum ChordSymbolReason {
   /// A bracket was opened and not closed.
   unclosedBracket,
 
-  /// The slash bass is missing or is not a note letter.
+  /// The symbol ends at a slash: it names a bass note and then does not write one.
+  ///
+  /// A slash followed by anything that is not a chord root is part of the quality suffix — `C6/9` is
+  /// a sixth chord with an added ninth — and is preserved verbatim rather than refused, because the
+  /// suffix is opaque by design. What is refused is a slash with NOTHING after it, where the reader
+  /// would otherwise have to invent either a bass or a quality out of the punctuation.
   badBass,
 
   /// The root's accidental is malformed: more than two in a row, or a mixed pair such as `b#`.
@@ -214,12 +219,20 @@ ChordSymbolParse readTypedChord(String text) {
   // opaque token, a bass is a sounding root — so the parser has to make it, and it makes it on the
   // contents for the same reason the bracket is decided that way: the punctuation alone does not
   // carry it.
+  //
+  // AND A SLASH AT THE END OF THE SYMBOL IS NOT A SUFFIX. `C/` is a chord with the bass left off, so
+  // the bass reader below must see the slash and refuse it as `badBass`. It used to be consumed into
+  // the suffix instead, because the break happened only when a note letter followed: `C/` was read as
+  // the root C with the quality `/` and rendered `C/`, a symbol nobody wrote, produced by a reader
+  // that looked as if it had accepted the input — the same failure the bracket and the lowercase flat
+  // are decided against elsewhere in this file. A trailing slash has nothing after it, so it cannot
+  // start a suffix and it cannot name a bass; refusing it is the only answer that is not an invention.
   final int qualityStart = index;
   while (index < trimmed.length) {
     final String character = trimmed[index];
     if (character == '/') {
       final int next = index + 1;
-      if (next < trimmed.length && isTypedChordRoot(trimmed[next])) {
+      if (next >= trimmed.length || isTypedChordRoot(trimmed[next])) {
         break;
       }
       index++;

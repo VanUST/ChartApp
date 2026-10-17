@@ -20,6 +20,7 @@ extension BarEditing on Bar {
   /// [clearVolta], not by passing a null `volta`.
   Bar copyWith({
     TimeSignature? timeSignature,
+    BarSize? size,
     List<BeatChord>? chords,
     List<BeatNote>? melody,
     List<PercussionHit>? percussion,
@@ -34,6 +35,7 @@ extension BarEditing on Bar {
     List<String>? staffText,
   }) => Bar(
     timeSignature: timeSignature ?? this.timeSignature,
+    size: size ?? this.size,
     chords: chords ?? this.chords,
     melody: melody ?? this.melody,
     percussion: percussion ?? this.percussion,

@@ -297,14 +297,22 @@ class LayoutEngine {
   // PURPOSE: Report the width a bar needs for its content. Exposed because the bar width is the
   //          unit a layout test reasons in, and because a caller sizing a single bar should not
   //          have to lay out a whole song to find out.
-  // INPUTS: bar — the bar to measure. key — the key its chords are spelled in, which affects the
-  //         width because `Bb` and `A#` are different strings.
-  // OUTPUTS: The bar's natural width, never less than the style's minimum bar width. A bar with
-  //          no chords measures to the minimum, because an empty cell still reserves room. A bar
-  //          whose staff text is wider than its cells widens to hold that text as DISPLAYED — the
-  //          `*NN` prefix and the exporter's padding are gone (see `displayStaffText`), so the
+  // INPUTS: bar — the bar to measure, including its own [Bar.size]. key — the key its chords are
+  //         spelled in, which affects the width because `Bb` and `A#` are different strings.
+  // OUTPUTS: The bar's width as the engine will draw it, which is its natural width multiplied by
+  //          its [BarSize] factor: never less than the style's minimum bar width, and a bar at
+  //          [BarSize.natural] is exactly the number this returned before the factor existed. A bar
+  //          with no chords measures to the minimum, because an empty cell still reserves room. A
+  //          bar whose staff text is wider than its cells widens to hold that text as DISPLAYED —
+  //          the `*NN` prefix and the exporter's padding are gone (see `displayStaffText`), so the
   //          layout does not reserve room for words it will not draw.
-  // KEYWORDS: bar-measurement, natural-width, minimum-width, key-dependent-width, staff-text
+  //
+  //          THIS IS THE SAME ARITHMETIC THE ENGRAVING USES, not a second copy of it: the private
+  //          [_barWidth] is the one implementation and this method is its way out of the library,
+  //          which is what lets a caller ask "how wide will this bar be" and get the width the page
+  //          will really give it.
+  // KEYWORDS: bar-measurement, natural-width, minimum-width, key-dependent-width, staff-text,
+  //           bar-size, one-implementation
   /// Returns the width [bar] needs when its chords are spelled in [key].
   double measureBar(Bar bar, Key key) =>
       _barWidth(bar, key, _measureStaffText(bar));
@@ -312,12 +320,32 @@ class LayoutEngine {
   // PURPOSE: Answer the width a bar needs, given its already-measured staff-text lines, so that the
   //          width reserved for the words and the box the words are placed in come from ONE
   //          measurement rather than two calls that happen to agree.
-  // INPUTS: bar — the bar. key — the key its chords are spelled in. staffLines — the bar's staff
-  //         text in display form with its measured sizes, from [_measureStaffText].
+  // INPUTS: bar — the bar, whose own [Bar.size] decides how many times its natural width it takes.
+  //         key — the key its chords are spelled in. staffLines — the bar's staff text in display
+  //         form with its measured sizes, from [_measureStaffText].
   // OUTPUTS: The bar's width: the larger of its cell content plus padding, and its widest staff
   //          line plus the line's left inset and the bar's right padding, floored at the style's
-  //          minimum bar width. Never less than [LayoutStyle.barMinWidth].
-  // KEYWORDS: bar-width, staff-text-room, single-measurement, minimum-width
+  //          minimum bar width, and then multiplied by [Bar.size]'s factor. A bar at
+  //          [BarSize.natural] is returned as the very same double as before the factor existed, so
+  //          every chart that never resized a bar engraves the page it always did.
+  //
+  //          THIS FUNCTION IS THE ONLY PLACE A BAR'S WIDTH IS DECIDED, and the factor is applied
+  //          HERE and nowhere else on purpose. Everything the width feeds already derives from the
+  //          rectangle this number becomes: the cell columns ([_cellOffsets] takes the drawn width
+  //          as an argument), the chord x positions, the melody staff's beat x positions, the beat
+  //          markers, the text cues' cell anchors, the hit test's cells and the bar rectangle an ink
+  //          stroke is anchored against. A second place that knew about the factor — a painter
+  //          multiplying a bar it drew, or a hit test adjusting for a resized bar — would be the
+  //          second source of truth for the coordinate system's one load-bearing number, which is
+  //          the defect A33 and A47 already paid for once here.
+  //
+  //          WHY THE FACTOR MULTIPLIES THE FLOORED WIDTH rather than being folded into the cell
+  //          minimums: the surplus a wider bar gets is then distributed over its cells by
+  //          [_cellOffsets], which is what actually gives a bar holding six chords more room
+  //          between them. Scaling only the minimum cell width would widen an EMPTY bar and leave a
+  //          crowded one exactly as it was, which is the opposite of what the musician asked for.
+  // KEYWORDS: bar-width, staff-text-room, single-measurement, minimum-width, bar-size,
+  //           width-multiplier, single-source-of-truth
   double _barWidth(Bar bar, Key key, List<_MeasuredStaffText> staffLines) {
     double content = 0;
     for (final double cellWidth in _cellWidths(bar, key)) {
@@ -334,7 +362,15 @@ class LayoutEngine {
         ? 0
         : widest + style.staffTextInset + style.barPadding;
     final double sized = natural > withStaffText ? natural : withStaffText;
-    return sized < style.barMinWidth ? style.barMinWidth : sized;
+    final double floored = sized < style.barMinWidth
+        ? style.barMinWidth
+        : sized;
+    // The natural bar is returned untouched rather than multiplied by 1. Multiplication by 1 is
+    // exact for every double, but comparing the factors first keeps the promise visible in the code:
+    // a chart of unresized bars computes the identical geometry it computed before this property
+    // existed, not merely an equal one.
+    final double factor = bar.size.factor;
+    return factor == 1 ? floored : floored * factor;
   }
 
   // PURPOSE: Read a bar's stored staff text into the lines it shows, measuring each line once so

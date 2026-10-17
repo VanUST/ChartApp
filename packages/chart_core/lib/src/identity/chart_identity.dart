@@ -22,7 +22,7 @@
 // rather than in the set's iteration order, because the order they are painted in is presentation:
 // two bars carrying the same three signs are the same bar.
 //
-// WHAT IS EXCLUDED, AND WHY IT IS EXACTLY THE METADATA BLOCK.
+// WHAT IS EXCLUDED, AND WHY NOTHING ELSE IS.
 //
 // `Song.id`, `title`, `composer`, `style` and `tempo` are excluded. The first is the identity being
 // computed, so including it would make the function depend on its own answer. The other four are
@@ -32,6 +32,17 @@
 // fields is what makes that a property of the code rather than of a list someone must remember to
 // keep in step.
 //
+// AND ONE FIELD OF A BAR IS EXCLUDED FOR THE SAME KIND OF REASON: `Bar.size` — how much room the
+// page gives that bar, relative to the room its own content needs — is removed from a bar's
+// canonical form. It is the musician's decision about the ENGRAVING, not about the music: the same
+// tune with one bar widened is still the same tune, and the consequence of including it would be
+// the one this file already refuses for a rename — widening a crowded bar would detach the chart
+// from every programme that named it, and the setlist would report a missing chart over a layout
+// change. The line is therefore "what is played" versus "where it was put on the page", and a bar's
+// width falls on the page's side of it. A chart that never resized a bar produces the bytes it
+// always did, which is what keeps every identity already written into a musician's `.setlist`
+// resolving to the chart it names.
+//
 // WHAT IT IS STABLE ACROSS.
 //   - a session: nothing recomputes it, and it is a pure function of content, so a saved programme
 //     reopened in a later session reaches the same string;
@@ -39,6 +50,8 @@
 //   - a DIFFERENT export containing the same tunes in a different ORDER, or with others removed:
 //     the identity never reads a position;
 //   - renaming a tune, and any other `song.update` — the metadata block is not covered;
+//   - widening a bar, and putting it back — a bar's size is engraving rather than music and is
+//     removed from the canonical bar, so a layout change never renames the tune;
 //   - re-encoding the chart: the subject is built from the model through `ModelJson`, so two equal
 //     songs produce equal canonical bytes.
 //
@@ -134,11 +147,15 @@ String chartIdentityOf(Song song) =>
 /// Whether [value] looks like an identity this library produces.
 bool isChartIdentity(String value) => value.startsWith(chartIdentityPrefix);
 
-// PURPOSE: Write one bar in the canonical form, with its mark set in a fixed order, so that two
-//          bars carrying the same signs produce the same bytes whatever order they were added in.
+// PURPOSE: Write one bar in the canonical form, with its mark set in a fixed order and its engraving
+//          size removed, so that two bars carrying the same MUSIC produce the same bytes whatever
+//          order their signs were added in and whatever width the page gave them.
 // INPUTS: bar — any bar.
-// OUTPUTS: The bar's JSON exactly as [ModelJson] writes it, except that `marks` is sorted by name.
-// KEYWORDS: canonical-form, bar, marks, sorted, order-independent
+// OUTPUTS: The bar's JSON exactly as [ModelJson] writes it, except that `marks` is sorted by name
+//          and `size` is absent. A bar that was never resized therefore contributes the same bytes
+//          it contributed before the size property existed, which is what keeps identities already
+//          written into a musician's `.setlist` resolving.
+// KEYWORDS: canonical-form, bar, marks, sorted, order-independent, size-excluded, engraving-not-music
 Map<String, Object?> _canonicalBar(Bar bar) {
   final Map<String, Object?> json = ModelJson.bar(bar);
   final List<Object?> marks = json['marks']! as List<Object?>;
@@ -146,6 +163,11 @@ Map<String, Object?> _canonicalBar(Bar bar) {
     for (final Object? mark in marks) mark! as String,
   ]..sort();
   json['marks'] = names;
+  // WHY A BAR'S WIDTH IS NOT PART OF THE TUNE. `Bar.size` says how much room the PAGE gives the bar,
+  // and the same music widened for a crowded run of chords is still the same music. Including it
+  // would make a layout adjustment detach the chart from every programme that named it, which is
+  // the failure this file refuses for a rename. See the library's header.
+  json.remove('size');
   return json;
 }
 

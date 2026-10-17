@@ -40,6 +40,22 @@ Song emptyChart(int bars) => Song(
   ],
 );
 
+/// The same empty chart, but the song DECLARES a pitched staff, so every bar is engraved with one
+/// before a single note exists — the D29 surface a staff tap has to be able to write on.
+Song staffChart(int bars) => Song(
+  id: 'staff-tap',
+  title: 'Staff tap',
+  key: Key.cMajor,
+  staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
+  sections: <Section>[
+    Section(
+      id: 'A',
+      label: const SectionLabel.letter('A'),
+      bars: <Bar>[for (int index = 0; index < bars; index++) Bar()],
+    ),
+  ],
+);
+
 /// A one-song library holding [song].
 IRealLibrary libraryOf(Song song) => IRealLibrary(
   playlistName: '',
@@ -288,6 +304,96 @@ void main() {
         reopened.song.barsInReadingOrder[0].melody.map((BeatNote n) => n.step),
         <int>[0, 1, 0],
         reason: 'the steps of each beat must come back as they were written',
+      );
+    },
+  );
+
+  // PURPOSE: Prove the SHORTEST PATH TO A NOTE, on the real screen: one tap on a column of the staff
+  //          opens the note palette for THAT beat, and the note written through it lands on that beat.
+  //          This is the case the tablet found and no test did — the staff's touch target was built
+  //          out of the beat CAPTIONS, so when the owner switched the captions off (A68 §7) a tap on
+  //          the five lines named nothing, `viewer.select staff ... hit=none`, and note entry was dead
+  //          while every palette test stayed green: those open the palette directly, from a selection
+  //          they make themselves, and never touch the surface a musician touches.
+  // INPUTS: A chart that DECLARES a pitched staff and holds no note, pumped in the viewer at the
+  //         size the other cases use. The style draws no beat captions, which is the state that broke.
+  // OUTPUTS: Pass/fail on: the bar has a staff and no beat captions; a tap at the middle line of beat
+  //          3's column opens the palette; the palette's own header names bar 1 beat 3; and the note
+  //          written through it is stored on beat 2 (zero-based), which is the column that was touched.
+  // KEYWORDS: test, widget, note-entry, staff-tap, beat-column, captions-off, a68, acceptance
+  testWidgets(
+    'a tap on a staff column opens the note palette for THAT beat, with the captions off',
+    (WidgetTester tester) async {
+      await pumpViewer(tester, library: libraryOf(staffChart(4)));
+      final PageLayout page = shownPainter(tester).page;
+      final PlacedBar bar = page.bars.first;
+      expect(
+        bar.melody.isEmpty,
+        isFalse,
+        reason: 'D29: the chart declared a staff, so the bar carries one before any note exists',
+      );
+      expect(
+        bar.beatMarkers,
+        isEmpty,
+        reason:
+            'the application draws no beat captions — the state in which a tap on the staff used '
+            'to name nothing, so the tap below is made in exactly it',
+      );
+
+      // Beat 3 of the bar (zero-based beat 2), touched where a musician would: the middle of the five
+      // lines, in that beat's own column.
+      const int beat = 2;
+      final PlacedCell cell = bar.cells.firstWhere(
+        (PlacedCell placed) => placed.beat == beat,
+      );
+      final Offset tapPoint = Offset(
+        cell.bounds.left + cell.bounds.size.width / 2,
+        bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
+      );
+      stdout.writeln(
+        'note.tap beat=$beat point=(${tapPoint.dx.toStringAsFixed(1)},'
+        '${tapPoint.dy.toStringAsFixed(1)}) '
+        'staff=(${bar.melody.bounds.top}..${bar.melody.bounds.bottom}) '
+        'captions=${bar.beatMarkers.length}',
+      );
+      await tapEngraved(tester, tapPoint);
+
+      final Finder position = find.byKey(
+        const ValueKey<String>('note-palette-position'),
+      );
+      expect(
+        position,
+        findsOneWidget,
+        reason:
+            'a tap on a staff column must open the note palette for that column: this is the path '
+            'that died when the captions were switched off',
+      );
+      // THE HEADER NAMES THE ADDRESS THE TAP NAMED, read through the app's own catalogue so the case
+      // does not pin a language. Bar 1, beat 3 as a musician counts them.
+      final AppLocalizations l10n = AppLocalizations.of(
+        tester.element(position),
+      );
+      expect(
+        tester.widget<Text>(position).data,
+        l10n.palettePosition(1, beat + 1),
+        reason:
+            'the palette must be aimed at the beat that was touched, and say so — a palette that '
+            'opens for the wrong cell writes a note the musician did not ask for',
+      );
+
+      // AND THE NOTE IT WRITES LANDS THERE. The case ARMS the duration and the alteration it is about
+      // rather than inheriting them: both are STICKY across openings — that is D28's "chosen once per
+      // run" — so a case that read them from whatever the previous case left armed would pass alone
+      // and fail in the suite, which is exactly what happened the first time this test was written.
+      await tapPalette(tester, 'note-palette-base-quarter');
+      await tapPalette(tester, 'note-palette-alter-0');
+      await tapPalette(tester, 'note-palette-degree-c');
+      expect(
+        notesOnPage(tester),
+        <String>['A[0] 2.0:C4 quarter'],
+        reason:
+            'the note must be stored on beat 3 of bar 1 — the column the finger touched — with the '
+            'pitch the degree button names',
       );
     },
   );

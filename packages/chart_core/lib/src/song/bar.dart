@@ -68,6 +68,110 @@ enum ChordSize {
   small,
 }
 
+/// How much room one bar is given on the page, as a multiple of the room its own content needs.
+///
+/// WHY A BAR'S WIDTH IS A PROPERTY OF THE BAR AND NOT OF THE VIEW. A jazz chart's bars are not
+/// equal: one bar holds a single chord and four beats, and the next holds six chords, a run of
+/// eighths and an accidental. An engraving that gives every bar the width its own content measures
+/// therefore starves the busy bar and wastes the empty one — and a bar is where this application
+/// writes chords, notes AND handwriting, so the shortage is felt three times in the same rectangle.
+/// The owner asked for the room to follow the music, in his own words: «менять видимый размер
+/// каждого конкретного такта, чтобы уместить больше внутри». The value is stored on the bar, in
+/// the document, and not in the screen's state, because it is the musician's decision about the
+/// chart: a chart opened on another device, or reopened next week, must look the way he set it.
+///
+/// WHY IT IS A MULTIPLE AND NOT A NUMBER OF PIXELS. The natural width is not a constant: it is
+/// measured from the chords' own text, in the key they are spelled in, with the style's own metrics
+/// — so it changes when the chart is transposed and when the engraving's proportions change. A
+/// stored absolute width would be a second opinion about a number the engraver already decides, and
+/// the first time the two disagreed the bar would be drawn at one width and measured at another.
+/// A multiple of the measurement cannot disagree with it, and it is what "this bar needs more room
+/// than the one next to it" actually means.
+///
+/// WHY THE FACTOR NEVER GOES BELOW 1. The surplus room a bar has is distributed evenly over its
+/// cells, so a factor below 1 would take room away from EVERY cell — including the ones holding
+/// chords — and a chord wider than the column it was measured into is drawn over its neighbour on
+/// the chord line. Making a narrower bar safe would need a second rule for how a deficit is shared
+/// out, which is exactly the second source of truth this coordinate system cannot afford; so the
+/// bar's own content is the floor and this property only ever ADDS room. A bar that is too wide is
+/// put back by stepping down the ladder, and the ladder's bottom rung IS the natural bar.
+class BarSize {
+  /// Creates a size [factor] times the bar's natural width.
+  ///
+  /// The [factor] must be at least 1: see the class's note on why a bar is never engraved narrower
+  /// than its own content needs. The check is an assert because this is the model's invariant and a
+  /// violation is a programmer's error, not a musician's; a value arriving from a file or a typed
+  /// form is checked by the reader that decodes it, because a decode path must not depend on
+  /// asserts being enabled.
+  const BarSize(this.factor)
+    : assert(
+        factor >= 1,
+        'a bar cannot be narrower than its own '
+        'content: the factor must be at least 1',
+      );
+
+  /// The size of a bar nobody has resized: exactly the width its own content needs.
+  ///
+  /// This is the default every bar carries, and it is what makes a chart that never used this
+  /// property engrave exactly the page it engraved before the property existed.
+  static const BarSize natural = BarSize(1);
+
+  /// The rungs the surface's control steps through, narrowest first.
+  ///
+  /// THE RUNGS ARE PART OF THE PROPERTY'S DOMAIN rather than of one screen's taste: the model
+  /// accepts any factor at or above 1, and this list is what a musician can reach with a press.
+  /// The steps grow (1, 1.25, 1.5, 2, 2.5, 3) rather than being evenly spaced, because the first
+  /// step is the one that has to be small enough to be an adjustment and the last ones only have to
+  /// be reachable: a bar at ×3 is 216 page pixels of chord line where a 5-cell bar was 88.
+  ///
+  /// Every value is an exact binary fraction, so a factor written to a file and read back is the
+  /// SAME double and `BarSize(1.25) == BarSize(1.25)` holds after a round trip with no tolerance.
+  static const List<BarSize> ladder = <BarSize>[
+    natural,
+    BarSize(1.25),
+    BarSize(1.5),
+    BarSize(2),
+    BarSize(2.5),
+    BarSize(3),
+  ];
+
+  /// The multiple of the bar's natural width this bar is drawn at.
+  final double factor;
+
+  /// Whether this bar is engraved at its natural width, which is the state of every bar that was
+  /// never resized and the state a reset returns it to.
+  bool get isNatural => factor == 1;
+
+  /// The next rung up the [ladder], or null when this bar is already at the top.
+  BarSize? get wider {
+    for (int index = 0; index + 1 < ladder.length; index++) {
+      if (ladder[index].factor >= factor) {
+        return ladder[index + 1];
+      }
+    }
+    return null;
+  }
+
+  /// The next rung down the [ladder], or null when this bar is already as narrow as it may be.
+  BarSize? get narrower {
+    for (int index = ladder.length - 1; index > 0; index--) {
+      if (ladder[index].factor <= factor) {
+        return ladder[index - 1];
+      }
+    }
+    return null;
+  }
+
+  @override
+  bool operator ==(Object other) => other is BarSize && other.factor == factor;
+
+  @override
+  int get hashCode => factor.hashCode;
+
+  @override
+  String toString() => isNatural ? 'BarSize(natural)' : 'BarSize(x$factor)';
+}
+
 /// An alternative-ending bracket.
 ///
 /// Number 0 is an UNNUMBERED bracket: iReal writes `N0` for an ending with no figure in it, and
@@ -136,6 +240,7 @@ class Bar {
   /// Creates a bar in [timeSignature] with the given contents and signs.
   const Bar({
     this.timeSignature = TimeSignature.fourFour,
+    this.size = BarSize.natural,
     this.chords = const <BeatChord>[],
     this.openingBarline = Barline.single,
     this.closingBarline = Barline.single,
@@ -151,6 +256,15 @@ class Bar {
 
   /// The meter in force for this bar.
   final TimeSignature timeSignature;
+
+  /// How much room this bar is given on the page, relative to the room its content needs.
+  ///
+  /// The musician's own decision, stored in the document rather than in a screen's state, because a
+  /// chart opened on another device must look the way he set it. Every bar starts at
+  /// [BarSize.natural], which is the width the engraver measured before this property existed, so a
+  /// chart that never sets it is engraved exactly as it was. See [BarSize] for why it is a multiple
+  /// of the natural width and why it never goes below 1.
+  final BarSize size;
 
   /// Chord placements, ordered by beat and then by step. Empty means the previous chord sustains.
   final List<BeatChord> chords;
@@ -209,6 +323,7 @@ class Bar {
       return false;
     }
     if (other.timeSignature != timeSignature ||
+        other.size != size ||
         other.openingBarline != openingBarline ||
         other.closingBarline != closingBarline ||
         other.volta != volta ||
@@ -249,6 +364,7 @@ class Bar {
   @override
   int get hashCode => Object.hash(
     timeSignature,
+    size,
     Object.hashAll(chords),
     Object.hashAll(melody),
     Object.hashAll(percussion),
@@ -267,6 +383,7 @@ class Bar {
       'Bar($openingBarline, ${chords.length} chord(s)'
       '${melody.isEmpty ? '' : ', ${melody.length} note(s)'}'
       '${percussion.isEmpty ? '' : ', ${percussion.length} hit(s)'}, $closingBarline'
+      '${size.isNatural ? '' : ', $size'}'
       '${volta == null ? '' : ', $volta'}'
       '${repeatPrevious == RepeatPrevious.none ? '' : ', $repeatPrevious'}'
       '${slashRepeat ? ', slash' : ''}${noChord ? ', N.C.' : ''})';

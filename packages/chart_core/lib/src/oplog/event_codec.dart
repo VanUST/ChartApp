@@ -252,6 +252,18 @@ abstract final class EventCodec {
           from: _meter(EventJson.object(payload, 'from'), 'from'),
           to: _meter(EventJson.object(payload, 'to'), 'to'),
         );
+      case 'size.set':
+        return BarSizeSetEvent(
+          docId: docId,
+          seq: seq,
+          sectionId: EventJson.string(payload, 'sectionId'),
+          barIndex: EventJson.integer(payload, 'bar'),
+          from: ModelJson.decodeBarSize(
+            EventJson.number(payload, 'from'),
+            'from',
+          ),
+          to: ModelJson.decodeBarSize(EventJson.number(payload, 'to'), 'to'),
+        );
       case 'key.transpose':
         return KeyTransposeEvent(
           docId: docId,

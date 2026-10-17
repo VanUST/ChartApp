@@ -5,10 +5,18 @@
 //          instead of a font version. The round trip is printed to stdout as well as asserted, so
 //          the numbers a reader would check by hand are in the transcript and not only in a
 //          boolean.
+//
+//          IT COVERS BOTH SURFACES OVER THE SAME BARS. `hitTestPage` answers for the chord line and
+//          `hitTestMelodyStaff` for the staff below it, whose columns name beats. The staff cases
+//          are laid out with the engine's own style, which prints no beat captions, because the
+//          target used to be built out of those captions and switching them off switched note entry
+//          off with them (A68 §7) — so the cases assert that the answer does not depend on anything
+//          that can be switched off, with and without the captions printed.
 // INPUTS: None.
-// OUTPUTS: Pass/fail per behaviour, plus `hit.cell ...` lines on stdout naming the point tested and
-//          the address it returned.
-// KEYWORDS: test, hit-testing, round-trip, page-scale, fit, edge-case, hand-derived, evidence
+// OUTPUTS: Pass/fail per behaviour, plus `hit.cell ...` and `hit.staff ...` lines on stdout naming
+//          the point tested and the address it returned.
+// KEYWORDS: test, hit-testing, round-trip, page-scale, fit, edge-case, hand-derived, evidence,
+//           melody-staff, beat-column, captions-off
 import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
@@ -42,6 +50,58 @@ Section sectionOf(String id, String label, int count) => Section(
 LayoutOffset centreOf(LayoutRect rect) => LayoutOffset(
   rect.left + rect.size.width / 2,
   rect.top + rect.size.height / 2,
+);
+
+/// A song that DECLARES a pitched staff and carries a chord and a note on every beat.
+///
+/// The declaration is the point: D29 makes the staff exist because the chart asked for it, so every
+/// bar of this song carries one whether or not a note was written on it, and a tap on its five lines
+/// has something to name. Four bars of 4/4 gives sixteen columns to touch.
+Song staffSong() => Song(
+  title: 'Staff',
+  staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
+  sections: <Section>[
+    Section(
+      id: 'staff-a',
+      label: const SectionLabel.letter('A'),
+      bars: <Bar>[
+        for (int barIndex = 0; barIndex < 4; barIndex++)
+          Bar(
+            chords: <BeatChord>[
+              for (int beat = 0; beat < 4; beat++)
+                BeatChord(
+                  chord: Chord(root: ChordRoot(barIndex + beat)),
+                  beat: beat,
+                ),
+            ],
+            // A note on every beat, so the column a tap names is also the column a notehead stands
+            // in: the beat the hit test answers can be checked against the note that beat holds.
+            melody: <BeatNote>[
+              for (int beat = 0; beat < 4; beat++)
+                BeatNote(
+                  pitch: const PitchedNote(
+                    note: WrittenNote(NoteLetter.e, 0),
+                    octave: 4,
+                  ),
+                  value: const NoteValue.plain(NoteBase.quarter),
+                  beat: beat,
+                ),
+            ],
+          ),
+      ],
+    ),
+  ],
+);
+
+/// The point in [bar]'s staff that a musician would touch to choose [beat]: the beat's own column,
+/// at the height of the staff's middle line.
+///
+/// The column comes from the bar's cells and the height from the staff's published box, which are
+/// the two things the caller of the hit test is allowed to know; the captions under the staff are
+/// deliberately not consulted, because a tap must not depend on them.
+LayoutOffset staffTapPoint(PlacedBar bar, PlacedCell cell) => LayoutOffset(
+  cell.bounds.left + cell.bounds.size.width / 2,
+  bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
 );
 
 void main() {
@@ -273,5 +333,184 @@ void main() {
         );
       },
     );
+  });
+
+  group('hitTestMelodyStaff', () {
+    // THE SECOND SURFACE, AND THE DEFECT THAT MADE THESE CASES NECESSARY. The staff's touch target
+    // used to be built out of the beat CAPTIONS: the touch band ran down to the caption row and each
+    // beat's column was that beat's marker. The owner read the captions and the tick marks as noise
+    // and asked for them to go; switching them off then switched off NOTE ENTRY, because a tap on the
+    // five lines named nothing. The tablet found it in one tap — `viewer.select staff ... hit=none` —
+    // after seventy tests stayed green, because the palette tests opened the palette directly instead
+    // of touching the staff. Every case below therefore lays the chart out with the engine's own
+    // style, which is the style that prints no captions.
+    final Song staffChart = staffSong();
+    final PageLayout staffPage = engine
+        .layout(staffChart, pageWidth: 400, pageHeight: 600)
+        .first;
+    // The same chart engraved by a style that DOES print the captions, for the comparison below.
+    final PageLayout captionedPage = LayoutEngine(
+      style: const LayoutStyle(showBeatCaptions: true),
+    ).layout(staffChart, pageWidth: 400, pageHeight: 600).first;
+
+    test('a tap on a staff column names that beat, with the beat captions OFF', () {
+      int tapped = 0;
+      for (final PlacedBar bar in staffPage.bars) {
+        expect(
+          bar.melody.isEmpty,
+          isFalse,
+          reason: 'D29: the chart declared a staff, so the bar carries one',
+        );
+        expect(
+          bar.beatMarkers,
+          isEmpty,
+          reason:
+              'the style prints no captions and no ticks under the staff — this is the state in '
+              'which note entry died, so the taps below are made in exactly it',
+        );
+        for (final PlacedCell cell in bar.cells) {
+          final LayoutOffset point = staffTapPoint(bar, cell);
+          final ChartHit? hit = hitTestMelodyStaff(staffPage, point);
+          stdout.writeln(
+            'hit.staff bar=${bar.barIndex} beat=${cell.beat} '
+            'point=(${point.x.toStringAsFixed(2)},${point.y.toStringAsFixed(2)}) '
+            'answered=${hit == null ? 'null' : '${hit.sectionId}[${hit.barIndex}] '
+                      'beat=${hit.beat}'}',
+          );
+          expect(
+            hit,
+            isNotNull,
+            reason:
+                'a tap on the five lines of beat ${cell.beat} of bar ${bar.barIndex} must name '
+                'that beat: a staff whose columns cannot be touched is a staff notes cannot be '
+                'written on',
+          );
+          expect(hit!.sectionId, bar.sectionId);
+          expect(hit.barIndex, bar.barIndex);
+          expect(
+            hit.beat,
+            cell.beat,
+            reason: 'the column touched is the beat named, not a neighbour',
+          );
+          tapped++;
+        }
+      }
+      expect(tapped, 16, reason: 'four 4/4 bars, every beat touched once');
+    });
+
+    test('the same taps name the same beats whether the captions print or not', () {
+      // THE ANSWER MUST NOT DEPEND ON ANYTHING THAT CAN BE SWITCHED OFF. This is the pair that
+      // states the rule rather than one side of it: the same column of the same bar, touched at the
+      // same musical height, must answer the same address in both layouts. The captioned page is
+      // proved to have printed its captions first, so the comparison cannot pass by both pages
+      // being caption-less.
+      expect(
+        captionedPage.bars.first.beatMarkers,
+        isNotEmpty,
+        reason: 'the comparison is worthless unless one of the two layouts prints them',
+      );
+      int compared = 0;
+      for (int index = 0; index < staffPage.bars.length; index++) {
+        final PlacedBar silent = staffPage.bars[index];
+        final PlacedBar captioned = captionedPage.bars[index];
+        for (int cell = 0; cell < silent.cells.length; cell++) {
+          final ChartHit? off = hitTestMelodyStaff(
+            staffPage,
+            staffTapPoint(silent, silent.cells[cell]),
+          );
+          final ChartHit? on = hitTestMelodyStaff(
+            captionedPage,
+            staffTapPoint(captioned, captioned.cells[cell]),
+          );
+          expect(
+            off?.beat,
+            cell,
+            reason: 'captions off, bar $index cell $cell',
+          );
+          expect(
+            on?.beat,
+            off?.beat,
+            reason:
+                'bar $index cell $cell answered ${on?.beat} with the captions printed and '
+                '${off?.beat} without them: the beat a touch names must not move when a label '
+                'under the staff is switched off',
+          );
+          compared++;
+        }
+      }
+      stdout.writeln(
+        'hit.staff-captions compared=$compared '
+        'markers_off=${staffPage.bars.first.beatMarkers.length} '
+        'markers_on=${captionedPage.bars.first.beatMarkers.length} identical=true',
+      );
+    });
+
+    test('the touch band is the five lines and half a space below them', () {
+      final PlacedBar bar = staffPage.bars.first;
+      final PlacedCell firstCell = bar.cells.first;
+      final double space = bar.melody.bounds.size.height / 4;
+      final double columnX = centreOf(firstCell.bounds).x;
+      final ChartHit? onTheLines = hitTestMelodyStaff(
+        staffPage,
+        staffTapPoint(bar, firstCell),
+      );
+      // Half a space under the bottom line is where a notehead on the ledger line below the staff
+      // sits, so that band is staff; a whole space below it is blank paper and is not.
+      final ChartHit? onTheLedgerNote = hitTestMelodyStaff(
+        staffPage,
+        LayoutOffset(columnX, bar.melody.bounds.bottom + space / 4),
+      );
+      final ChartHit? onBlankPaper = hitTestMelodyStaff(
+        staffPage,
+        LayoutOffset(columnX, bar.melody.bounds.bottom + space),
+      );
+      // Above the top line, inside the band the system reserved, there is nothing to touch either:
+      // the reserved band is not the staff, and a tap on it must not be told it named a beat.
+      final ChartHit? aboveTheStaff = hitTestMelodyStaff(
+        staffPage,
+        LayoutOffset(columnX, bar.melody.bounds.top - 12),
+      );
+      stdout.writeln(
+        'hit.staff-band on_lines=${onTheLines?.beat} '
+        'on_ledger_note=${onTheLedgerNote?.beat} '
+        'below_band=${onBlankPaper?.beat} above_staff=${aboveTheStaff?.beat} '
+        'staff=(${bar.melody.bounds.top}..${bar.melody.bounds.bottom}) space=$space',
+      );
+      expect(onTheLines, isNotNull);
+      expect(
+        onTheLedgerNote?.beat,
+        firstCell.beat,
+        reason:
+            'half a staff space under the bottom line is where a note on the ledger line below the '
+            'staff is drawn, so a touch there still names the beat of that column',
+      );
+      expect(
+        onBlankPaper,
+        isNull,
+        reason:
+            'below the staff and its ledger room is blank paper: a touch there has not chosen a '
+            'beat, and answering anyway would put a note where nothing was touched',
+      );
+      expect(
+        aboveTheStaff,
+        isNull,
+        reason:
+            'the band the system reserves for the melody is not the staff: a tap on the paper above '
+            'the five lines names nothing',
+      );
+      // And a touch in the bar's own leading padding is over the bar and over no beat, which is the
+      // same answer the chord line gives for its own padding rather than a silent guess at beat 0.
+      final ChartHit? inPadding = hitTestMelodyStaff(
+        staffPage,
+        LayoutOffset(bar.bounds.left + 1, staffTapPoint(bar, firstCell).y),
+      );
+      expect(inPadding, isNotNull);
+      expect(inPadding!.barIndex, bar.barIndex);
+      expect(
+        inPadding.cell,
+        isNull,
+        reason: 'the padding before the first column names the bar and no beat',
+      );
+    });
   });
 }

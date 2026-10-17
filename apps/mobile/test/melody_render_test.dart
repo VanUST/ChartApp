@@ -4,13 +4,22 @@
 //          stem, accidental, dot and tie were placed. It is the instrument behind the claim that a
 //          melody staff can be read: the PNG is looked at, and these numbers are what it is looked
 //          at against.
+//
+//          ITS SECOND CASE ASKS A QUESTION NUMBERS CANNOT ANSWER: whether anything is DRAWN where
+//          the clef used to be. The owner removed the letter that stood there (A68), and a letter
+//          was painted straight onto the canvas rather than placed in the glyph list — so the claim
+//          is checked on the rendered page's pixels, with a control box on the chord row proving the
+//          detector can see ink at all.
 // INPUTS: MELODY_PROBE_OUT names the directory. Nothing else; the chart is built here so the run
-//         never depends on the owner's export.
+//         never depends on the owner's export. The pixel case needs no directory and no font: it
+//         renders in memory and reads the bytes.
 // OUTPUTS: `melody.png` at a device pixel ratio of 2, a `melody.geometry.txt` dump of every
 //          rectangle, and the per-note report on stdout. The test ASSERTS that the fixture
 //          exercises every case it was written for — each written value, a tie, a stacked beat,
 //          an accidental and a note needing three ledger lines each way — so a fixture that
-//          silently stopped exercising one of them fails rather than passing quietly.
+//          silently stopped exercising one of them fails rather than passing quietly. The pixel case
+//          adds a `probe.no-clef` line naming the box sampled, the ink found in it and the ink found
+//          in its control.
 // KEYWORDS: melody-staff, render, png, instrument, ledger-line, tie, accidental, dot, stacked-chord
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -728,6 +737,175 @@ void main() {
       'probe.melody png=${pngFile.path} bytes=${pngFile.lengthSync()} '
       'pixels=${(probePageWidth * probePixelRatio).round()}x'
       '${(probePageHeight * probePixelRatio).round()}',
+    );
+  });
+
+  // PURPOSE: Pin the OWNER'S VERDICT that the staff carries no clef sign — by looking at the drawn
+  //          page's pixels rather than at the model, because the decision was a decision about the
+  //          picture. The treble clef was drawn as the letter `G` in the field left of the first
+  //          note, and the owner's report of it is «зачем то буква G в начале. Если это просто
+  //          убрать - уже будет лучше» (A68 §7). A test that asserted "no glyph carries a clef" would
+  //          not have caught its return: the letter was painted straight onto the canvas, not placed
+  //          in the glyph list. This one reads the field it stood in and fails if anything is there.
+  // INPUTS: None. The chart is built here, one bar with a chord on beat 1 and a note on the LAST
+  //         beat, which leaves the field between the barline and the first cell empty of music.
+  // OUTPUTS: Pass/fail, plus `probe.no-clef` lines naming the box sampled, the ink found in it, and
+  //          the ink found in a control box on the chord row — the control is what proves the
+  //          detector can see ink at all rather than sampling blank paper twice.
+  // KEYWORDS: test, melody-staff, clef-removed, owner-verdict, pixels, ink-detector, negative-control,
+  //           a68
+  test('the staff is drawn without a clef: its left field holds no ink', () async {
+    final FlutterTextMetrics metrics = _metricsFor(null);
+    final LayoutEngine engine = LayoutEngine(
+      style: LayoutStyle(
+        textMetrics: metrics,
+        pageMargin: probeStyle.pageMargin,
+        barMinWidth: probeStyle.barMinWidth,
+        barPadding: probeStyle.barPadding,
+        chordSpacing: probeStyle.chordSpacing,
+        minCellWidth: probeStyle.minCellWidth,
+        barHeight: probeStyle.barHeight,
+        systemSpacing: probeStyle.systemSpacing,
+        sectionLabelHeight: probeStyle.sectionLabelHeight,
+      ),
+    );
+    // The chord is written on beat 1 and the note on beat 4, so the staff's left field — where the
+    // clef stood, between the barline and the first cell's column — holds nothing but the staff's own
+    // five lines.
+    final Song song = Song(
+      title: 'No clef',
+      key: Key.cMajor,
+      staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
+      sections: <Section>[
+        Section(
+          id: 'N',
+          label: const SectionLabel.letter('N'),
+          bars: <Bar>[
+            melodyBar(<BeatNote>[
+              noteOf(
+                NoteLetter.c,
+                4,
+                const NoteValue.plain(NoteBase.quarter),
+                beat: 3,
+              ),
+            ]),
+          ],
+        ),
+      ],
+    );
+    final PageLayout page = engine
+        .layout(song, pageWidth: probePageWidth, pageHeight: probePageHeight)
+        .single;
+    expect(
+      page.scale,
+      1,
+      reason:
+          'the page is engraved at 1:1, so an engraved coordinate IS a pixel and the box below '
+          'can be sampled directly',
+    );
+    final PlacedBar bar = page.bars.first;
+    final double space = bar.melody.bounds.size.height / 4;
+
+    final int width = probePageWidth.round();
+    final int height = probePageHeight.round();
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final ui.Canvas canvas = ui.Canvas(recorder);
+    ChartPainter(
+      song: song,
+      page: page,
+      metrics: metrics,
+    ).paint(canvas, ui.Size(probePageWidth, probePageHeight));
+    final ui.Picture picture = recorder.endRecording();
+    final ui.Image image = await picture.toImage(width, height);
+    final ByteData? raw = await image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
+    expect(raw, isNotNull, reason: 'the renderer must produce pixels to read');
+    final Uint8List pixels = raw!.buffer.asUint8List();
+    image.dispose();
+    picture.dispose();
+
+    /// Whether the pixel at ([x], [y]) is ink rather than paper: white is the page's background, so
+    /// anything materially darker than it was drawn.
+    bool isInk(int x, int y) {
+      final int at = 4 * (y * width + x);
+      return pixels[at] < 250 || pixels[at + 1] < 250 || pixels[at + 2] < 250;
+    }
+
+    /// Counts ink in a box in PAGE coordinates, skipping a band around each staff line's y.
+    ///
+    /// THE SKIP IS WHAT MAKES THE SAMPLE MEAN "PAPER": the five staff lines run through the field by
+    /// design, so a raw count there would always be positive and the case would prove nothing. The
+    /// band is two page pixels either side of a line, which is the antialiasing of a 1.4-pixel
+    /// stroke — anything drawn BETWEEN the lines is not a staff line.
+    int inkBetweenTheLines({
+      required double left,
+      required double right,
+      required double top,
+      required double bottom,
+    }) {
+      final List<double> lineYs = <double>[
+        for (int line = 0; line < 5; line++)
+          bar.melody.bounds.top + space * line,
+      ];
+      int found = 0;
+      for (int y = top.ceil(); y <= bottom.floor(); y++) {
+        if (lineYs.any((double lineY) => (y - lineY).abs() <= 2)) {
+          continue;
+        }
+        for (int x = left.ceil(); x <= right.floor(); x++) {
+          if (isInk(x, y)) {
+            found++;
+          }
+        }
+      }
+      return found;
+    }
+
+    // THE FIELD THE CLEF STOOD IN: from just clear of the barline to just short of the first cell's
+    // column, over the height of the five lines.
+    final double firstCellLeft = bar.cells.first.bounds.left;
+    final int inTheClefsField = inkBetweenTheLines(
+      left: bar.melody.bounds.left + 3,
+      right: firstCellLeft - 2,
+      top: bar.melody.bounds.top + 1,
+      bottom: bar.melody.bounds.bottom - 1,
+    );
+    // THE CONTROL: the same detector aimed at the chord row, where the chord symbol is drawn. If this
+    // finds nothing, the detector is blind and the case above proves nothing at all.
+    final LayoutRect chordBox = bar.chords.first.bounds;
+    int inTheControl = 0;
+    for (int y = chordBox.top.ceil(); y <= chordBox.bottom.floor(); y++) {
+      for (int x = chordBox.left.ceil(); x <= chordBox.right.floor(); x++) {
+        if (isInk(x, y)) {
+          inTheControl++;
+        }
+      }
+    }
+    stdout.writeln(
+      'probe.no-clef field=(${(bar.melody.bounds.left + 3).toStringAsFixed(1)}..'
+      '${(firstCellLeft - 2).toStringAsFixed(1)}, '
+      '${bar.melody.bounds.top.toStringAsFixed(1)}..'
+      '${bar.melody.bounds.bottom.toStringAsFixed(1)}) '
+      'ink=$inTheClefsField control_ink=$inTheControl '
+      'control=(${chordBox.left},${chordBox.top},'
+      '${chordBox.size.width},${chordBox.size.height}) '
+      'staff_space=${space.toStringAsFixed(1)}',
+    );
+    expect(
+      inTheControl,
+      greaterThan(0),
+      reason:
+          'the control box holds the chord symbol, so a detector that finds no ink there cannot '
+          'be trusted about the field beside the staff',
+    );
+    expect(
+      inTheClefsField,
+      0,
+      reason:
+          'the staff’s left field is blank paper apart from the five lines: the owner removed the '
+          'letter that stood there as a clef, and a clef — letter or vector — would be ink between '
+          'the lines of exactly this box',
     );
   });
 }

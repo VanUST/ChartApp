@@ -1035,6 +1035,64 @@ class EditSession {
     return changed;
   }
 
+  // --- How much room a bar is given ------------------------------------------------------------
+  //
+  // The owner's own words for this operation: «менять видимый размер каждого конкретного такта, чтобы
+  // уместить больше внутри». A jazz chart's bars are not equal — one holds a single chord and four
+  // beats, the next holds six chords, a run of eighths and an accidental — and an engraving that
+  // gives every bar the width its own content measures starves the busy one. `Bar.size` is where the
+  // musician's answer to that is stored; this method is the only way it is written.
+  //
+  // WHY THE WHOLE SIZE IS CARRIED ON BOTH SIDES. Like the meter and the repeat signs, a size has no
+  // neutral value that means "leave it alone": an event carrying only the new factor could not
+  // describe its own reversal, and undo would have to reconstruct what the bar held. The event
+  // therefore records the factor before and after, read from the bar here, and its inverse is a
+  // swap.
+  //
+  // WHY THE REFUSALS ARE WHAT THEY ARE. An address that names no bar, and a size equal to the one
+  // the bar already carries — the second is the rule every edit here follows (see [setBarMark],
+  // [setTimeSignature], [setVolta]): an event whose two sides are equal is a log row that changed
+  // nothing and an offer to undo an edit that did not happen. A value the model cannot hold is NOT
+  // refused here, because [BarSize] cannot be constructed with one; a value arriving from a file is
+  // checked by the reader that decodes it.
+
+  // PURPOSE: Set how much room the page gives one bar, through the operation log, so a bar holding
+  //          six chords and a run of eighths can be drawn wider than the empty bar beside it — and
+  //          so that widening is undoable and survives a save.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. size — the size the bar
+  //         should carry, from [BarSize.ladder] or from anywhere else the model accepts; it is a
+  //         multiple of the bar's own natural width and is at least [BarSize.natural].
+  // OUTPUTS: True when an event was appended, false when the address names no bar or when the bar
+  //          already carries exactly that size. The event carries the complete size on both sides,
+  //          read from the bar here, so its inverse restores the bar exactly.
+  //
+  //          A REFUSED OR IMPOSSIBLE SIZE HAS NO PARTIAL EFFECT: nothing is appended, the document
+  //          is untouched, and the caller is told by the boolean. The engine applies the factor in
+  //          one place, so there is no second half of this operation that could be left behind.
+  // KEYWORDS: bar-size, width, whole-value, no-op-refusal, undoable, the-musician-decides
+  /// Sets the size of the bar at ([sectionId], [barIndex]), reporting whether it changed.
+  bool setBarSize({
+    required String sectionId,
+    required int barIndex,
+    required BarSize size,
+  }) {
+    final Bar? bar = _document.song.barAt(sectionId, barIndex);
+    if (bar == null || bar.size == size) {
+      return false;
+    }
+    apply(
+      BarSizeSetEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: sectionId,
+        barIndex: barIndex,
+        from: bar.size,
+        to: size,
+      ),
+    );
+    return true;
+  }
+
   // --- Text cues: the words a musician writes on the chart -------------------------------------
   //
   // `textcue.insert`, `textcue.edit`, `textcue.move` and `textcue.delete` have been in the

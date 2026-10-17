@@ -204,9 +204,13 @@ abstract final class ModelJson {
   /// Writes a [Bar] with every field the model carries, including the structural signs.
   ///
   /// All of them are written because a `measure.*` event carries a whole bar and carries it for
-  /// the inverse alone: a bar restored without its volta would be a silently different bar.
+  /// the inverse alone: a bar restored without its volta would be a silently different bar. The
+  /// same argument covers [BarSize]: a bar restored at the wrong size is a bar the musician did not
+  /// set, and because a `measure.delete` undo re-inserts the bar it removed, the size has to travel
+  /// with it or an undo would silently reset a width he chose.
   static Map<String, Object?> bar(Bar bar) => <String, Object?>{
     'timeSignature': timeSignature(bar.timeSignature),
+    'size': bar.size.factor,
     'chords': <Object?>[for (final BeatChord c in bar.chords) beatChord(c)],
     'melody': <Object?>[for (final BeatNote n in bar.melody) beatNote(n)],
     'percussion': <Object?>[
@@ -223,12 +227,22 @@ abstract final class ModelJson {
   };
 
   /// Rebuilds a [Bar] from [json].
+  ///
+  /// `size` IS READ TOLERANTLY, AND IT IS THE ONLY FIELD THAT IS. Every other field of a bar is
+  /// required, because a missing one means a truncated event and a default would make the damage
+  /// look like an edit that cleared something. A missing `size` is not that case: no build before
+  /// this field existed could express any value other than [BarSize.natural], so absence names
+  /// exactly one value rather than an unknown one, and refusing the file would make every chart and
+  /// every operation tail written by the previous build unreadable. What is NOT tolerated is a
+  /// factor the engraver cannot honour — see [decodeBarSize], which reports it rather than
+  /// defaulting it.
   static Bar decodeBar(Map<String, Object?> json) {
     final int? volta = EventJson.optionalInteger(json, 'volta');
     return Bar(
       timeSignature: decodeTimeSignature(
         EventJson.object(json, 'timeSignature'),
       ),
+      size: decodeBarSize(EventJson.optionalNumber(json, 'size'), 'size'),
       chords: <BeatChord>[
         for (final Object? entry in EventJson.array(json, 'chords'))
           decodeBeatChord(_asObject(entry, 'chords')),
@@ -265,6 +279,43 @@ abstract final class ModelJson {
           _asString(entry, 'staffText'),
       ],
     );
+  }
+
+  /// Rebuilds a [BarSize] from the factor a bar or an event carries, naming [field] in a failure.
+  ///
+  /// A NULL FACTOR IS THE NATURAL BAR, because a bar that was never resized writes nothing anywhere
+  /// in this format and an older file carries no `size` at all: absence can only mean the one value
+  /// every bar had before the property existed. Every other shape of the value is a reported
+  /// failure and never a default —
+  ///
+  ///   * a non-finite factor would put a bar's rectangle at infinity or at NaN, and a bar drawn at
+  ///     NaN is invisible rather than visibly wrong;
+  ///   * a factor below 1 asks the engraver to squeeze the bar's cells, and the surplus it would
+  ///     have to give back is shared out over EVERY cell, including the ones holding chords — so a
+  ///     chord would be drawn over its neighbour on the chord line, which is the one thing the
+  ///     width of a bar may never do. The model's own constructor asserts this, and the reader
+  ///     checks it here as well because a decode path must not depend on asserts being enabled.
+  ///
+  /// A factor ABOVE the top of [BarSize.ladder] is deliberately accepted. That is the `meter.set`
+  /// rule: refusing a value already written into a saved file would make the file unopenable rather
+  /// than merely unusual, and a future build that offers a wider ladder must stay readable by this
+  /// one.
+  static BarSize decodeBarSize(double? factor, String field) {
+    if (factor == null) {
+      return BarSize.natural;
+    }
+    if (!factor.isFinite) {
+      throw EventFormatException(
+        'field "$field" names a bar size of $factor, which is not a width',
+      );
+    }
+    if (factor < BarSize.natural.factor) {
+      throw EventFormatException(
+        'field "$field" names a bar size of $factor, and a bar may not be drawn '
+        'narrower than ${BarSize.natural.factor} times its own content',
+      );
+    }
+    return BarSize(factor);
   }
 
   /// Writes a set of [BarMark]s as the list of their names.

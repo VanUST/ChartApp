@@ -227,6 +227,13 @@ Song transposeSong(Song song, int semitones, {required Key toKey}) {
           for (final Bar bar in section.bars)
             Bar(
               timeSignature: bar.timeSignature,
+              // THE SIZE TRAVELS WITH THE BAR, and it is carried as the VALUE the musician set
+              // rather than re-measured: the factor is a multiple of the bar's own content, so a bar
+              // at ×2 stays "twice whatever these chords need" and is neither lost nor doubled by a
+              // transposition. Dropping it here would be invisible in the editor — the page would
+              // still draw — and would reset the chart's engraving the first time the musician
+              // transposed it.
+              size: bar.size,
               chords: <BeatChord>[
                 for (final BeatChord placed in bar.chords)
                   BeatChord(

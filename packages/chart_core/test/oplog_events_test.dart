@@ -545,10 +545,20 @@ void main() {
         ),
       ),
       'measure.insert': (
+        // THIS LITERAL WAS UPDATED BY THE CHANGE THAT ADDED `Bar.size`, AND HERE IS WHAT IT SAID
+        // BEFORE, so a reader can see what moved rather than trusting that nothing did. The bar
+        // object used to begin:
+        //   '"bar":{"timeSignature":{"numerator":3,"denominator":4},'
+        //   '"chords":[{"chord":{...
+        // and it now carries the size between the two, because a `measure.*` event carries a WHOLE
+        // bar for its inverse's sake and a bar restored without the width the musician set would be
+        // a silently different bar. `1.0` is the natural size: the bar in this case was never
+        // resized, and a factor of 1 is the one every bar had before the property existed.
         '{"v":1,"docId":"doc-1","seq":7,"anchor":{"sectionId":"s1","bar":1,'
             '"beat":null,"step":0},'
             '"type":"measure.insert","payload":{"sectionId":"s1","index":1,'
             '"bar":{"timeSignature":{"numerator":3,"denominator":4},'
+            '"size":1.0,'
             '"chords":[{"chord":{"root":{"semitones":0,"preference":"automatic"},'
             '"quality":"","bass":null,"alternate":null},"beat":0,"step":0,'
             '"size":"normal"}],'

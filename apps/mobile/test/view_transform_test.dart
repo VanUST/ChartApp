@@ -23,14 +23,21 @@
 //          the wrong value, and "the pen wrote" is satisfied by a stroke anchored to the wrong bar.
 //          The claims here are the anchor's address, the stored anchor-local point (which must be
 //          the SAME value at every zoom), and the page's own view fields.
+//
+//          AND ONE CLAIM ABOUT THE OWNER'S SCALE LOCK (A66), measured here because no other
+//          instrument could: a lock held across a pane change that ALTERS THE PAGE'S OWN `scale`.
+//          A66 §2 records that its own window engraved at 1:1, so its case proves "the lock survives
+//          a re-engraving" but not "the lock compensates a different scale", and A68 §8 records that
+//          the device run never took that measurement either. That case is the pair.
 // INPUTS: None. The chart is synthetic and the layout is deterministic, so this runs on any machine
-//         with no device and no font.
+//         with no device and no font. The scale-lock case pumps a long chart in a window narrow
+//         enough that hiding and showing the chrome change the page's own scale.
 // OUTPUTS: Pass/fail per behaviour, plus the numbers each one rests on — the view before and after
-//          each gesture, the cell the pen aimed at, the anchor it received, the stored point, and
-//          the same stored point on an unmagnified page — printed so the arithmetic can be read
-//          rather than only trusted.
+//          each gesture, the cell the pen aimed at, the anchor it received, the stored point, the
+//          same stored point on an unmagnified page, and the page's own scale on both sides of the
+//          pane change — printed so the arithmetic can be read rather than only trusted.
 // KEYWORDS: test, widget, two-finger, pan, pinch, view-transform, zoom, pen-at-zoom, hit-test,
-//           synthetic-pointers, d33, d34
+//           synthetic-pointers, d33, d34, view-lock, pane-change, a66
 import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
@@ -86,6 +93,41 @@ Song viewChart() => Song(
 IRealLibrary libraryOf(Song song) => IRealLibrary(
   playlistName: '',
   songs: <IRealSong>[IRealSong(index: 0, song: song)],
+);
+
+/// A chart long enough that FIT must engrave it BELOW 1:1 in the window the pane cases use.
+///
+/// [viewChart] is short enough to fit a tablet pane at full size, which is right for the gesture
+/// cases and useless for the lock: A66 §2 records that its own window engraved at 1:1, so a scale
+/// held there could not be told apart from a scale that never changed. This chart is the fixture
+/// that makes the page's own scale a number the lock has to compensate.
+Song longViewChart(int bars) => Song(
+  id: 'view-transform-long',
+  title: 'Long view transform',
+  composer: 'ChartApp',
+  style: 'Medium Swing',
+  key: Key.cMajor,
+  tempo: 120,
+  sections: <Section>[
+    Section(
+      id: 'L',
+      label: const SectionLabel.letter('L'),
+      bars: <Bar>[
+        for (int index = 0; index < bars; index++)
+          Bar(
+            chords: <BeatChord>[
+              BeatChord(
+                chord: Chord(
+                  root: ChordRoot(index % 12),
+                  quality: ChordQuality.majorSeventh,
+                ),
+                beat: 0,
+              ),
+            ],
+          ),
+      ],
+    ),
+  ],
 );
 
 /// Pumps the viewer with [song] loaded through an injected loader.
@@ -981,6 +1023,125 @@ void main() {
       stdout.writeln(
         'view.test.lock released ${viewOf(released)} '
         'drawn_scale=${released.drawnScale.toStringAsFixed(4)}',
+      );
+    },
+  );
+
+  // PURPOSE: Measure the HALF OF THE LOCK THE DEVICE COULD NOT PROVE. A66 §2 says it plainly about
+  //          its own case: in a 900x1000 window FIT already engraves at 1:1, so the case proves "the
+  //          lock survives a re-engraving" but NOT "the lock compensates a DIFFERENT scale" — the
+  //          second half was left to the tablet, and A68 §8 records that the tablet run never took
+  //          that measurement either ("компенсация масштаба при смене панели на устройстве не
+  //          предъявлена"). So the pair — a lock held across a pane change that ALTERS the page's own
+  //          `scale` — had not been shown by any instrument. This case shows it headlessly.
+  // INPUTS: A chart long enough to force FIT below 1:1, pumped in a window small enough that hiding
+  //         the chrome and showing it again change the pane measurably.
+  // OUTPUTS: `view.test.lock-pane` lines with the page's own scale, the derived zoom and the drawn
+  //          scale on both sides of the pane change, and pass/fail on: the fixture forces a scale
+  //          below 1, the pane change really moves that scale, the drawn scale is unchanged, the zoom
+  //          is the ratio the engraving implies, and releasing changes nothing.
+  // KEYWORDS: test, view-lock, pane-change, re-engraving, derived-zoom, compensation, a66
+  testWidgets(
+    'a lock holds the drawn scale across a pane change that re-engraves the page',
+    (WidgetTester tester) async {
+      // The chrome is hidden FIRST so that showing it again SHRINKS the pane — and the window is wide
+      // enough that the pane stays above `sceneBarTabletWidth` either way, so the page mode stays FIT
+      // and what the pane change moves is the page's own `scale` rather than the mode. (A pane that
+      // drops below that width re-engraves in PAGES at 1:1, which grows the scale and lands on the
+      // clamp instead: that is the other, already-measured direction.)
+      //
+      // THE DIRECTION MATTERS. `PageLayout.withView` refuses a zoom below 1, so a pane that GROWS can
+      // only make the music bigger and the lock reports itself clamped (A66 §1 says so and names the
+      // log line). The shrinking direction is where the lock has room to compensate, and that is the
+      // measurement A66 §2 and A68 §8 both record as missing.
+      await pumpViewer(tester, longViewChart(72), size: const Size(1000, 1000));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('viewer-chrome-toggle')),
+      );
+      await tester.pumpAndSettle();
+      final PageLayout wide = chartPainter(tester).page;
+      stdout.writeln(
+        'view.test.lock-pane chrome=hidden scale=${wide.scale.toStringAsFixed(6)} '
+        '${viewOf(wide)}',
+      );
+
+      await tester.tap(find.byKey(const ValueKey<String>('viewer-view-lock')));
+      await tester.pumpAndSettle();
+      final PageLayout locked = chartPainter(tester).page;
+      expect(
+        locked.drawnScale,
+        wide.drawnScale,
+        reason: 'locking is not a change of magnification in either direction',
+      );
+
+      // --- THE PANE CHANGE: SHOWING THE CHROME SHRINKS THE PANE AND RE-ENGRAVES SMALLER ---------
+      await tester.tap(
+        find.byKey(const ValueKey<String>('viewer-chrome-toggle')),
+      );
+      await tester.pumpAndSettle();
+      final PageLayout narrow = chartPainter(tester).page;
+      stdout.writeln(
+        'view.test.lock-pane chrome=shown scale=${narrow.scale.toStringAsFixed(6)} '
+        '${viewOf(narrow)} '
+        'scale_from=${wide.scale.toStringAsFixed(6)} '
+        'locked_drawn_scale=${locked.drawnScale.toStringAsFixed(6)} '
+        'unity_divided_by_scale=${(1 / narrow.scale).toStringAsFixed(6)}',
+      );
+      expect(
+        narrow.scale,
+        lessThan(wide.scale),
+        reason:
+            'the pane change must really alter the page’s own scale — that is the pair this case '
+            'exists for, and without it the case is the one A66 already had',
+      );
+      expect(
+        narrow.drawnScale,
+        closeTo(locked.drawnScale, 1e-6),
+        reason:
+            'THE LOCK HOLDS THE DRAWN SCALE: a re-engraving at a smaller scale must be compensated '
+            'by a larger zoom, or the music changes size under the musician’s hand the moment a bar '
+            'of interface appears',
+      );
+      expect(
+        narrow.zoom,
+        closeTo(locked.drawnScale / narrow.scale, 1e-6),
+        reason:
+            'the zoom is DERIVED from the engraving while the lock is on, so there is no second '
+            'place a size could come from',
+      );
+      expect(
+        narrow.zoom,
+        greaterThan(1),
+        reason:
+            'compensating a smaller engraving is the one thing that needs a zoom above the identity, '
+            'and a compensation that never left 1 did not compensate anything',
+      );
+
+      // --- AND RELEASING HANDS BACK THE ZOOM THAT WAS DRAWN -------------------------------------
+      //
+      // WHAT IS ASSERTED HERE IS THE MECHANISM A66 PROMISES, NOT THE DRAWN SCALE, and the difference
+      // is measured rather than assumed. The sentence that says the scale is fixed occupies a line of
+      // the status bar, and when the lock is released that line goes: the pane is 739x622 while the
+      // lock is on and 739x638 immediately after, so the page is re-engraved from a TALLER pane — a
+      // pane change like any other, which after the release is the chart's to follow. The drawn scale
+      // therefore moves by the ratio of those two panes (printed below, 2.5 per cent in this run),
+      // and asserting it unchanged would be asserting that a pane change does nothing. What MUST hold
+      // is that the zoom handed back is the one that was on the glass: a release that restored a
+      // stored zoom would jump the chart by a number the musician never saw.
+      await tester.tap(find.byKey(const ValueKey<String>('viewer-view-lock')));
+      await tester.pumpAndSettle();
+      final PageLayout released = chartPainter(tester).page;
+      stdout.writeln(
+        'view.test.lock-pane chrome=shown released ${viewOf(released)} '
+        'drawn_scale=${released.drawnScale.toStringAsFixed(6)} '
+        'zoom_while_locked=${narrow.zoom.toStringAsFixed(6)}',
+      );
+      expect(
+        released.zoom,
+        closeTo(narrow.zoom, 1e-6),
+        reason:
+            'releasing the lock stores the zoom that was on the glass, so the chart does not jump '
+            'by a stored number nobody saw',
       );
     },
   );
