@@ -306,9 +306,33 @@ void main() {
           fittedPlacement.origin,
         );
 
-        // In engraved coordinates the two pages place the bar in different places — that is what a
-        // different scale means — so the engraved points differ.
-        expect(fittedPoint, isNot(plainPoint));
+        // THE TWO PAGES ENGRAVE THE BAR AT THE SAME POINT, AND THAT IS A FACT ABOUT THE LAYOUT
+        // RATHER THAN A FAILURE OF THE CASE. THE OLD ASSERTION, QUOTED:
+        //   expect(fittedPoint, isNot(plainPoint));
+        // with the reason "In engraved coordinates the two pages place the bar in different places —
+        // that is what a different scale means — so the engraved points differ." That was true while
+        // a bar's width was its METRE times a cell: the fitted page is engraved at a larger virtual
+        // size, so its content width divided into more cells and the same bar landed somewhere else.
+        // A bar's geometry is absolute now — its width follows its content, its left edge is the page
+        // margin plus the bars before it — so engraving on a larger virtual page moves no bar at all
+        // until the pagination itself changes, and this fixture's bar 4 falls on the first system of
+        // both pages at the same engraved point.
+        //
+        // WHAT THE FIT REALLY CHANGES IS THE SCALE THE POINT IS DRAWN AT, and the claim this case is
+        // named for survives either way: the stored offset is a place in the MUSIC, so it means the
+        // same place in the bar on both pages, which is what the four expectations below say.
+        expect(
+          fittedPoint,
+          plainPoint,
+          reason:
+              'bar geometry is absolute, so a fitted page draws the same bar at the same engraved '
+              'point and shrinks it — the ink describes a place in the music, not a place on glass',
+        );
+        expect(
+          fitted.scale,
+          lessThan(1),
+          reason: 'the fitted page is the smaller drawing, or there is nothing to compare',
+        );
         // On their own surfaces they agree to the scale, because the bar moved with the music.
         stdout.writeln(
           'ink.fit_proof scale=${fitted.scale.toStringAsFixed(4)} '

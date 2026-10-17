@@ -84,7 +84,7 @@ void main() {
   });
 
   group('ChordMark addressing', () {
-    test('two chords packed onto one beat differ by their step', () {
+    test('two chords at one place in a bar are two marks, told apart by their x', () {
       final ChordMark first = ChordMark(
         place: placeAt(0),
         chord: Chord(root: ChordRoot(2)),
@@ -93,18 +93,38 @@ void main() {
         place: placeAt(0, 1),
         chord: Chord(root: ChordRoot(2)),
       );
-      // Same chord, same beat, different place in the bar.
+      // Same chord, same bar, a sub-slot apart in the bar.
+      //
+      // THE OLD ASSERTIONS, QUOTED: expect(first.pseudoBeat, second.pseudoBeat);
+      // expect(first == second, isFalse); — two chords "packed onto one beat differ by their step",
+      // with the shared BEAT asserted and the difference carried by the step that equality then saw.
+      // A chord has no beat and no step: its place is one coordinate, so the shared part is the
+      // anchor — the same bar of the same section — and the difference is the x itself. Asserting
+      // `expect(first.offsetX, second.offsetX)` here, as the migration first left it, would have said
+      // two marks at two places have one x, which is the opposite of the claim.
       expect(first.chord, second.chord);
-      expect(first.offsetX, second.offsetX);
+      expect(first.place.anchor, second.place.anchor);
+      expect(first.offsetX, isNot(second.offsetX));
       expect(first == second, isFalse);
     });
 
-    test('the default step is zero and the default size is normal', () {
+    test('a mark keeps the place it was built with, and the default size is normal', () {
       final ChordMark chord = ChordMark(
         place: placeAt(2),
         chord: Chord(root: ChordRoot(0)),
       );
-      expect(chord.offsetX, fixtureX(0, 0));
+      // THE OLD ASSERTIONS, QUOTED: expect(chord.pseudoStep, 0); — "the default step is zero", the
+      // sub-beat slot a mark got when the caller named none. There is no step to default, so the
+      // claim that survives is that a mark stores the place it was constructed with and invents
+      // nothing: the fixture's slot 2 is 8 + 2×18 = 44, and the mark says 44. (The migrated
+      // assertion here compared against `fixtureX(0, 0)` = 8 while the mark was built at slot 2,
+      // which could only ever have been a copy of the wrong number.)
+      expect(chord.offsetX, fixtureX(2));
+      expect(
+        chord.place.offsetY,
+        0,
+        reason: 'the vertical offset defaults to the chord band line',
+      );
       expect(chord.size, ChordSize.normal);
     });
 

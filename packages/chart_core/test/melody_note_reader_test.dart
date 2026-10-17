@@ -16,6 +16,7 @@
 // INPUTS: None.
 // OUTPUTS: Pass/fail per expectation.
 // KEYWORDS: test, note-reader, pitch, staff-step, spacing, notehead, cell-width, writer, undoable
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:chart_core/chart_core.dart';
@@ -37,41 +38,49 @@ const double _pageHeight = 1318;
 LayoutStyle _style({double? minCellWidth}) =>
     LayoutStyle(minCellWidth: minCellWidth ?? const LayoutStyle().minCellWidth);
 
-// PURPOSE: Build a one-section song of one bar holding [pitches] on its first beats, so a case can
-//          state a melody as written pitches and let the real engraver place it.
-// INPUTS: pitches — one (octave, letter index) pair per beat, letter index as C=0 … B=6.
+// PURPOSE: Build a one-section song of one bar holding [pitches] at a stated spacing, so a case can
+//          state a melody as written pitches and let the real engraver place it — and so that a case
+//          about SPACING can move the notes rather than a style constant.
+// INPUTS: pitches — one (octave, letter index) pair per note, letter index as C=0 … B=6. spacing —
+//         the distance between two neighbouring notes' places, in bar-local pixels; the fixture's
+//         own 18 unless a case is asking what happens when notes stand closer than a notehead.
 // OUTPUTS: The song, with a declared pitched treble staff so the layout draws a staff at all (D29).
-// KEYWORDS: fixture, melody, engraver, declared-staff
-Song _songOf(List<(int, int)> pitches) => Song(
-  id: 'note-reader-test',
-  title: '',
-  composer: '',
-  style: '',
-  key: Key.cMajor,
-  tempo: 120,
-  staffSet: const StaffSet(pitched: StaffSpec.pitched()),
-  sections: <Section>[
-    Section(
-      id: 'sec-1',
-      label: const SectionLabel.letter('A'),
-      bars: <Bar>[
-        Bar(
-          melody: <NoteMark>[
-            for (int beat = 0; beat < pitches.length; beat++)
-              NoteMark(
-                place: placeAt(beat),
-                pitch: PitchedNote(
-                  note: WrittenNote(NoteLetter.values[pitches[beat].$2], 0),
-                  octave: pitches[beat].$1,
-                ),
-                value: const NoteValue.plain(NoteBase.quarter),
-              ),
+// KEYWORDS: fixture, melody, engraver, declared-staff, spacing-under-test
+Song _songOf(List<(int, int)> pitches, {double spacing = fixtureSlotPitch}) =>
+    Song(
+      id: 'note-reader-test',
+      title: '',
+      composer: '',
+      style: '',
+      key: Key.cMajor,
+      tempo: 120,
+      staffSet: const StaffSet(pitched: StaffSpec.pitched()),
+      sections: <Section>[
+        Section(
+          id: 'sec-1',
+          label: const SectionLabel.letter('A'),
+          bars: <Bar>[
+            Bar(
+              melody: <NoteMark>[
+                for (int beat = 0; beat < pitches.length; beat++)
+                  NoteMark(
+                    place: AnchoredPlace(
+                      anchor: fixtureBar,
+                      offsetX: fixtureSlotOrigin + beat * spacing,
+                      offsetY: 0,
+                    ),
+                    pitch: PitchedNote(
+                      note: WrittenNote(NoteLetter.values[pitches[beat].$2], 0),
+                      octave: pitches[beat].$1,
+                    ),
+                    value: const NoteValue.plain(NoteBase.quarter),
+                  ),
+              ],
+            ),
           ],
         ),
       ],
-    ),
-  ],
-);
+    );
 
 // PURPOSE: The same song with its melody STRIPPED, which is the document a recognition run writes
 //          into: the ink exists and the structure does not. The engraving that produced the ink
@@ -188,15 +197,18 @@ List<InkStroke> _inkOfBar(PlacedBar bar, {double nib = 2.2}) {
 // PURPOSE: Lay a fixture out, read its one bar, and hand back the reading — the whole path from a
 //          modelled melody through the real engraver, its glyphs, ink, the page's frames and the
 //          reader.
-// INPUTS: pitches — the melody as written; style — the layout style, for the spacing cases.
+// INPUTS: pitches — the melody as written; style — the layout style; spacing — the distance between
+//         two neighbouring notes' places, for the case that asks what the reader does when notes
+//         stand closer together than a notehead is wide.
 // OUTPUTS: The reading and the page, so a case can ask about both a head and the geometry it came
 //          from.
-// KEYWORDS: end-to-end, engrave-then-read, fixture
+// KEYWORDS: end-to-end, engrave-then-read, fixture, spacing-under-test
 ({MelodyNoteReading reading, PageLayout page}) _engraveAndRead(
   List<(int, int)> pitches, {
   LayoutStyle? style,
+  double spacing = fixtureSlotPitch,
 }) {
-  final Song song = _songOf(pitches);
+  final Song song = _songOf(pitches, spacing: spacing);
   final PageLayout page = LayoutEngine(style: style ?? _style())
       .layout(song, pageWidth: _pageWidth, pageHeight: _pageHeight)
       .first;
@@ -380,9 +392,31 @@ void main() {
       // "both in beat 0, the first and the second of it". A head's address is now its own x, so the
       // statement is made in the coordinates the ink was drawn at: the ring at x=12 and the ring at
       // x=30 stand 18 apart, the left one first.
+      //
+      // WHY A CLOSE-TO AND NOT THE EXACT DOUBLE ANY MORE. The old form of this assertion compared
+      // x values the LAYOUT had computed, so equality was exact. The reader now MEASURES a centre
+      // from stamped ink, and the stamp is a grid of a twelfth of a staff space (13 / 12 = 1.083
+      // pixels), so what comes back is the answer to a measurement: 11.954 and 30.094 were reported
+      // for ink drawn at 12 and 30. One grid cell is therefore the honest tolerance — it is the
+      // resolution the reader itself documents — and the ORDER stays exact, which is the part a
+      // musician's melody depends on.
+      const double gridCell = 13 / 12;
       expect(
-        <double>[for (final MelodyNoteHead head in reading.heads) head.offsetX],
-        <double>[12, 30],
+        <double>[
+          for (final MelodyNoteHead head in reading.heads) head.offsetX,
+        ][0],
+        closeTo(12, gridCell),
+      );
+      expect(
+        <double>[
+          for (final MelodyNoteHead head in reading.heads) head.offsetX,
+        ][1],
+        closeTo(30, gridCell),
+      );
+      expect(
+        reading.heads.first.offsetX,
+        lessThan(reading.heads.last.offsetX),
+        reason: 'the head drawn on the left comes back first, whatever the measurement noise',
       );
       expect(
         <String>[
@@ -395,21 +429,50 @@ void main() {
   });
   group('the spacing the read depends on', () {
     test('the render that used to merge four notes into one blob', () {
-      // AT 14 — the width `LayoutStyle.minCellWidth` used to default to — a notehead is WIDER than
-      // the cell, so four notes on adjacent beats are drawn overlapping and the reader cannot
-      // separate them. This is the measured defect the default was raised for, and it is asserted
-      // here so that lowering the default again fails the suite rather than a musician's page.
-      final ({MelodyNoteReading reading, PageLayout page}) result =
+      // THE SPACING IS NOW THE MUSICIAN'S, NOT THE LAYOUT'S, so the fixture moves the NOTES rather
+      // than a style constant. Two notes stand closer together than a notehead is wide (15.6 at the
+      // default 13-point staff) when they are 14 apart: they are drawn overlapping, they are one
+      // component of ink, and fewer than four come back. At the tree's 18 they are clear of each
+      // other by 2.4 pixels and all four are read.
+      //
+      // THE OLD ASSERTION, QUOTED: it engraved the four notes at the fixture's own 18-pixel places
+      // and passed `style: _style(minCellWidth: 14)` to narrow the CELL, with the reason "AT 14 —
+      // the width `LayoutStyle.minCellWidth` used to default to — a notehead is WIDER than the cell,
+      // so four notes on adjacent beats are drawn overlapping". There are no cells: `minCellWidth`
+      // is a style constant that no placement reads any more, and passing it moved nothing, which is
+      // exactly why this case passed four notes at a 14 that no longer reached the page. The
+      // property the old assertion protected — the reader needs one head width of clearance — is
+      // asserted below on both sides of the number instead of on one.
+      final ({MelodyNoteReading reading, PageLayout page}) narrow =
           _engraveAndRead(<(int, int)>[
             (4, 0),
             (4, 1),
             (4, 2),
             (4, 3),
-          ], style: _style(minCellWidth: 14));
+          ], spacing: 14);
+      stdout.writeln(
+        'reader.spacing at=14 heads=${narrow.reading.heads.length} '
+        'refusals=${narrow.reading.refusals.length}',
+      );
       expect(
-        result.reading.heads.length,
+        narrow.reading.heads.length,
         lessThan(4),
         reason: 'at 14 the four heads overlap and fewer than four can be read',
+      );
+      // AND AT THE TREE'S OWN 18 ALL FOUR ARE READ, which is the other half: a reader that failed on
+      // both spacings would pass the line above while being broken.
+      final ({MelodyNoteReading reading, PageLayout page}) wide =
+          _engraveAndRead(<(int, int)>[(4, 0), (4, 1), (4, 2), (4, 3)]);
+      stdout.writeln(
+        'reader.spacing at=18 heads=${wide.reading.heads.length} '
+        'refusals=${wide.reading.refusals.length}',
+      );
+      expect(
+        wide.reading.heads,
+        hasLength(4),
+        reason:
+            'at 18 two neighbouring noteheads are clear of each other by 2.4 pixels, so all four '
+            'are read: this is why minCellWidth is 18 and not 14',
       );
     });
 
@@ -556,14 +619,40 @@ void main() {
       // it takes the value the note palette starts from.
       expect(write.value, recognisedNoteValue);
       expect(write.value.base, NoteBase.quarter);
+      // WHERE THE NOTES LAND, AND IN WHAT ORDER. THE OLD ASSERTION, QUOTED:
+      //   expect(<String>[for (final NoteMark note in ...) '${note.offsetX.toStringAsFixed(1)}:
+      //       ${note.pitch} ${note.value.base.name}'], <String>['0.0:E4 quarter', '1.0:F4 quarter']);
+      // — the printed field was the note's beat.step, and the two notes were "beat 0, the first and
+      // the second of it". The place is now the number the reader MEASURED, so the assertion is made
+      // on the two facts that survive: the pitches and their order (E4 then F4, left to right), and
+      // the places being the ones the ink was drawn at, within one cell of the reader's own
+      // quantisation. The drawn places are the fixture's 8 and 26; the reader reported 8.6 and 26.4,
+      // which is the same measurement noise the case above names.
+      const double gridCell = 13 / 12;
+      final List<NoteMark> melody =
+          session.song.sections.first.bars.first.melody;
       expect(
         <String>[
-          for (final NoteMark note
-              in session.song.sections.first.bars.first.melody)
-            '${note.offsetX.toStringAsFixed(1)}:${note.pitch} ${note.value.base.name}',
+          for (final NoteMark note in melody)
+            '${note.pitch} ${note.value.base.name}',
         ],
-        <String>['0.0:E4 quarter', '1.0:F4 quarter'],
+        <String>['E4 quarter', 'F4 quarter'],
+        reason: 'each recognised head becomes one note, of the placeholder value, in reading order',
       );
+      for (int index = 0; index < melody.length; index++) {
+        expect(
+          melody[index].offsetX,
+          reading.heads[index].offsetX,
+          reason:
+              'the note is written at the very double the reading measured, so drawing it back '
+              'puts the notehead on the ink it came from',
+        );
+        expect(
+          melody[index].offsetX,
+          closeTo(fixtureSlotOrigin + index * fixtureSlotPitch, gridCell),
+          reason: 'and that place is where the ink was drawn, to within the reader\'s own grid',
+        );
+      }
       // Every added note is one operation of the log, so the ordinary undo takes it back.
       expect(session.undoDepth, 2);
       expect(session.undo(), isTrue);
@@ -597,8 +686,18 @@ void main() {
     });
 
     test('a note the musician already placed at an address is left alone', () {
-      // A palette note on beat 0 must not be overwritten by ink the reader also reads there — the
+      // A NOTE ALREADY IN THE BAR MUST NOT BE OVERWRITTEN BY INK THE READER ALSO READS THERE — the
       // correction he makes by hand has to survive the next recognition run.
+      //
+      // THE ADDRESS IS THE ONE THE READING NAMES, AND THAT IS EXACT ON PURPOSE. THE OLD FIXTURE,
+      // QUOTED: `fixtureInsertNote(..., slot: 0, pitch: A3, value: half)` followed by
+      // `firstWhere((note) => note.offsetX == fixtureX(0))`, on the reasoning that a "palette note on
+      // beat 0" and the ink read at that beat were the same address. They are the same address only
+      // to within the reader's measurement: the reader reports 8.6 for ink drawn at 8.0, and
+      // `MelodyNoteWriter._noteAt` compares x for EQUALITY — deliberately, because the same ink read
+      // twice must be the same double or a musician's kept note would be added again. So the placed
+      // note is written where the reading says the ink is, which is the address the writer will
+      // actually be asked about.
       final Song song = _songOf(<(int, int)>[(4, 2), (4, 3)]);
       final PageLayout page = LayoutEngine(style: _style())
           .layout(song, pageWidth: _pageWidth, pageHeight: _pageHeight)
@@ -613,11 +712,10 @@ void main() {
       final EditSession session = EditSession(
         document: DocumentState(song: _blankSong()),
       );
-      fixtureInsertNote(
-        session,
+      session.insertNote(
         sectionId: 'sec-1',
         barIndex: 0,
-        slot: 0,
+        offsetX: reading.heads.first.offsetX,
         pitch: const PitchedNote(note: WrittenNote(NoteLetter.a, 0), octave: 3),
         value: const NoteValue.plain(NoteBase.half),
       );
@@ -627,8 +725,11 @@ void main() {
       );
       expect(write.written, hasLength(1));
       expect(write.written.single.pitch.toString(), 'F4');
+      expect(write.alreadyPresent, hasLength(1));
       final NoteMark first = session.song.sections.first.bars.first.melody
-          .firstWhere((NoteMark note) => note.offsetX == fixtureX(0));
+          .firstWhere(
+            (NoteMark note) => note.offsetX == reading.heads.first.offsetX,
+          );
       expect(first.pitch.toString(), 'A3');
       expect(first.value.base, NoteBase.half);
     });

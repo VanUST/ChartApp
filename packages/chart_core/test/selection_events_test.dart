@@ -519,115 +519,157 @@ void main() {
   });
 
   group('a window of beats inside one bar', () {
+    test('copies the cells of the window, pastes them into another bar, and one '
+        'undo puts the target bar back', () {
+      final EditSession session = EditSession(
+        document: _document(_chart(bars: 2)),
+      );
+      for (int beat = 0; beat < 4; beat++) {
+        fixtureChord(
+          session,
+          sectionId: _section,
+          barIndex: 0,
+          slot: beat,
+          chord: Chord(root: ChordRoot(beat)),
+        );
+      }
+      // A WINDOW IS A STRETCH OF THE BAR BETWEEN TWO X VALUES, so its width is a DISTANCE and not
+      // a count of beats. THE OLD ASSERTION, QUOTED: expect(window.windowWidth, 2); — two beats,
+      // because a window used to be a run of cells and its width was how many of them it held.
+      // What a paste needs from the width is a length in pixels, because a paste translates a clip
+      // by the distance between two windows' left ends. This window runs from x=26 to x=45: it is
+      // 19 wide, and it holds the chords written at 26 and 44 and nothing else.
+      final ChartSelection window = ChartSelection.window(
+        sectionId: _section,
+        barIndex: 0,
+        firstX: 26,
+        lastX: 45,
+      );
+      expect(window.barCount, 1);
+      expect(window.windowWidth, 19);
+      final ChartClip clip = session.copySelection(window)!;
+      expect(clip.depth, SelectionDepth.window);
+
+      final Bar targetBefore = session.document.song.sections.first.bars[1];
+      final ClipPasteOutcome outcome = session.pasteClip(
+        at: ChartSelection.window(
+          sectionId: _section,
+          barIndex: 1,
+          firstX: 70,
+          lastX: 89,
+        ),
+        clip: clip,
+      );
+      expect(outcome, ClipPasteOutcome.pasted);
+      final Bar target = session.document.song.sections.first.bars[1];
+      // THE WINDOW LANDED WHERE IT WAS PUT. Two old expectations are quoted here because the
+      // migration had already rewritten one of them. The original read the two chords' beats as
+      // `<int>[2, 3]` — the columns the metre gave them in the target bar. The migrated form read
+      // the two places as `<double>[fixtureX(2), fixtureX(3)]`, which was the right unit and the
+      // wrong numbers: the source window it named held no chord at all, so it pinned a paste of
+      // nothing. A paste is a TRANSLATION, so what is asserted is the two places it produced: the
+      // source window's chords (26 and 44) moved by the 44 pixels between the two windows' left
+      // ends, which is 70 and 88.
+      expect(
+        target.chords.map((ChordMark placed) => placed.offsetX),
+        <double>[70, 88],
+        reason:
+            'each chord of the copied window moved by the distance between the windows, which is '
+            'the whole of what a window paste is',
+      );
+      expect(
+        target.chords.map((ChordMark placed) => placed.chord.root.pitchClass),
+        <int>[1, 2],
+        reason: 'the chords of the source window are the ones at x=26 and x=44, roots 1 and 2',
+      );
+      expect(
+        session.document.song.sections.first.bars[0].chords.length,
+        4,
+        reason: 'the source bar was copied, not moved',
+      );
+      expect(session.undo(), isTrue);
+      expect(
+        session.document.song.sections.first.bars[1],
+        targetBefore,
+        reason: 'ONE undo puts the whole target bar back as it was',
+      );
+    });
+
     test(
-      'copies the cells of the window, pastes them into another bar, and one '
-      'undo puts the target bar back',
+      'a window past the old metre is pasted and widens the bar, not refused',
       () {
+        // THE OLD ASSERTION, QUOTED, and its removal is the point of this case:
+        //   expect(session.pasteClip(...), ClipPasteOutcome.windowDoesNotFit,
+        //       reason: 'a two-beat window at beat 4 of a 4/4 bar does not fit, and spilling past the
+        //                barline would be the application composing');
+        // — with `expect(session.undoDepth, undoBefore)` and the target bar unchanged after it. A
+        // window that ran past the last beat of the metre was refused, because the metre decided how
+        // much room a bar had and a paste could not be allowed to exceed it.
+        //
+        // THERE IS NO ROOM TO EXCEED. A bar's width follows its content, so a mark past where the
+        // fourth beat used to end makes the bar wider instead of spilling off it, and a paste is a
+        // translation whose destination is a coordinate like any other. What has to remain true — and
+        // is asserted here instead of the refusal — is that the paste lands exactly where it was put,
+        // is ONE event, and loses nothing.
         final EditSession session = EditSession(
           document: _document(_chart(bars: 2)),
         );
-        for (int beat = 0; beat < 4; beat++) {
-          fixtureChord(
-            session,
-            sectionId: _section,
-            barIndex: 0,
-            slot: beat,
-            chord: Chord(root: ChordRoot(beat)),
-          );
-        }
-        final ChartSelection window = ChartSelection.window(
+        fixtureChord(
+          session,
           sectionId: _section,
           barIndex: 0,
-          firstX: 1,
-          lastX: 2,
+          slot: 3,
+          chord: const Chord(root: ChordRoot(0)),
         );
-        expect(window.barCount, 1);
-        expect(window.windowWidth, 2);
-        final ChartClip clip = session.copySelection(window)!;
-        expect(clip.depth, SelectionDepth.window);
-
-        final Bar targetBefore = session.document.song.sections.first.bars[1];
-        final ClipPasteOutcome outcome = session.pasteClip(
-          at: ChartSelection.window(
+        final int undoBefore = session.undoDepth;
+        final ChartClip clip = session.copySelection(
+          ChartSelection.window(
             sectionId: _section,
-            barIndex: 1,
-            firstX: 2,
-            lastX: 3,
+            barIndex: 0,
+            firstX: 62,
+            lastX: 63,
           ),
-          clip: clip,
-        );
-        expect(outcome, ClipPasteOutcome.pasted);
-        final Bar target = session.document.song.sections.first.bars[1];
-        // THE WINDOW LANDED WHERE IT WAS PUT. The old assertion read the two chords' beats as
-        // `<int>[2, 3]` — the columns the metre gave them in the target bar. A paste is a
-        // TRANSLATION now, so what is asserted is the two places it produced: the source window's
-        // own x values moved by the distance between the windows.
+        )!;
         expect(
-          target.chords.map((ChordMark placed) => placed.offsetX),
-          <double>[fixtureX(2), fixtureX(3)],
-          reason: 'the window landed at slot 2 of the target bar',
+          clip.bars.single.chords,
+          hasLength(1),
+          reason: 'the copied window holds the chord written at x=62, which is the old beat 4',
         );
         expect(
-          target.chords.first.chord.root.pitchClass,
-          1,
-          reason: 'the chord from beat 1 of the source is now on beat 2',
+          session.pasteClip(
+            at: ChartSelection.window(
+              sectionId: _section,
+              barIndex: 1,
+              firstX: 100,
+              lastX: 101,
+            ),
+            clip: clip,
+          ),
+          ClipPasteOutcome.pasted,
+          reason:
+              'a place further along the bar than the metre ever reached is a place like any other: '
+              'the bar widens to hold it rather than the application refusing the musician',
         );
         expect(
-          session.document.song.sections.first.bars[0].chords.length,
-          4,
-          reason: 'the source bar was copied, not moved',
+          session.undoDepth,
+          undoBefore + 1,
+          reason: 'a paste is one event, so one undo is enough to take it back',
+        );
+        expect(
+          session.document.song.sections.first.bars[1].chords.map(
+            (ChordMark placed) => placed.offsetX,
+          ),
+          <double>[100],
+          reason: 'the chord landed exactly where the target window began',
         );
         expect(session.undo(), isTrue);
         expect(
           session.document.song.sections.first.bars[1],
-          targetBefore,
-          reason: 'ONE undo puts the whole target bar back as it was',
+          _chart(bars: 2).sections.first.bars[1],
+          reason: 'and the undo left the target bar exactly as it was',
         );
       },
     );
-
-    test('a window that does not fit the target metre is refused, and nothing '
-        'is written', () {
-      final EditSession session = EditSession(
-        document: _document(_chart(bars: 2)),
-      );
-      fixtureChord(
-        session,
-        sectionId: _section,
-        barIndex: 0,
-        slot: 3,
-        chord: const Chord(root: ChordRoot(0)),
-      );
-      final int undoBefore = session.undoDepth;
-      final ChartClip clip = session.copySelection(
-        ChartSelection.window(
-          sectionId: _section,
-          barIndex: 0,
-          firstX: 2,
-          lastX: 3,
-        ),
-      )!;
-      expect(
-        session.pasteClip(
-          at: ChartSelection.window(
-            sectionId: _section,
-            barIndex: 1,
-            firstX: 3,
-            lastX: 3,
-          ),
-          clip: clip,
-        ),
-        ClipPasteOutcome.windowDoesNotFit,
-        reason:
-            'a two-beat window at beat 4 of a 4/4 bar does not fit, and '
-            'spilling past the barline would be the application composing',
-      );
-      expect(session.undoDepth, undoBefore);
-      expect(
-        session.document.song.sections.first.bars[1],
-        _chart(bars: 2).sections.first.bars[1],
-      );
-    });
 
     test('a window cannot be transposed, and says so instead of writing '
         'something', () {
@@ -793,7 +835,11 @@ void main() {
       expect(window.isWindow, isTrue);
       expect(window.firstX, 1);
       expect(window.lastX, 3);
-      expect(window.windowWidth, 3);
+      // A WINDOW'S WIDTH IS THE DISTANCE BETWEEN ITS ENDS. THE OLD ASSERTION, QUOTED:
+      // expect(window.windowWidth, 3); — three beats, because a window was a run of cells and the
+      // span from x=1 to x=3 covered three of them. The two ends are one pixel apart per pixel now:
+      // 3 − 1 = 2.
+      expect(window.windowWidth, 2);
 
       final ChartSelection flattened = ChartSelection.span(
         sectionId: 'A',

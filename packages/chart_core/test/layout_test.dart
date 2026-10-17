@@ -4,8 +4,8 @@
 //          regression instead of a font-version difference.
 // INPUTS: None.
 // OUTPUTS: Pass/fail per expectation.
-// KEYWORDS: test, layout, bar-width, cell-offset, system-building, pagination, hit-testing,
-//           hand-derived
+// KEYWORDS: test, layout, bar-width, bar-minimum-width, place-not-cell, system-building,
+//           pagination, hit-testing, hand-derived
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
@@ -46,50 +46,100 @@ void main() {
   const LayoutEngine engine = LayoutEngine();
 
   group('measureBar', () {
-    test('a single-character chord in 4/4 measures to 88', () {
-      // Cell 0: one 8-wide chord plus a 10 gap = 18. Cells 1..3 empty, floored at 18 each = 54.
-      // Total 72, plus 8 padding on each side = 88.
-      //
-      // THE EXPECTATION WAS 76 AND IS 88 BECAUSE THE CELL FLOOR ROSE FROM 14 TO 18. 14 was the
-      // old LayoutStyle.minCellWidth default, and it was narrower than a notehead (15.6), so two
-      // notes on adjacent beats were engraved overlapping. See LayoutStyle.minCellWidth for the
-      // measurement. The old assertion, quoted: expect(engine.measureBar(oneChordBar(0),
-      // Key.cMajor), 76); — with cells floored at 14 the same bar was 18 + 3×14 + 16 = 76.
-      expect(engine.measureBar(oneChordBar(0), Key.cMajor), 88);
-    });
+    test(
+      'a bar holding one short chord measures to the floor, not to its content',
+      () {
+        // THE BAR'S WIDTH FOLLOWS WHAT IS WRITTEN IN IT. This bar holds one single-character chord at
+        // the fixture's first slot: 8 (its own place) + 8 (one character at the 8-per-character
+        // advance) = 16, and 16 is less than the style's floor, so the floor is the answer.
+        //
+        // THE OLD ASSERTION, QUOTED: expect(engine.measureBar(oneChordBar(0), Key.cMajor), 88);
+        // It was four cells — one occupied at 18 and three empty at 18 — plus 16 of padding, because a
+        // bar's width used to be its METRE multiplied by a cell's width. The metre no longer divides
+        // the bar at all: owner's words, «Просто надпись» — the time signature is a label and nothing
+        // else. So an empty cell neither exists nor reserves anything, and the only reason a bar is as
+        // wide as it is is the room the musician needs. What the old 88 was really buying — room to
+        // write the bar's beats into — is now carried by one number, `LayoutStyle.barMinWidth`, and
+        // that number is where the question lives rather than a column count.
+        expect(
+          engine.measureBar(oneChordBar(0), Key.cMajor),
+          engine.style.barMinWidth,
+        );
+      },
+    );
 
-    test('a bar with no chords still reserves every cell', () {
-      // Four empty cells at 18 = 72, plus 16 padding = 88. Empty cells are not free: they are
-      // where a sustained chord is drawn, and collapsing them would move the chords that remain.
-      //
-      // WAS 72: expect(engine.measureBar(const Bar(), Key.cMajor), 72); at the old 14-pixel cell
-      // floor, which is now 18 because a notehead is 15.6 wide and a cell narrower than a notehead
-      // merges two adjacent-beat notes into one shape.
-      expect(engine.measureBar(const Bar(), Key.cMajor), 88);
-    });
+    test(
+      'a bar with no chords measures to the floor, which is its room to write',
+      () {
+        // THE PROPERTY THE OLD ASSERTION WAS PROTECTING IS NOT "THE BAR HAS FOUR CELLS", it is "a bar
+        // the musician has not written in yet still has room for him to write in". That is the fact
+        // this test now states, and it is the fact that decides `barMinWidth`: a floor too small to
+        // write into makes every new bar unwritable, whatever it does to the arithmetic.
+        //
+        // THE OLD ASSERTION, QUOTED: expect(engine.measureBar(const Bar(), Key.cMajor), 88);
+        // Four empty cells at 18 plus 16 of padding. An empty bar no longer reserves the metre's
+        // worth of columns; it reserves nothing, and the floor is what is left of that reservation.
+        expect(
+          engine.measureBar(const Bar(), Key.cMajor),
+          engine.style.barMinWidth,
+        );
+      },
+    );
 
-    test('a wider chord widens its own cell only', () {
-      // Dm7 renders as three characters = 24, plus a 10 gap = 34 for cell 0, plus 54 for the
-      // other three cells at the 18 floor, plus 16 padding = 104. (WAS 92, with 42 for the other
-      // three cells at the old 14 floor.)
-      final Bar bar = Bar(
-        chords: <ChordMark>[
-          ChordMark(
-            place: placeAt(0),
-            chord: Chord(
-              root: ChordRoot(2),
-              quality: ChordQuality.minorSeventh,
+    test(
+      'a wider chord makes the bar exactly as much wider as the chord is',
+      () {
+        // Two bars identical except for the CHORD SYMBOL, both written at the same place (fixture slot
+        // 4 = 8 + 4×18 = 80, comfortably past the floor so that the content decides both widths):
+        // "C" is one character = 8 wide and "Cmaj7" is five characters = 40 wide. Each bar is its
+        // chord's right edge — 80 + 8 = 88 and 80 + 40 = 120 — plus the bar's own trailing padding.
+        //
+        // THE OLD ASSERTION, QUOTED: expect(engine.measureBar(bar, Key.cMajor), 104);
+        // 104 was "Dm7 is three characters = 24, plus a 10 gap = 34 for cell 0, plus 54 for the other
+        // three cells at the 18 floor, plus 16 padding". Two thirds of that number was the three cells
+        // the bar no longer has, which is why the old assertion could not survive. The part that is
+        // about the CHORD — a wider symbol widens its own bar, and by its own width — is what this
+        // states, and it does so without needing the other cells to exist.
+        final Bar shortChord = Bar(
+          chords: <ChordMark>[
+            ChordMark(
+              place: placeAt(4),
+              chord: Chord(root: ChordRoot(0)),
             ),
-          ),
-        ],
-      );
-      expect(engine.measureBar(bar, Key.cMajor), 104);
-    });
+          ],
+        );
+        final Bar longChord = Bar(
+          chords: <ChordMark>[
+            ChordMark(
+              place: placeAt(4),
+              chord: Chord(
+                root: ChordRoot(0),
+                quality: ChordQuality.majorSeventh,
+              ),
+            ),
+          ],
+        );
+        expect(engine.measureBar(shortChord, Key.cMajor), fixtureX(4) + 8 + 8);
+        expect(engine.measureBar(longChord, Key.cMajor), fixtureX(4) + 40 + 8);
+        expect(
+          engine.measureBar(longChord, Key.cMajor) -
+              engine.measureBar(shortChord, Key.cMajor),
+          32,
+          reason: 'four more characters at 8 per character is four times eight',
+        );
+      },
+    );
 
-    test('a three-four bar has three cells, not four', () {
-      // 18 + 18 + 18 = 54, plus 16 padding = 70. (WAS 62: 18 + 14 + 14 = 46, plus 16, at the old
-      // 14-pixel cell floor.)
-      final Bar bar = Bar(
+    test('the metre does not decide the width: a 3/4 bar and a 4/4 bar measure alike', () {
+      // THE PROPERTY: two bars holding the same music are the same width whatever metre they are
+      // written in, because the metre is a label and not a division.
+      //
+      // THE OLD ASSERTION, QUOTED: expect(engine.measureBar(bar, Key.cMajor), 70);
+      // — "a three-four bar has three cells, not four": 18 + 18 + 18 plus 16 of padding. The
+      // difference between 70 and the 4/4 bar's 88 WAS the grid, and it is exactly what this test
+      // now asserts is gone. A chart in 3/4 therefore paginates by the width of its MUSIC rather
+      // than by the number of beats its metre declares.
+      final Bar threeFour = Bar(
         timeSignature: TimeSignature.threeFour,
         chords: <ChordMark>[
           ChordMark(
@@ -98,11 +148,29 @@ void main() {
           ),
         ],
       );
-      expect(engine.measureBar(bar, Key.cMajor), 70);
+      final Bar fourFour = Bar(
+        chords: <ChordMark>[
+          ChordMark(
+            place: placeAt(0),
+            chord: Chord(root: ChordRoot(0)),
+          ),
+        ],
+      );
+      expect(
+        engine.measureBar(threeFour, Key.cMajor),
+        engine.measureBar(fourFour, Key.cMajor),
+      );
     });
 
     test('the minimum bar width is respected', () {
-      // A 2/4 bar is only two cells: 18 + 14 = 32, plus 16 = 48, which is below the 56 minimum.
+      // A 2/4 bar holding one short chord: 8 + 8 = 16 of content, which is below the floor, so the
+      // bar is the floor. The floor is what stops a bar from collapsing to the width of one symbol,
+      // and the reason it exists is that a musician has to be able to hit it and write in it.
+      //
+      // (The derivation this test used to carry was "two cells: 18 + 14 = 32, plus 16 = 48, below
+      // the 56 minimum". There are no cells, and 48 is not a number this arithmetic can produce any
+      // more — which is why the assertion is written against the floor itself rather than against a
+      // sum that used to land on the same value.)
       final Bar bar = Bar(
         timeSignature: TimeSignature.twoFour,
         chords: <ChordMark>[
@@ -112,61 +180,77 @@ void main() {
           ),
         ],
       );
-      expect(engine.measureBar(bar, Key.cMajor), 56);
+      expect(engine.measureBar(bar, Key.cMajor), engine.style.barMinWidth);
     });
 
-    test(
-      'a chord beyond the meter widens the bar instead of being dropped',
-      () {
-        // Beat 7 does not exist in 4/4. This used to be skipped, which engraved a bar that was
-        // silently missing a chord the musician had written: the content vanished and nothing on
-        // the page said so. The bar now widens to include it, so a genuine overflow is visible.
-        final Bar inMeter = Bar(
-          chords: <ChordMark>[
-            ChordMark(
-              place: placeAt(0),
-              chord: Chord(root: ChordRoot(0)),
-            ),
-          ],
-        );
-        final Bar beyond = Bar(
-          chords: <ChordMark>[
-            ChordMark(
-              place: placeAt(0),
-              chord: Chord(root: ChordRoot(0)),
-            ),
-            ChordMark(
-              place: placeAt(7),
-              chord: Chord(root: ChordRoot(7)),
-            ),
-          ],
-        );
-        // In the meter: cell 0 holds an 8-wide chord plus a 10 gap, three empty cells at the 18
-        // minimum, and 16 of bar padding: 18 + 54 + 16 = 88. (WAS 76 with the old 14 floor.)
-        expect(engine.measureBar(inMeter, Key.cMajor), 88);
-        // Widened to eight cells: cell 0 = 18, six empty cells at 18 = 108, cell 7 holds the second
-        // one-character chord = 18, plus 16 padding: 18 + 108 + 18 + 16 = 160. (WAS 136.)
-        expect(engine.measureBar(beyond, Key.cMajor), 160);
-      },
-    );
-
-    test('a chord at a negative beat is skipped, because there is no cell to widen into', () {
-      // The widening rule stops at the left edge of the bar: a beat before the printed cell 0
-      // cannot be reached by adding cells to the right.
-      final Bar bar = Bar(
+    test('a chord written past the old meter widens the bar instead of being dropped', () {
+      // A chord on what used to be beat 7 — a beat a 4/4 bar does not have. The bar widens to
+      // include it, so a genuine overflow is visible on the page instead of being silently
+      // missing from it. Nothing is refused for falling "outside the metre", because there is no
+      // metre to fall outside of: a bar's width follows the furthest thing written in it.
+      final Bar oneChord = Bar(
+        chords: <ChordMark>[
+          ChordMark(
+            place: placeAt(0),
+            chord: Chord(root: ChordRoot(0)),
+          ),
+        ],
+      );
+      final Bar beyond = Bar(
         chords: <ChordMark>[
           ChordMark(
             place: placeAt(0),
             chord: Chord(root: ChordRoot(0)),
           ),
           ChordMark(
-            place: placeAt(-3),
+            place: placeAt(7),
             chord: Chord(root: ChordRoot(7)),
           ),
         ],
       );
-      expect(engine.measureBar(bar, Key.cMajor), 88);
+      // THE OLD ASSERTIONS, QUOTED: expect(engine.measureBar(inMeter, Key.cMajor), 88) and
+      // expect(engine.measureBar(beyond, Key.cMajor), 160) — an occupied cell plus six empty ones
+      // plus a cell seven, all at 18, plus 16 of padding. Both were cell arithmetic. The property
+      // is unchanged and is what is asserted: the one-chord bar is the floor, and the bar with a
+      // chord on beat 7 is as wide as that chord reaches — place 8 + 7×18 = 134, plus the chord's
+      // own 8, plus 8 of trailing padding = 150.
+      expect(engine.measureBar(oneChord, Key.cMajor), engine.style.barMinWidth);
+      expect(engine.measureBar(beyond, Key.cMajor), fixtureX(7) + 8 + 8);
     });
+
+    test(
+      'a chord left of the barline does not widen the bar, and is not lost',
+      () {
+        // THE WIDENING RULE HAS ONE DIRECTION AND IT IS THE RIGHT ONE. A bar buys room by reaching the
+        // right edge of what it must draw, so a mark written LEFT of the bar's own origin cannot make
+        // the bar wider: there is no edge over there to push. It is also not silently dropped from the
+        // document — the model keeps both marks — which is the half of the old assertion that was
+        // about losing a musician's chord.
+        //
+        // THE OLD ASSERTION, QUOTED: expect(engine.measureBar(bar, Key.cMajor), 88);
+        // reason: "a beat before the printed cell 0 cannot be reached by adding cells to the right".
+        // The reason is still exactly right; only the number was cell arithmetic, and the bar is now
+        // the floor because its rightmost content is a single short chord.
+        final Bar bar = Bar(
+          chords: <ChordMark>[
+            ChordMark(
+              place: placeAt(0),
+              chord: Chord(root: ChordRoot(0)),
+            ),
+            ChordMark(
+              place: placeAt(-3),
+              chord: Chord(root: ChordRoot(7)),
+            ),
+          ],
+        );
+        expect(engine.measureBar(bar, Key.cMajor), engine.style.barMinWidth);
+        expect(
+          bar.chords,
+          hasLength(2),
+          reason: 'a mark the engraver cannot widen for is still the musician\'s mark',
+        );
+      },
+    );
   });
 
   group('layout', () {
@@ -208,23 +292,49 @@ void main() {
     });
 
     test('a section is not split across the heading that names it', () {
-      // Five bars cannot fit one system, so section A alone occupies two systems; the second
-      // continues the section and carries no label.
+      // A system has room for as many bars as 352 points of content width divide into, and eight
+      // bars are more than that, so section A alone occupies two systems; the second continues the
+      // section and carries no label.
+      //
+      // THE OLD DERIVATION, QUOTED: "Five bars cannot fit one system, so section A alone occupies
+      // two systems", with `expect(pages.single.systems[0].bars.length, 4)` and
+      // `expect(pages.single.systems[1].bars.length, 1)`. Five bars fit one system now — each is
+      // the width its own single chord needs rather than four cells' worth — so the fixture is
+      // eight bars, and the split is COMPUTED from the bar width the engine reports rather than
+      // restated as a number, so that the claim is about where the line falls and not about how
+      // wide a bar happens to be this month.
       final Song song = Song(
         title: 'Wrapping',
-        sections: <Section>[sectionOf('sec-a', 'A', 5)],
+        sections: <Section>[sectionOf('sec-a', 'A', 8)],
       );
       final List<PageLayout> pages = engine.layout(
         song,
         pageWidth: 400,
         pageHeight: 600,
       );
+      final double contentWidth = 400 - 2 * engine.style.pageMargin;
+      final double barWidth = engine.measureBar(oneChordBar(0), Key.cMajor);
+      final int perSystem = (contentWidth / barWidth).floor();
 
       expect(pages.single.systems.length, 2);
+      expect(
+        perSystem,
+        greaterThan(1),
+        reason: 'the fixture only wraps if more than one fits',
+      );
+      expect(
+        perSystem,
+        lessThan(8),
+        reason: 'the fixture only wraps if eight do not fit',
+      );
       expect(pages.single.systems[0].sectionLabel, 'A');
-      expect(pages.single.systems[1].sectionLabel, isNull);
-      expect(pages.single.systems[0].bars.length, 4);
-      expect(pages.single.systems[1].bars.length, 1);
+      expect(
+        pages.single.systems[1].sectionLabel,
+        isNull,
+        reason: 'a continuation carries no heading — that is what "not split across it" means',
+      );
+      expect(pages.single.systems[0].bars.length, perSystem);
+      expect(pages.single.systems[1].bars.length, 8 - perSystem);
     });
 
     test('every written bar appears exactly once, whatever the page size', () {
@@ -263,14 +373,20 @@ void main() {
     });
 
     test('a shorter page produces more pages without losing a bar', () {
+      // Eighteen bars need three systems of six, because a bar holding one short chord is exactly
+      // the floor and six of those fit 352 points of content width. The first system carries a
+      // section label, so the three systems are 66, 44 and 44 high plus 12 of spacing between them:
+      // 178 points of content. A 2000-point page holds them all; a 200-point page has 152 points of
+      // content room and must therefore split.
+      //
+      // THE OLD FIXTURE, QUOTED: `sectionOf('sec-a', 'A', 12)` with the reason "Twelve bars need
+      // three systems of four". Twelve bars are two systems now, and two systems fit a 200-point
+      // page, so the case stopped being a case; eighteen is the smallest count that still makes the
+      // three systems the derivation names. Nothing about the claim changed.
       final Song song = Song(
         title: 'Long',
-        sections: <Section>[sectionOf('sec-a', 'A', 12)],
+        sections: <Section>[sectionOf('sec-a', 'A', 18)],
       );
-      // Twelve bars need three systems of four. The first carries a section label, so the three
-      // systems are 66, 44 and 44 high plus 12 of spacing between them: 178 points of content.
-      // A 2000-point page holds them all; a 200-point page has 152 points of content room and
-      // must therefore split.
       final List<PageLayout> tall = engine.layout(
         song,
         pageWidth: 400,
@@ -294,14 +410,25 @@ void main() {
     });
 
     test('a bar wider than the page forms its own system and overflows', () {
-      // A 4/4 bar with four long chords is far wider than a 120-point page. It is engraved and
-      // overflows rather than being dropped or silently shrunk: a chord that runs off the edge is
-      // visible, and a layout that omitted it would look correct while losing music.
+      // A bar that is wider than the page it must be drawn on. Its width is its content's: four
+      // five-character chords, the last written on fixture slot 4 (8 + 4×18 = 80), so the furthest
+      // right edge is 80 + 40 = 120, plus 8 of trailing padding = 128. The page is 100 points wide,
+      // which leaves 52 of content room. It is engraved and overflows rather than being dropped or
+      // silently shrunk: a chord that runs off the edge is visible, and a layout that omitted it
+      // would look correct while losing music.
+      //
+      // THE OLD FIXTURE, QUOTED: `pageWidth: 120` with four chords on `placeAt(beat)` for
+      // beat 0..3, and the reason "A 4/4 bar with four long chords is far wider than a 120-point
+      // page". Four long chords are no longer wide by themselves: the width was four cells of 40
+      // plus a gap, and without cells those four chords span 62 + 40 = 102, which fits 120. The
+      // property is unchanged — a bar wider than its page overflows and is not lost — so the
+      // fixture moves one chord past the metre and the page narrows, which is the smallest change
+      // that makes the case true again.
       final Bar wide = Bar(
         chords: <ChordMark>[
-          for (int beat = 0; beat < 4; beat++)
+          for (int slot = 0; slot < 4; slot++)
             ChordMark(
-              place: placeAt(beat),
+              place: placeAt(slot == 3 ? 4 : slot),
               chord: Chord(
                 root: ChordRoot(0),
                 quality: ChordQuality.majorSeventh,
@@ -321,7 +448,7 @@ void main() {
       );
       final List<PageLayout> pages = engine.layout(
         song,
-        pageWidth: 120,
+        pageWidth: 100,
         pageHeight: 600,
       );
 
@@ -352,9 +479,15 @@ void main() {
           .single;
 
       expect(bar.bounds.left, 24);
-      // WAS 76: expect(bar.bounds.size.width, 76); with the old 14-pixel cell floor. The bar is
-      // 88 wide now, and the chord still starts one padding inside it.
-      expect(bar.bounds.size.width, 88);
+      // THE BAR IS AS WIDE AS THE ROOM TO WRITE IN IT, because one short chord's own content — 8 of
+      // place plus 8 of symbol = 16 — is less than that room. The width is taken from the style's
+      // floor rather than restated as a number: the number itself is pinned once, by
+      // `measureBar`'s floor cases, and a bar's placement should not fail when it changes.
+      //
+      // THE OLD ASSERTION, QUOTED: expect(bar.bounds.size.width, 88); — four cells of 18 plus 16 of
+      // padding. What this test is FOR is the line below it, the chord starting one padding inside
+      // the bar, and that claim survives the grid's removal untouched.
+      expect(bar.bounds.size.width, engine.style.barMinWidth);
       expect(bar.chords.single.bounds.left, 32);
       expect(
         bar.chords.single.bounds.size.width,
@@ -363,10 +496,16 @@ void main() {
       );
     });
 
-    test('a chord on a later beat is offset by the cells before it', () {
-      // Cell widths are 18, 18, 18 and 18 — the third cell holds the chord — so the offsets are
-      // 8, 26, 44 and 62 from the bar's left edge. A chord on beat 2 therefore starts at
-      // 24 + 44 = 68. (WAS 60 with cell widths 14, 14, 18, 14 and offsets 8, 22, 36, 54.)
+    test('a chord written further along the bar is engraved further along it', () {
+      // The chord is written on fixture slot 2 — 8 + 2×18 = 44 from the bar's left edge — so it is
+      // engraved at 24 + 44 = 68. Nothing between the barline and the chord moves it: there are no
+      // cells before it to be offset by, only the one number the model stores.
+      //
+      // THE OLD DERIVATION AND NAME, QUOTED: the test was 'a chord on a later beat is offset by the
+      // cells before it', with "Cell widths are 18, 18, 18 and 18 — the third cell holds the chord —
+      // so the offsets are 8, 26, 44 and 62 from the bar's left edge". There are no cells; the
+      // offset is the place the mark was written at, and the property a reader can check — a mark
+      // further along the bar is drawn further along it — is the same property.
       final Song song = Song(
         title: 'Placement',
         sections: <Section>[
@@ -394,8 +533,11 @@ void main() {
     });
 
     test('two chords packed onto one beat are laid out side by side', () {
-      // The comma-packed case: both are on beat 0, so they differ only by step, and the second
-      // starts one chord width plus a gap after the first.
+      // The comma-packed case: both are written at the same place, so they are two marks 1.125 of a
+      // pixel apart — the fixture's own sub-slot spacing — and the engraving separates them so that
+      // neither hides the other. (Before the grid was removed they "differed only by step"; a step
+      // is now simply the sub-slot distance the fixture chose, and the property this test exists for
+      // is that two chords at one place are still two readable symbols.)
       final Bar packed = Bar(
         chords: <ChordMark>[
           ChordMark(

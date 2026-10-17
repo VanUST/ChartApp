@@ -672,6 +672,15 @@ void main() {
       'bar_engraved=(${fittedBar.bounds.left.toStringAsFixed(2)},'
       '${fittedBar.bounds.top.toStringAsFixed(2)})',
     );
+    // THE ROW'S X IS THE ANCHOR BAR'S OWN LEFT EDGE, AND THAT ASSERTION IS NOW THE TRUTH RATHER THAN A
+    // COINCIDENCE. It is UNCHANGED — the line below is the one this case has always had — but it used
+    // to be reached by two errors cancelling: `PlacedTextCue.origin.x` was published as
+    // `bar.left + place.offsetX` while the painter drew the plate at `row.x + place.offsetX`, so the
+    // origin was the bar's edge only while a cue's offset happened to be zero. With a cue nudged two
+    // pixels the two numbers differ, the expectation below is what fails, and the repair is in the
+    // layout (see `LayoutEngine._placeTextCues`): the row is published at the bar's edge and the
+    // offset is applied once, by the painter. The claim — under FIT the cue resolves to the bar its
+    // anchor names — is what this pins.
     expect(
       fittedCue.origin.x,
       fittedBar.bounds.left,

@@ -991,16 +991,28 @@ class LayoutEngine {
   //         drawScale — the page scale the rows are engraved for.
   // OUTPUTS: One placed cue per measured cue, in the same order, each carrying the words and the
   //          box it occupies. The first sits directly above the stave and each later one above
-  //          that. A cue starts at `bounds.left + place.offsetX` — ITS OWN NUMBER — and the layout
-  //          neither rounds it to a column nor falls back to the bar's edge when that number is
-  //          unusual. A remark the musician dragged to the far end of a bar therefore stays there,
-  //          which is the whole of what "the cue is at its own place" means; a cue that overhangs
-  //          its neighbour is a remark written over the barline and is drawn as one.
+  //          that. A cue's row is published at THE BAR'S OWN LEFT EDGE, and the cue's own stored
+  //          offset is applied by the painter that draws it — see below.
   //
-  //          The stored vertical offset is NOT applied here. It stays the painter's, exactly as it
-  //          was, so a nudge up or down still moves the cue by the number the musician stored and
-  //          the layout does not have to interpret a value it does not own.
-  // KEYWORDS: cue-placement, stacking, own-offset, origin, painter-contract, no-column
+  //          THE OFFSET IS APPLIED ONCE, AND THIS FUNCTION USED TO APPLY IT AS WELL. It published
+  //          `bounds.left + place.offsetX` here while the painter drew the plate at
+  //          `row.x + place.offsetX`, so every text cue on the page was drawn one whole offset too
+  //          far along its bar — two pixels for a cue nudged two pixels, and the full offset twice
+  //          for a cue dragged to the far end of a bar. Two documents state the rule and both say
+  //          the painter's half is the one that applies it: [PlacedTextCue.origin] says "its x is
+  //          the anchor's own left edge, unchanged", and [ResolvedTextCue.origin] says the same.
+  //          The vertical offset was never applied here — it was always the painter's — and that
+  //          symmetry is the reason the horizontal one belongs there too.
+  //
+  //          A cue that overhangs its neighbour is still a remark written over the barline and is
+  //          drawn as one: nothing here clamps it, rounds it to a column, or falls back to the
+  //          bar's edge when its offset is unusual.
+  //
+  //          The stored vertical offset is NOT applied here, so a nudge up or down moves the cue by
+  //          the number the musician stored and the layout does not interpret a value it does not
+  //          own.
+  // KEYWORDS: cue-placement, stacking, own-offset, origin, painter-contract, no-column,
+  //           offset-applied-once
   List<PlacedTextCue> _placeTextCues(
     List<_MeasuredTextCue> cues,
     LayoutRect bounds,
@@ -1016,7 +1028,7 @@ class LayoutEngine {
     for (final _MeasuredTextCue cue in cues) {
       final double height = _cueRowHeight(cue, drawScale);
       y -= height;
-      final double left = bounds.left + cue.offsetX;
+      final double left = bounds.left;
       placed.add(
         PlacedTextCue(
           id: cue.id,

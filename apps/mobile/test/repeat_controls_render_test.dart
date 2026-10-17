@@ -45,11 +45,19 @@ const double repeatPageWidth = 640;
 const double repeatPageHeight = 420;
 
 /// The surface a FITTED page is asked for. Deliberately too narrow for the four bars to form one
-/// system and too short to hold the two systems they wrap into, so `fitToPage` must re-engrave the
-/// page wider and shrink the result: a surface that already fitted at full size would come back with
+/// system and too short to hold the systems they wrap into, so `fitToPage` must re-engrave the page
+/// wider and shrink the result: a surface that already fitted at full size would come back with
 /// scale 1, which is exactly the case where a rectangle computed without the scale looks right.
-const double repeatFitWidth = 500;
-const double repeatFitHeight = 150;
+///
+/// IT WAS 500 × 150, AND THE NUMBER STOPPED FORCING ANYTHING. THE OLD VALUES, QUOTED:
+/// `repeatFitWidth = 500` and `repeatFitHeight = 150`. They were too narrow for four bars while a bar
+/// was four cells wide — 500 points of surface holds 4 × 88 of music — and a bar is as wide as its
+/// content now (one chord is 56), so the four bars fitted one system of a 452-point content width and
+/// the page came back at scale 1, which is the case this surface exists to avoid. 200 × 100 is narrow
+/// enough that one bar fills a system's content width and short enough that the four systems do not
+/// fit at scale 1, so the fit still has to shrink — which is the only thing the case is about.
+const double repeatFitWidth = 200;
+const double repeatFitHeight = 100;
 
 /// Where the PNGs are written. Outside the repository: an image is evidence for one inspection, not
 /// an artefact to commit.

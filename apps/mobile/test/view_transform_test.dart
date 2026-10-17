@@ -60,7 +60,15 @@ import '../support/place_fixture.dart';
 /// quietly be a regression in the fixture.
 const Size _paneSize = Size(900, 1000);
 
-/// A twelve-bar two-section chart, laid out deterministically by the package's default metrics.
+/// A two-section chart, laid out deterministically by the package's default metrics.
+///
+/// SIXTY BARS AND NOT TWELVE, AND THE REASON IS THE FOUR-TIMES ZOOM CASE. THE OLD FIXTURE, QUOTED:
+/// `for (int index = 0; index < 6; index++)` — twelve bars in all, which used to fill the page
+/// because a bar was four cells wide. A bar is as wide as its content now (one 5-character chord is
+/// 91 points), so twelve bars were two systems in the top seventh of an 824×1318 page: the pen case
+/// zooms to 4×, and at that zoom the glass looks at the MIDDLE of the page, which was blank paper.
+/// Sixty bars fill the page with systems, so every zoom looks at music — which is what a fixture for
+/// a view transform is for.
 Song viewChart() => Song(
   id: 'view-transform',
   title: 'View transform',
@@ -74,7 +82,7 @@ Song viewChart() => Song(
         id: label,
         label: SectionLabel.letter(label),
         bars: <Bar>[
-          for (int index = 0; index < 6; index++)
+          for (int index = 0; index < 30; index++)
             Bar(
               chords: <ChordMark>[
                 ChordMark(
@@ -466,35 +474,28 @@ void main() {
     );
   });
 
-  testWidgets('the pen writes at every zoom, on the cell under the nib', (
+  testWidgets('the pen writes at every zoom, at the place under the nib', (
     WidgetTester tester,
   ) async {
     await pumpViewer(tester, viewChart());
     await setInkMode(tester, true);
 
-    // WHICH BAR IS AIMED AT IS DECIDED BY THE LAYOUT, NOT BY A CONSTANT: the point aimed at is the
-    // middle of the page, and the hit test that reads it is the same one a tap uses. Asking the
-    // layout which cell that point is over means the aim is correct at every zoom by construction.
-    final PageLayout plain = chartPainter(tester).page;
-    final ChartHit aimed = hitTestPage(
-      plain,
-      LayoutOffset(pageCentreOf(plain).dx, pageCentreOf(plain).dy),
-    )!;
-    final PlacedBar bar = aimed.bar;
-    final LayoutRect cell = bar.bounds;
-    final Offset target = pageCentreOf(plain);
-    // REWRITTEN. This offset used to be measured from the CELL's corner —
-    //   Offset(target.dx - cell.left, target.dy - cell.top)
-    // — because a stroke was anchored to the column it was drawn in. A stroke is anchored to its BAR
-    // now, so the origin every stored point is measured from is the bar's corner, and the pen's own
-    // position in the music is that much further along. `cell` is still read above, by the hit test
-    // that decides which bar was aimed at.
-    final Offset fromCorner = Offset(
-      target.dx - bar.bounds.left,
-      target.dy - bar.bounds.top,
-    );
-
-    Offset? storedAtIdentity;
+    // THE AIM IS CHOSEN INSIDE THE VISIBLE WINDOW OF EACH ZOOM, FROM THE APP'S OWN TRANSFORM. THE OLD
+    // FIXTURE, QUOTED: the target was `pageCentreOf(plain)` — the middle of the PAGE, chosen once and
+    // reused at every zoom — together with `Offset(target.dx - cell.left, target.dy - cell.top)`
+    // measured from the CELL's corner, because a stroke was anchored to the column it was drawn in.
+    //
+    // TWO THINGS STOPPED BEING TRUE. A stroke is anchored to its BAR, so the origin every stored point
+    // is measured from is the bar's corner. And a bar is as wide as what is written in it, so this
+    // chart's bars no longer fill the page: the middle of the page is blank paper (that is the null
+    // the old fixture dereferenced), and at 4× the glass shows a quarter of the page's middle, so a
+    // page point that was comfortably visible at 1× can be off the surface entirely.
+    //
+    // So each zoom aims at the bar nearest the middle of the GLASS at that zoom, asking [PageLayout.
+    // pagePointOf] where the middle of the glass is in the page. That is the same transform the pen
+    // uses, which is the point: the case then measures whether the stored point is the nib's own
+    // place in the bar, at every zoom, which is what "the pen writes where it looks" means.
+    final Rect pane = tester.getRect(pageSurfaceFinder());
     int level = 0;
     for (final double requested in <double>[1, 2, 4]) {
       level++;
@@ -511,6 +512,76 @@ void main() {
         page.zoom,
         greaterThanOrEqualTo(requested - 1e-6),
         reason: 'the view must have reached the zoom the loop asked for',
+      );
+      // THE VISIBLE WINDOW IN PAGE COORDINATES, from the app's own inverse transform, and the aim is
+      // the middle of the part of a bar that the glass actually shows. A stroke can only be drawn
+      // where the page is on screen, and at 4× that is a quarter of the page's middle — a bar whose
+      // CENTRE is above the window may still have half its height showing, and that is where the
+      // pen has to be asked to write.
+      final LayoutOffset windowTopLeft = page.pagePointOf(LayoutOffset.zero);
+      final LayoutOffset windowBottomRight = page.pagePointOf(
+        LayoutOffset(pane.width, pane.height),
+      );
+      PlacedBar? aimedAt;
+      double bestArea = 0;
+      LayoutRect bestPart = LayoutRect.fromLTWH(0, 0, 0, 0);
+      for (final PlacedBar candidate in page.bars) {
+        final double left = candidate.bounds.left > windowTopLeft.x
+            ? candidate.bounds.left
+            : windowTopLeft.x;
+        final double top = candidate.bounds.top > windowTopLeft.y
+            ? candidate.bounds.top
+            : windowTopLeft.y;
+        final double right =
+            candidate.bounds.left + candidate.bounds.size.width <
+                windowBottomRight.x
+            ? candidate.bounds.left + candidate.bounds.size.width
+            : windowBottomRight.x;
+        final double bottom =
+            candidate.bounds.top + candidate.bounds.size.height <
+                windowBottomRight.y
+            ? candidate.bounds.top + candidate.bounds.size.height
+            : windowBottomRight.y;
+        if (right <= left + 24 || bottom <= top + 16) {
+          continue;
+        }
+        final double area = (right - left) * (bottom - top);
+        if (area > bestArea) {
+          bestArea = area;
+          aimedAt = candidate;
+          bestPart = LayoutRect.fromLTWH(left, top, right - left, bottom - top);
+        }
+      }
+      expect(
+        aimedAt,
+        isNotNull,
+        reason:
+            'no part of any bar big enough to aim at is inside the window the glass shows at '
+            'zoom ${page.zoom} (window=(${windowTopLeft.x.toStringAsFixed(1)},'
+            '${windowTopLeft.y.toStringAsFixed(1)})..(${windowBottomRight.x.toStringAsFixed(1)},'
+            '${windowBottomRight.y.toStringAsFixed(1)}) bars=${page.bars.length} '
+            'first=(${page.bars.first.bounds.left.toStringAsFixed(1)},'
+            '${page.bars.first.bounds.top.toStringAsFixed(1)},'
+            '${page.bars.first.bounds.size.width.toStringAsFixed(1)}x'
+            '${page.bars.first.bounds.size.height.toStringAsFixed(1)})): the fixture cannot '
+            'measure the pen at this zoom',
+      );
+      final LayoutRect cell = aimedAt!.bounds;
+      final Offset target = Offset(
+        bestPart.left + bestPart.size.width / 2,
+        bestPart.top + bestPart.size.height / 2,
+      );
+      final ChartHit aimed = hitTestPage(
+        page,
+        LayoutOffset(target.dx, target.dy),
+      )!;
+      final PlacedBar bar = aimed.bar;
+      // REWRITTEN, and this offset used to be measured from the CELL's corner. A stroke is anchored
+      // to its BAR now, so the origin every stored point is measured from is the bar's corner and the
+      // pen's own position in the music is that much further along.
+      final Offset fromCorner = Offset(
+        target.dx - bar.bounds.left,
+        target.dy - bar.bounds.top,
       );
       await drawStroke(
         tester,
@@ -535,7 +606,6 @@ void main() {
       final LayoutOffset pagePoint = page.pagePointOf(
         LayoutOffset(surface.dx, surface.dy),
       );
-      storedAtIdentity ??= stored;
       expect(
         stroke.anchor.sectionId,
         bar.sectionId,
@@ -548,15 +618,18 @@ void main() {
       // and it pinned the CELL a stroke was anchored to. An anchor names the bar now — the position
       // inside the bar is in the stroke's own points — so the same fact is checked as the one that
       // still exists: the stroke hangs on the bar under the pen and its first point is where the pen
-      // touched, which the two comparisons below do in pixels. That is a stronger statement than the
+      // touched, which the comparisons below do in pixels. That is a stronger statement than the
       // cell index was: it would catch a stroke moved by any distance at all, where the index only
       // caught a move to another column.
       expect(
         stroke.anchor,
         EventAnchor(sectionId: bar.sectionId, bar: bar.barIndex),
       );
-      expect(stroke.points.first.x, closeTo(storedAtIdentity.dx, 1e-6));
-      expect(stroke.points.first.y, closeTo(storedAtIdentity.dy, 1e-6));
+      // THE STORED POINT IS THE NIB'S OWN PLACE IN ITS BAR, AT EVERY ZOOM. The old pair of
+      // expectations here compared the stored point with the one a different zoom produced
+      // (`storedAtIdentity`), which was a way of saying the same thing while the aim was fixed; with
+      // the aim moving to stay visible, the claim is stated about the bar the pen actually landed in
+      // and its two halves are the transform and the geometry.
       expect(
         pagePoint.x - drawn.origin.x,
         closeTo(stored.dx, 1e-6),
@@ -567,7 +640,7 @@ void main() {
       expect(stored.dy, closeTo(fromCorner.dy, 1e-6));
       stdout.writeln(
         'view.test.pen ${viewOf(page)} '
-        'aimed=${bar.sectionId}#${bar.barIndex} beat=${cell.left} '
+        'aimed=${bar.sectionId}#${bar.barIndex} bar_x=${cell.left} '
         'anchor=${stroke.anchor} '
         'surface=(${surface.dx.toStringAsFixed(2)},'
         '${surface.dy.toStringAsFixed(2)}) '
@@ -581,12 +654,22 @@ void main() {
     }
   });
 
-  testWidgets('a chord tap names the same cell at every zoom', (
+  testWidgets('a chord tap names the same place in the bar at every zoom', (
     WidgetTester tester,
   ) async {
     await pumpViewer(tester, viewChart());
     final PageLayout plain = chartPainter(tester).page;
-    final Offset target = pageCentreOf(plain);
+    // A BAR'S OWN CENTRE, not the page's. THE OLD FIXTURE, QUOTED: `final Offset target =
+    // pageCentreOf(plain);` with `hitTestPage(...)!`. The middle of the page is blank paper on this
+    // chart now — its twelve content-width bars fit one system at the top — so the fixture aims at a
+    // bar that exists and the property under test is unchanged: the same surface aim names the same
+    // place in the same bar at every zoom.
+    final PlacedBar aimedAt = plain.bars[plain.bars.length ~/ 2];
+    final LayoutRect aimedRect = aimedAt.bounds;
+    final Offset target = Offset(
+      aimedRect.left + aimedRect.size.width / 2,
+      aimedRect.top + aimedRect.size.height / 2,
+    );
     final ChartHit aimed = hitTestPage(
       plain,
       LayoutOffset(target.dx, target.dy),
@@ -603,20 +686,25 @@ void main() {
       await tester.tapAt(pagePointToGlobal(tester, page, target));
       await tester.pumpAndSettle();
       final ChartHit? hit = chartPainter(tester).selection;
-      expect(hit, isNotNull, reason: 'a tap on a cell must select');
+      expect(hit, isNotNull, reason: 'a tap on a bar must select it');
       expect(hit!.sectionId, aimed.bar.sectionId);
       expect(hit.barIndex, aimed.bar.barIndex);
+      // THE OLD ASSERTIONS, QUOTED: expect(hit.local.x, aimed.local.x) and the recorded name
+      // `'... beat=${hit.local.x}'`, with the reason "the same surface aim must name the same cell at
+      // every zoom". There is no cell; `local.x` is the distance from the bar's left edge, and it is
+      // the same number at every zoom for the same reason it was before — it is a PAGE coordinate,
+      // so the zoom it was drawn at cannot enter it.
       expect(hit.local.x, aimed.local.x);
-      named ??= '${hit.sectionId}#${hit.barIndex} beat=${hit.local.x}';
+      named ??= '${hit.sectionId}#${hit.barIndex} x=${hit.local.x}';
       expect(
-        '${hit.sectionId}#${hit.barIndex} beat=${hit.local.x}',
+        '${hit.sectionId}#${hit.barIndex} x=${hit.local.x}',
         named,
-        reason: 'the same surface aim must name the same cell at every zoom',
+        reason: 'the same surface aim must name the same place at every zoom',
       );
       stdout.writeln(
         'view.test.hit ${viewOf(page)} '
         'aimed=${aimed.bar.sectionId}#${aimed.bar.barIndex} x=${aimed.local.x} '
-        'named=${hit.sectionId}#${hit.barIndex} beat=${hit.local.x}',
+        'named=${hit.sectionId}#${hit.barIndex} x=${hit.local.x}',
       );
     }
   });

@@ -114,7 +114,7 @@ Offset centreOf(LayoutRect rect) =>
 
 void main() {
   testWidgets(
-    'a tap on a fitted page selects the cell it was aimed at and says so',
+    'a tap on a fitted page names the bar it was aimed at, and measures from that bar',
     (WidgetTester tester) async {
       await pumpViewer(tester, libraryOf(longChart(200)));
 
@@ -131,18 +131,31 @@ void main() {
       // the tap as an earlier bar, so a bar near the end makes that mistake visible rather than
       // landing on the right bar by luck.
       final PlacedBar bar = page.bars[page.bars.length - 3];
-      final LayoutRect cell = bar.bounds;
-      await tapEngraved(tester, centreOf(cell));
+      final LayoutRect rect = bar.bounds;
+      await tapEngraved(tester, centreOf(rect));
 
       final ChartPainter after = shownPainter(tester);
       expect(after.selection, isNotNull);
       expect(after.selection!.sectionId, bar.sectionId);
       expect(after.selection!.barIndex, bar.barIndex);
-      expect(after.selection!.local.x, 1);
-      // Single section, so the global ordinal is the bar index plus one; the model's zero-based
-      // beat 1 is the musician's cell 2.
+      // THE HIT IS A COORDINATE IN THE BAR, and the tap was at the bar's own centre, so the local x
+      // is half the bar's width: THE DISTANCE FROM THAT BAR'S LEFT EDGE, which is the property the
+      // hit test answers by. THE OLD ASSERTION, QUOTED: expect(after.selection!.local.x, 1); — the
+      // offset inside the CELL the tap landed in, because a hit used to name a cell and then say
+      // where inside it the touch fell. There is no cell: the answer is the point in the bar, and
+      // asserting it against the bar's own geometry is what makes a scale error visible.
       expect(
-        find.text('selected: bar ${bar.barIndex + 1} cell 2'),
+        after.selection!.local.x,
+        closeTo(rect.size.width / 2, 0.5),
+        reason:
+            'the tap was at the bar\'s centre, so its place in the bar is half the bar\'s width — '
+            'measured from that bar\'s left edge, on the fitted page as on any other',
+      );
+      // ONE TOUCH NAMES THE BAR. It used to add "cell N" when the touch landed on one; a place
+      // inside a bar is a distance now, and the line names the bar alone.
+      // THE OLD ASSERTION, QUOTED: find.text('selected: bar ${bar.barIndex + 1} cell 2').
+      expect(
+        find.text('selected: bar ${bar.barIndex + 1} (whole bar)'),
         findsOneWidget,
       );
     },
@@ -156,7 +169,10 @@ void main() {
 
     // Select something first, so the clearing is observable rather than the initial state.
     await tapEngraved(tester, centreOf(page.bars.first.bounds));
-    expect(find.textContaining('selected: bar 1 cell 1'), findsOneWidget);
+    // THE OLD ASSERTION, QUOTED: find.textContaining('selected: bar 1 cell 1'). One touch names the
+    // BAR now — a cell is not an address the line prints, because a place inside a bar is a
+    // distance — so the line that has to be there before the miss is the whole-bar one.
+    expect(find.textContaining('selected: bar 1 (whole bar)'), findsOneWidget);
 
     // Then tap the gap between the first two systems, where no bar is.
     final PlacedSystem first = page.systems.first;
@@ -191,14 +207,23 @@ void main() {
     expect(painter.page.scale, 1);
 
     final PlacedBar bar = painter.page.bars[2];
-    final LayoutRect cell = bar.bounds;
-    await tapEngraved(tester, centreOf(cell));
+    final LayoutRect rect = bar.bounds;
+    await tapEngraved(tester, centreOf(rect));
 
     final ChartPainter after = shownPainter(tester);
     expect(after.selection!.barIndex, bar.barIndex);
-    expect(after.selection!.local.x, 3);
+    // THE OLD ASSERTIONS, QUOTED: expect(after.selection!.local.x, 3); and
+    // find.text('selected: bar ${bar.barIndex + 1} cell 4'). The first was the distance into the
+    // CELL the tap fell in; the second named that cell. A page at scale 1 answers with the same
+    // coordinate a fitted page does — the tap's place in the bar, from the bar's left edge — and one
+    // touch names the bar, so both are stated in the bar's own units.
     expect(
-      find.text('selected: bar ${bar.barIndex + 1} cell 4'),
+      after.selection!.local.x,
+      closeTo(rect.size.width / 2, 0.5),
+      reason: 'the tap was at the bar\'s centre, so its place in the bar is half the bar\'s width',
+    );
+    expect(
+      find.text('selected: bar ${bar.barIndex + 1} (whole bar)'),
       findsOneWidget,
     );
   });

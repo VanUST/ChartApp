@@ -24,10 +24,13 @@
 //
 //          AND THE BEAMING CASES FOLLOW THE SAME RULE, because a beam is a musical statement and not
 //          a stroke: the number of beams is the written VALUE (one for an eighth, two for a
-//          sixteenth), the group is one BEAT, and the direction the group's stems take is the one a
-//          note farthest from the middle line dictates. Each expectation names the notation it comes
-//          from — "a beat boundary breaks the beam", "a group of one pitch is level" — so a change in
-//          the engraver fails a sentence about music rather than a sentence about the engraver.
+//          sixteenth), the group is a maximal run of NEIGHBOURING notes that can carry a beam at
+//          all — cut by a note too long to beam, and by nothing else, because the metre stopped
+//          dividing anything when the grid was removed — and the direction the group's stems take is
+//          the one a note farthest from the middle line dictates. Each expectation names the
+//          notation it comes from — "a quarter cuts the run", "a group of one pitch is level" — so a
+//          change in the engraver fails a sentence about music rather than a sentence about the
+//          engraver.
 // INPUTS: None. The staff the geometry cases are engraved on is declared below with the
 //         application's own staff-space proportion, so the case needs no device, no font and no
 //         fixture file. The one case that asks about a PAGE — whether a beam crosses a barline —
@@ -36,7 +39,7 @@
 //          ledger-line distance, beam span, slope and thickness the assertions rest on, so a failure
 //          shows the staff rather than only a boolean.
 // KEYWORDS: test, melody-staff, engraving, music-theory, treble-clef, bass-clef, ledger-line,
-//           accidental, stem, beam, beaming, rhythm-grouping, beat-boundary, glyph-box,
+//           accidental, stem, beam, beaming, rhythm-grouping, beam-run-adjacency, glyph-box,
 //           clef-published-not-drawn, falsifiable
 import 'dart:io';
 
@@ -929,11 +932,18 @@ void main() {
       );
     });
 
-    test('a beat boundary breaks the beam, and a beam never crosses a barline', () {
-      // BEAMS GROUP BY BEAT AND NOT BY THE BAR. In 4/4 a run of four eighth notes is two beams of
-      // two and not one beam of four, because the beat is the quarter and a reader's eye is looking
-      // for the beat. The two cases below are the same four notes: the first in two beats, the
-      // second in one — and the engraving must not be the same picture for both.
+    test('beams join adjacent notes, and only a longer value cuts the run', () {
+      // THE METRE IS NOT AN INPUT TO BEAMING. A beam joins a maximal run of neighbouring notes that
+      // can carry one at all, and the run ends at a note too long to carry a beam — at nothing else.
+      //
+      // THE OLD ASSERTION, QUOTED: expect(splitBeams.length, 2, reason: 'four eighth notes in two
+      // beats are two beams of two: a beat boundary breaks the beam, and a single beam across both
+      // beats would tell the reader the run is one group'), together with a loop asserting
+      // `_headsUnder(split, beam) == 2` for each. The run used to be cut at the METRE's beat, which
+      // is the same division the owner removed from the model («Сетка НЕ квантизована. Вообще
+      // квантизацию сетки надо убрать как класс»). Eight eighths in a 4/4 bar are ONE run now. What
+      // the old assertion was protecting — that a beam joins only notes which may be joined, and
+      // that two groups are visibly two — is what the rest of this case asserts.
       const List<Written> pitches = <Written>[
         Written(NoteLetter.c, 4),
         Written(NoteLetter.e, 4),
@@ -955,21 +965,50 @@ void main() {
       );
       expect(
         splitBeams.length,
+        1,
+        reason:
+            'the four eighths are neighbours in x order, so they are one run and one beam: the '
+            'grouping a reader sees is the notes that stand together, not the count the metre makes',
+      );
+      expect(
+        _headsUnder(split, splitBeams.single),
+        4,
+        reason: 'every note of the run hangs on the one beam the run draws',
+      );
+
+      // AND A NOTE THAT CANNOT CARRY A BEAM CUTS THE RUN ON BOTH SIDES. This is the WHOLE of the
+      // cutting rule, so the case exists to prove a run is cut at all: a quarter between two pairs
+      // of eighths leaves two groups of two, and the groups do not overlap.
+      final List<NoteMark> quarterBetween = <NoteMark>[
+        _note(pitches[0], beat: 0, step: 0, value: _eighth),
+        _note(pitches[1], beat: 0, step: 1, value: _eighth),
+        _note(pitches[2], beat: 1, step: 0),
+        _note(pitches[3], beat: 1, step: 1, value: _eighth),
+        _note(pitches[0], beat: 1, step: 2, value: _eighth),
+      ];
+      final PlacedMelodyStaff cut = _engrave(quarterBetween);
+      final List<MelodyGlyph> cutBeams = _beamsOf(cut);
+      stdout.writeln(
+        'notation.beam quarter_between beams=${cutBeams.length} '
+        'sizes=${cutBeams.map((MelodyGlyph b) => _headsUnder(cut, b)).join(",")}',
+      );
+      expect(
+        cutBeams.length,
         2,
         reason:
-            'four eighth notes in two beats are two beams of two: a beat boundary breaks the beam, '
-            'and a single beam across both beats would tell the reader the run is one group',
+            'a quarter note carries no beam, so the run cannot pass over it: two groups of two, '
+            'which is what a musician reads as two pairs and not as one run of four',
       );
-      for (final MelodyGlyph beam in splitBeams) {
+      for (final MelodyGlyph beam in cutBeams) {
         expect(
-          _headsUnder(split, beam),
+          _headsUnder(cut, beam),
           2,
-          reason: 'each beam joins the two notes of one beat and no note of the other',
+          reason: 'each beam joins its own pair and no note of the other',
         );
       }
       expect(
-        _beamEnd(splitBeams[0]),
-        lessThan(_beamStart(splitBeams[1])),
+        _beamEnd(cutBeams[0]),
+        lessThan(_beamStart(cutBeams[1])),
         reason:
             'the two groups do not overlap, so no reader can take them for one',
       );
@@ -1020,11 +1059,17 @@ void main() {
         reason: 'both bars must contribute a beam, or the containment above proves nothing',
       );
 
-      // AND IN A COMPOUND METER THE BEAT IS THE DOTTED ONE, so the same rule writes eighths in
-      // THREES. 6/8 has two beats, each a dotted quarter long; six eighth notes are therefore two
-      // beams of three and not three beams of two. This is the assertion that a rule counting the
-      // meter's numerator instead of its beats would fail — and it is the difference between an
-      // engraving a jazz musician reads as 6/8 and one he reads as 3/4 written oddly.
+      // AND THE SAME IS TRUE IN A COMPOUND METER, WHICH IS THE OTHER HALF OF "THE METRE IS NOT AN
+      // INPUT": six eighths in 6/8 are one run of six, exactly as six eighths in 3/4 or 4/4 would
+      // be. THE OLD ASSERTIONS, QUOTED: expect(compoundBeams.length, 2, reason: 'six eighths in 6/8
+      // are two groups, one per dotted-quarter beat') and `_headsUnder(compound, beam) == 3`, reason
+      // 'a beat of 6/8 holds THREE eighths ... a beam of two would be the grouping of 3/4'.
+      //
+      // THE COST IS NAMED RATHER THAN HIDDEN: a musician reading 6/8 no longer sees the bar's two
+      // halves in the beaming, because the dotted beat was a division of the metre and every
+      // division of the metre went. The grouping he sees is the run of notes he wrote. Whether the
+      // engraver should ever group by something else is a decision for the owner, and it is put to
+      // him in the record for this change rather than settled here by a number.
       final PlacedMelodyStaff compound = _engrave(<NoteMark>[
         for (int beat = 0; beat < 2; beat++)
           for (int step = 0; step < 3; step++)
@@ -1037,19 +1082,16 @@ void main() {
       );
       expect(
         compoundBeams.length,
-        2,
+        1,
         reason:
-            'six eighths in 6/8 are two groups, one per dotted-quarter beat',
+            'six eighths are six neighbours: the metre does not cut them into dotted-quarter '
+            'groups, because the metre is a label and not a division',
       );
-      for (final MelodyGlyph beam in compoundBeams) {
-        expect(
-          _headsUnder(compound, beam),
-          3,
-          reason:
-              'a beat of 6/8 holds THREE eighths, so the beam joins three notes: a beam of two '
-              'would be the grouping of 3/4, which is a different meter read the same way',
-        );
-      }
+      expect(
+        _headsUnder(compound, compoundBeams.single),
+        6,
+        reason: 'the run is as long as the notes that stand together, whatever the metre says',
+      );
     });
 
     test('the shorter value\'s extra beam sits inside the longer one\'s span', () {
@@ -1300,11 +1342,32 @@ void main() {
       }
     });
 
-    test('a rest breaks the group, and a beam does not reach across one', () {
-      // A REST IS A SILENCE AND A BEAM IS A CLAIM THAT NOTES BELONG TOGETHER. Two eighths on beat one
-      // are a pair; the second half of beat two is a rest, so the eighth on beat two is NOT joined to
-      // them — it is written with its own flag, which is exactly how a musician sees that it stands
-      // alone.
+    test('a silence is not written in the model, so a beam spans it', () {
+      // THIS CASE RECORDS A LIMITATION RATHER THAN A FEATURE, and it is written down because the
+      // claim it replaces was false the moment the grid went.
+      //
+      // THE OLD ASSERTIONS, QUOTED, in full because their reasoning is what stopped being true:
+      //   expect(beams.length, 1, reason: 'the two notes of beat one are joined; nothing else is');
+      //   expect(_headsUnder(staff, beams.single), 2, reason: 'the beam covers beat one and stops at
+      //       the rest');
+      //   expect(_beamEnd(beams.single), lessThan(_cx(heads.last)), reason: 'the beam ends before
+      //       the note that follows the rest: a beam across a silence claims a grouping the music
+      //       does not have');
+      //   expect(afterTheRest.flagLength, greaterThan(0), reason: 'the note after the rest keeps its
+      //       flag');
+      //   expect(_beamsOf(separated), isEmpty, reason: 'two eighth notes with a beat of silence
+      //       between them are two notes and not a pair');
+      // — and the two cases built their "rest" by LEAVING A HOLE in the beat/step grid (the third
+      // note was written on the next beat, or two beats later). A hole in a grid was therefore the
+      // only representation a rest had, and the engraver read the hole. There are no cells for a
+      // hole to exist in: `Bar.melody` holds NOTES, a silence is the absence of one, and an absence
+      // carries no x to be measured at. So the engraver beams the notes it has, and a beam over a
+      // written silence is the honest picture of what the model knows.
+      //
+      // WHY SPACING DOES NOT REPLACE THE HOLE, stated so that nobody "fixes" it by accident: after
+      // this change the distance between two notes is the MUSICIAN'S OWN choice — he writes them
+      // where he likes — so a run cut at some gap would cut a run he deliberately spaced. A rest
+      // has to be something the model stores before the engraving can respect it.
       final PlacedMelodyStaff staff = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4), beat: 0, step: 0, value: _eighth),
         _note(const Written(NoteLetter.d, 4), beat: 0, step: 1, value: _eighth),
@@ -1315,50 +1378,52 @@ void main() {
         staff,
         MelodyGlyphKind.notehead,
       );
-      final MelodyGlyph afterTheRest = _stemOf(staff, heads.last);
+      final MelodyGlyph afterTheGap = _stemOf(staff, heads.last);
       stdout.writeln(
-        'notation.beam rest beams=${beams.length} '
+        'notation.beam silence beams=${beams.length} '
         'heads=${beams.map((MelodyGlyph b) => _headsUnder(staff, b)).join(",")} '
-        'flagged=${afterTheRest.flagLength > 0} '
+        'flagged=${afterTheGap.flagLength > 0} '
         'beam_end=${beams.isEmpty ? 0 : _beamEnd(beams.single)} '
-        'rest_note_x=${_cx(heads.last)}',
+        'note_after_gap_x=${_cx(heads.last)}',
       );
-      expect(
-        beams.length,
-        1,
-        reason: 'the two notes of beat one are joined; nothing else is',
-      );
+      expect(beams.length, 1, reason: 'three neighbouring eighths are one run');
       expect(
         _headsUnder(staff, beams.single),
-        2,
-        reason: 'the beam covers beat one and stops at the rest',
+        3,
+        reason:
+            'the beam covers all three notes: nothing in the model says the middle of the run is '
+            'silent, because a silence is not a mark the model can hold',
       );
       expect(
         _beamEnd(beams.single),
-        lessThan(_cx(heads.last)),
+        greaterThan(_cx(heads.last)),
         reason:
-            'the beam ends before the note that follows the rest: a beam across a silence claims a '
-            'grouping the music does not have',
+            'the beam runs to the far side of the last note of the run, which is what joining it '
+            'means — the note that follows a written gap is joined, not flagged',
       );
       expect(
-        afterTheRest.flagLength,
-        greaterThan(0),
-        reason: 'the note after the rest keeps its flag',
+        afterTheGap.flagLength,
+        0,
+        reason:
+            'a note under a beam carries no flag, and this one is under a beam',
       );
 
-      // AND TWO NOTES SEPARATED BY A WHOLE REST ARE NOT A GROUP AT ALL: eighths on beats one and
-      // three are two single notes, so neither is beamed.
+      // AND TWO NOTES FAR APART ARE STILL A PAIR, for the same reason: the distance between them is
+      // the musician's spacing and not a silence.
       final PlacedMelodyStaff separated = _engrave(<NoteMark>[
         _note(const Written(NoteLetter.c, 4), beat: 0, value: _eighth),
         _note(const Written(NoteLetter.e, 4), beat: 2, value: _eighth),
       ]);
       stdout.writeln(
-        'notation.beam separated beams=${_beamsOf(separated).length}',
+        'notation.beam separated beams=${_beamsOf(separated).length} '
+        'heads=${_beamsOf(separated).map((MelodyGlyph b) => _headsUnder(separated, b)).join(",")}',
       );
       expect(
         _beamsOf(separated),
-        isEmpty,
-        reason: 'two eighth notes with a beat of silence between them are two notes and not a pair',
+        hasLength(1),
+        reason:
+            'two eighths are two notes that can be beamed, so they are one run however far apart '
+            'they are written — the gap is spacing, and spacing is the musician\'s',
       );
     });
   });

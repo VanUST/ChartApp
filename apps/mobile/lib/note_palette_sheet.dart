@@ -184,13 +184,43 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   @override
   void initState() {
     super.initState();
-    // The last note of the beat is the one a musician just wrote, so it is the one they are most
-    // likely to be looking at; the first is the fallback when the address cannot be reread.
-    final List<NoteMark> existing = _notesHere();
-    if (existing.isNotEmpty) {
-      final NoteMark nearest = _nearestToWidgetX(existing);
-      _editingX = nearest.offsetX;
-      _base = nearest.value.base;
+    // THE SHEET OPENS IN EDIT MODE ONLY ON A NOTE THE FINGER ACTUALLY TOUCHED, AND THAT IS A REPAIR
+    // RATHER THAN A REFINEMENT. It used to select the note NEAREST the place the sheet was opened
+    // at, which was the right rule while a sheet was opened for ONE BEAT: every note in
+    // `_notesHere()` stood at that beat's own address, so "the nearest note here" was a note the
+    // musician had pointed at, or nothing at all. `_notesHere()` is the whole BAR now, and a bar
+    // holds notes everywhere, so "nearest" picked a note eighteen pixels away from the tap and every
+    // degree this sheet's grid wrote became an EDIT of that note. The visible effect was the defect
+    // the owner found with his hands on the tablet: a melody typed left to right came out as ONE note
+    // whose pitch kept changing, because each new place edited the note before it instead of writing
+    // a new one.
+    //
+    // A TAP THAT LANDS ON A NOTEHEAD still edits that note, and the REACH is half a head's width
+    // rather than the chord line's 22 pixels. Both halves of that are measurements:
+    //
+    //   * a notehead is `MelodyMetrics.noteheadWidth × melodyStaffSpace` = 1.2 × 13 = 15.6 pixels
+    //     wide, so its own half-width is 7.8 — a finger inside that rectangle is on the head;
+    //   * the tree's own minimum distance between two written notes is `LayoutStyle.minCellWidth` =
+    //     18, which is the gap below which the ink reader merges two heads into one. A reach of 22
+    //     is wider than that gap, so a musician writing the NEXT note one pitch gap to the right
+    //     would land inside the reach of the previous one and EDIT it instead of writing — which is
+    //     exactly what "a note typed left to right" looked like on the tablet: one note whose pitch
+    //     kept changing. A reach below the minimum spacing cannot make that mistake.
+    //
+    // The chord line keeps its own 22-pixel reach: chords are symbols drawn side by side and a note
+    // is a head, so the two gestures are not the same measurement and are not given the same number.
+    final double noteheadWidth =
+        const MelodyMetrics().noteheadWidth *
+        const LayoutStyle().melodyStaffSpace;
+    final NoteMark? touched = widget.session.existingNoteNear(
+      sectionId: widget.sectionId,
+      barIndex: widget.barIndex,
+      offsetX: widget.offsetX,
+      tolerance: noteheadWidth / 2,
+    );
+    if (touched != null) {
+      _editingX = touched.offsetX;
+      _base = touched.value.base;
     }
   }
 

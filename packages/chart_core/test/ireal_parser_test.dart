@@ -7,7 +7,7 @@
 // INPUTS: None. The last group reads a real iReal export from the path in the IREAL_FIXTURE
 //         environment variable and is skipped when it is unset.
 // OUTPUTS: Pass/fail per expectation.
-// KEYWORDS: test, ireal, parser, assembler, cell-model, comma-separator, padding, diagnostics,
+// KEYWORDS: test, ireal, parser, assembler, source-cell-to-x, comma-separator, padding, diagnostics,
 //           real-export, hand-derived
 import 'dart:io';
 
@@ -20,11 +20,19 @@ import 'package:chart_core/src/song/song.dart';
 import 'package:chart_core/src/song/time_signature.dart';
 import 'package:test/test.dart';
 
-/// The chords of [bar] as `rootQuality[/bass]@beat.step[size]`, in stored order.
+/// The chords of [bar] as `rootQuality[/bass]@x[size]`, in stored order.
 ///
 /// A chord is rendered from its pitch class and opaque quality token rather than through
 /// `Chord.render`, because rendering consults a key and this file is about placement, not
 /// spelling.
+///
+/// THE `@` FIELD IS AN X AND NOT A CELL, WHICH IS THE ONE THING TO READ BEFORE THE EXPECTATIONS.
+/// An iReal source really does place its chords on a beat grid, so the ASSEMBLER counts cells while
+/// it reads — that is the source's own unit and the only place a beat survives in this tree — and it
+/// converts each one to a coordinate when it builds the bar: `x = barPadding + beat × minCellWidth`,
+/// which with this tree's style is `8 + 18 × beat`. So cell 0 is x=8.0, cell 1 is 26.0, cell 2 is
+/// 44.0 and cell 3 is 62.0. Every number below is that arithmetic, and each case states how many
+/// BEATS apart its chords are, because that is the property a musician reads off the page.
 List<String> placementsOf(Bar bar) {
   final List<String> placements = <String>[];
   for (final ChordMark chord in bar.chords) {
@@ -43,50 +51,67 @@ List<String> placementsOf(Bar bar) {
 List<Bar> barsOf(Song song) => song.barsInReadingOrder;
 
 void main() {
-  group('a chord occupies a cell', () {
-    test(
-      'the protocol document\'s |C7ppF7| is one bar of exactly four cells',
-      () {
-        // Derivation: the leading `|` closes a bar that received no token, so it is padding and is
-        // dropped. C7 is placed on cell 0 and the pointer moves to 1. Each `p` occupies a cell and
-        // moves on, so the two slashes take cells 1 and 2. F7 then lands on cell 3. The trailing
-        // `|` closes the bar. One bar, four cells — the document's own worked example.
-        final IRealParseResult result = parseIRealNotation('|C7ppF7|');
+  group('a chord occupies a beat of the source, and a place on the page', () {
+    test('the protocol document\'s |C7ppF7| is one bar whose chords are three beats apart', () {
+      // Derivation: the leading `|` closes a bar that received no token, so it is padding and is
+      // dropped. C7 is placed on cell 0 and the pointer moves to 1. Each `p` occupies a cell and
+      // moves on, so the two slashes take cells 1 and 2. F7 then lands on cell 3. The trailing
+      // `|` closes the bar. One bar, four cells — the document's own worked example.
+      //
+      // THE OLD ASSERTION, QUOTED: expect(placementsOf(bars.single), <String>['07@0.0', '57@3.0']);
+      // The `@` field was a CELL and is an x: C7 is at 8.0 and F7 is three beats later at
+      // 8 + 3×18 = 62.0. The property the old number pinned — F7 is the bar's fourth beat, not its
+      // second — is now the DISTANCE between the two x values, which is 54 = three beats.
+      final IRealParseResult result = parseIRealNotation('|C7ppF7|');
 
-        expect(result.issues, isEmpty);
-        final List<Bar> bars = barsOf(result.song);
-        expect(bars, hasLength(1));
-        expect(placementsOf(bars.single), <String>['07@0.0', '57@3.0']);
-        expect(bars.single.slashRepeat, isTrue);
-      },
-    );
+      expect(result.issues, isEmpty);
+      final List<Bar> bars = barsOf(result.song);
+      expect(bars, hasLength(1));
+      expect(placementsOf(bars.single), <String>['07@8.0', '57@62.0']);
+      expect(
+        bars.single.chords.last.offsetX - bars.single.chords.first.offsetX,
+        54,
+        reason: 'three beats at 18 pixels each is the distance a musician reads as "on beat 4"',
+      );
+      expect(bars.single.slashRepeat, isTrue);
+    });
 
-    test('a space consumes a cell, so D- D-/C lands on cells 0 and 2', () {
+    test('a space consumes a beat, so D- and D-/C are two beats apart', () {
       // Derivation: D- is placed on cell 0 and the pointer moves to 1; the space occupies cell 1
       // and moves to 2; D-/C is placed on cell 2. This is the document's second worked example
       // and it is what proves a space is not free.
+      //
+      // THE OLD ASSERTION, QUOTED: expect(placementsOf(bar), <String>['2-@0.0', '2-/0@2.0']);
+      // — cells 0 and 2. In x: 8.0 and 8 + 2×18 = 44.0, two beats apart, which is the claim the
+      // space is there to make.
       final IRealParseResult result = parseIRealNotation('|D- D-/C|');
       final Bar bar = barsOf(result.song).single;
 
-      expect(placementsOf(bar), <String>['2-@0.0', '2-/0@2.0']);
+      expect(placementsOf(bar), <String>['2-@8.0', '2-/0@44.0']);
     });
 
     test('a comma removes an empty cell rather than joining two chords', () {
       // Derivation taken from the reference implementation, NOT from the protocol prose. A comma
       // is dropped before it can become a token, so it consumes no cell and stacks nothing. `s`
-      // turns on small size and persists. Eh is placed on cell 0, step 0, and the pointer moves to
-      // 1. The comma does nothing at all. A7 therefore takes CELL 1, step 0. The trailing comma
-      // has no chord after it. Both chords are small, because `s` persists until `l`.
+      // turns on small size and persists. Eh is placed on cell 0 and the pointer moves to 1. The
+      // comma does nothing at all. A7 therefore takes CELL 1. The trailing comma has no chord after
+      // it. Both chords are small, because `s` persists until `l`.
       //
-      // What this pins: two chords written with a comma between them are ONE CELL APART, not two
-      // chords on a single beat. An earlier version of the parser read the comma the other way and
+      // What this pins: two chords written with a comma between them are ONE BEAT APART, not two
+      // chords on one beat. An earlier version of the parser read the comma the other way and
       // stacked both on cell 0. Every worked example in the protocol document is consistent with
       // BOTH readings, so only the reference parser settles it — which is why this expectation
       // comes from reading that parser rather than from reasoning about the examples.
+      //
+      // THE OLD ASSERTION, QUOTED:
+      // expect(placementsOf(bar), <String>['4h@0.0[small]', '97@1.0[small]']);
+      // — cells 0 and 1, which are x=8.0 and x=26.0. THE TWO-CHORDS-ON-ONE-BEAT READING the old
+      // comment ruled out would now be two marks at the SAME x, so the distance of exactly one beat
+      // between the x values is the whole of what settles it.
       final IRealParseResult result = parseIRealNotation('|sEh,A7,|');
       final Bar bar = barsOf(result.song).single;
 
-      expect(placementsOf(bar), <String>['4h@0.0[small]', '97@1.0[small]']);
+      expect(placementsOf(bar), <String>['4h@8.0[small]', '97@26.0[small]']);
     });
 
     test(
@@ -100,11 +125,14 @@ void main() {
         // This is the case where the two readings of the comma AGREE, which is precisely why the
         // rule could not be settled from examples that all have this shape. It is kept as the
         // regression pin for the cell consumption of `p`.
+        //
+        // THE OLD ASSERTIONS, QUOTED: <String>['97@0.0', '117@3.0'] — cells 0 and 3. In x: 8.0 and
+        // 8 + 3×18 = 62.0, so the two chords are three beats apart exactly as the derivation says.
         final IRealParseResult result = parseIRealNotation('|A7,p,p,B7|');
 
         expect(placementsOf(barsOf(result.song).single), <String>[
-          '97@0.0',
-          '117@3.0',
+          '97@8.0',
+          '117@62.0',
         ]);
       },
     );
@@ -126,23 +154,24 @@ void main() {
   });
 
   group('sections', () {
-    test(
-      '[*i starts a section without losing the bracket on its first bar',
-      () {
-        // Derivation: `[` creates an empty bar and sets its opening barline to double. `*i` starts
-        // the intro; because the open bar is empty it belongs to the new section rather than to the
-        // section that was current, so the bracket survives. B- and the space then fill cells 0
-        // and 1, and `|` closes the bar. One section, one bar.
-        final IRealParseResult result = parseIRealNotation('[*iB- |');
-        final List<Section> sections = result.song.sections;
+    test('[*i starts a section without losing the bracket on its first bar', () {
+      // Derivation: `[` creates an empty bar and sets its opening barline to double. `*i` starts
+      // the intro; because the open bar is empty it belongs to the new section rather than to the
+      // section that was current, so the bracket survives. B- and the space then fill cells 0
+      // and 1, and `|` closes the bar. One section, one bar.
+      final IRealParseResult result = parseIRealNotation('[*iB- |');
+      final List<Section> sections = result.song.sections;
 
-        expect(sections, hasLength(1));
-        expect(sections.single.id, 'sec-i-0');
-        expect(sections.single.label.kind, SectionKind.intro);
-        expect(sections.single.bars.single.openingBarline, Barline.double);
-        expect(placementsOf(sections.single.bars.single), <String>['11-@0.0']);
-      },
-    );
+      expect(sections, hasLength(1));
+      expect(sections.single.id, 'sec-i-0');
+      expect(sections.single.label.kind, SectionKind.intro);
+      expect(sections.single.bars.single.openingBarline, Barline.double);
+      // THE OLD ASSERTION, QUOTED:
+      // expect(placementsOf(sections.single.bars.single), <String>['11-@0.0']);
+      // — cell 0 of the bracket bar, now x = 8.0. The bracket is what the case is for and it is
+      // asserted by the three expectations above.
+      expect(placementsOf(sections.single.bars.single), <String>['11-@8.0']);
+    });
 
     test(
       'an earlier bar does not renumber a later section: sec-A-0 then sec-A-1',
@@ -188,28 +217,30 @@ void main() {
 
       expect(result.song.sections, hasLength(1));
       expect(result.song.sections.single.id, 'sec-implicit-0');
-      expect(placementsOf(barsOf(result.song)[0]), <String>['07@0.0']);
-      expect(placementsOf(barsOf(result.song)[1]), <String>['57@0.0']);
+      // THE OLD ASSERTIONS, QUOTED: <String>['07@0.0'] and <String>['57@0.0'] — the `@` field was a
+      // cell. Both chords are the first of their bar, so both are one padding inside it: x = 8.0.
+      expect(placementsOf(barsOf(result.song)[0]), <String>['07@8.0']);
+      expect(placementsOf(barsOf(result.song)[1]), <String>['57@8.0']);
     });
   });
 
   group('signs that belong to the bar', () {
-    test(
-      'an opening barline, a volta, a fermata and a segno land on one bar',
-      () {
-        // Derivation: `*A` opens a bar (no content yet). `{` sets its opening barline to a repeat
-        // start. C7 takes cell 0. N2 sets volta 2. `f` adds a fermata and `S` a segno; neither
-        // consumes a cell, so they do not move C7. `|` closes the bar.
-        final IRealParseResult result = parseIRealNotation('*A{C7N2fS|');
-        final Bar bar = barsOf(result.song).single;
+    test('an opening barline, a volta, a fermata and a segno land on one bar', () {
+      // Derivation: `*A` opens a bar (no content yet). `{` sets its opening barline to a repeat
+      // start. C7 takes cell 0. N2 sets volta 2. `f` adds a fermata and `S` a segno; neither
+      // consumes a cell, so they do not move C7. `|` closes the bar.
+      final IRealParseResult result = parseIRealNotation('*A{C7N2fS|');
+      final Bar bar = barsOf(result.song).single;
 
-        expect(bar.openingBarline, Barline.repeatStart);
-        expect(bar.closingBarline, Barline.single);
-        expect(bar.volta, const Volta(2));
-        expect(bar.marks, <BarMark>{BarMark.fermata, BarMark.segno});
-        expect(placementsOf(bar), <String>['07@0.0']);
-      },
-    );
+      expect(bar.openingBarline, Barline.repeatStart);
+      expect(bar.closingBarline, Barline.single);
+      expect(bar.volta, const Volta(2));
+      expect(bar.marks, <BarMark>{BarMark.fermata, BarMark.segno});
+      // THE OLD ASSERTION, QUOTED: expect(placementsOf(bar), <String>['07@0.0']); — cell 0, which
+      // is the first place of the bar, x = 8.0. What the case is for — the signs and the chord
+      // all landed on ONE bar — is asserted by the four expectations above it.
+      expect(placementsOf(bar), <String>['07@8.0']);
+    });
 
     test('a closing `]` is written on the bar it closes', () {
       // Derivation: C7 takes cell 0, then `]` both closes the bar and names the closing barline
@@ -246,8 +277,10 @@ void main() {
       final IRealParseResult result = parseIRealNotation('C7|    |F7|');
 
       expect(barsOf(result.song), hasLength(2));
-      expect(placementsOf(barsOf(result.song)[0]), <String>['07@0.0']);
-      expect(placementsOf(barsOf(result.song)[1]), <String>['57@0.0']);
+      // THE OLD ASSERTIONS, QUOTED: <String>['07@0.0'] and <String>['57@0.0'] — the first cell of
+      // each bar, which is x = 8.0 for both. The count above is the claim this case exists for.
+      expect(placementsOf(barsOf(result.song)[0]), <String>['07@8.0']);
+      expect(placementsOf(barsOf(result.song)[1]), <String>['57@8.0']);
     });
 
     test('padding after the last barline does not add a bar', () {
@@ -273,7 +306,10 @@ void main() {
       final IRealParseResult result = parseIRealNotation('*AC7');
       final Bar bar = barsOf(result.song).single;
 
-      expect(placementsOf(bar), <String>['07@0.0']);
+      // THE OLD ASSERTION, QUOTED: expect(placementsOf(bar), <String>['07@0.0']); — cell 0, now
+      // x = 8.0. That the final bar EXISTS at all is what the case is named for, and the barline
+      // below is the other half of it.
+      expect(placementsOf(bar), <String>['07@8.0']);
       expect(bar.closingBarline, Barline.single);
     });
   });
@@ -309,8 +345,11 @@ void main() {
       final IRealParseResult result = parseIRealNotation('*AsC7|lD-|');
       final List<Bar> bars = barsOf(result.song);
 
-      expect(placementsOf(bars[0]), <String>['07@0.0[small]']);
-      expect(placementsOf(bars[1]), <String>['2-@0.0']);
+      // THE OLD ASSERTIONS, QUOTED: <String>['07@0.0[small]'] and <String>['2-@0.0'] — the first
+      // cell of each bar, which is x = 8.0. The size flag on the first and the absence of it on the
+      // second are the claim this case is for, and both survive the unit change untouched.
+      expect(placementsOf(bars[0]), <String>['07@8.0[small]']);
+      expect(placementsOf(bars[1]), <String>['2-@8.0']);
     });
   });
 
@@ -370,7 +409,11 @@ void main() {
       expect(result.issues, hasLength(1));
       expect(result.issues.single.message, contains('System break'));
       expect(result.issues.single.offset, 2);
-      expect(placementsOf(barsOf(result.song).single), <String>['07@0.0']);
+      // THE OLD ASSERTION, QUOTED: expect(placementsOf(barsOf(result.song).single),
+      // <String>['07@0.0']); — cell 0, now x = 8.0. It asserts that the `Y` did not move the chord
+      // and did not stop the bar being emitted, which is the half of this case that is about the
+      // music rather than about the issue.
+      expect(placementsOf(barsOf(result.song).single), <String>['07@8.0']);
     });
 
     test(

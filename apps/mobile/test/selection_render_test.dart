@@ -222,7 +222,13 @@ void main() {
     expect(hit, isNotNull);
     expect(hit!.sectionId, 'B');
     expect(hit.barIndex, 0);
-    expect(hit.local.x, 2);
+    // THE HIT IS A COORDINATE IN THE BAR. THE OLD ASSERTIONS, QUOTED: the comment above read "the
+    // ninth written bar, third cell" and `expect(hit.local.x, 2)` pinned the CELL the point fell in,
+    // zero-based. A hit answers with the distance from the bar's own left edge now, and this point is
+    // the middle of the bar, so the answer is half the bar's width — which is what a tap means when
+    // there is no column to be in. The highlighted rectangle the PNGs below are about comes from the
+    // bar, so what the picture has to show is unchanged.
+    expect(hit.local.x, closeTo(cell.size.width / 2, 1e-9));
 
     stdout.writeln(
       'render.select bar=9 cell=3 section=${bar.sectionId} '
@@ -276,7 +282,13 @@ void main() {
     );
     expect(fitHit, isNotNull);
     expect(fitHit!.barIndex, fitBar.barIndex);
-    expect(fitHit.local.x, 2);
+    // THE SAME CLAIM ON THE FITTED PAGE, IN THE UNIT A HIT ANSWERS WITH NOW. THE OLD ASSERTION,
+    // QUOTED: expect(fitHit.local.x, 2); — the cell the middle of the bar fell in, while the metre
+    // divided a bar into equal columns. The point is the middle of the bar, so the distance from the
+    // bar's left edge is half its width, at every scale — which is the property the case is here for:
+    // the FIT re-engraves the page and shrinks it, and the hit must be measured in the page's own
+    // coordinates rather than on the glass.
+    expect(fitHit.local.x, closeTo(fitCell.size.width / 2, 1e-9));
     stdout.writeln(
       'render.select.fit scale=${fitted.scale} '
       'engraved_cell=(${fitCell.left},${fitCell.top},'

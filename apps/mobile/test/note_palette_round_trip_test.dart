@@ -125,7 +125,7 @@ List<String> notesOf(Song song) => <String>[
         noteLine(section.id, barIndex, note),
 ];
 
-/// One note rendered as `A[0] 1.0:A4 eighth~`.
+/// One note rendered as `A[0] 26.0:A4 eighth~`.
 String noteLine(String sectionId, int barIndex, NoteMark note) {
   final String tie = note.tiedToNext ? '~' : '';
   final String value = '${note.value}';
@@ -137,7 +137,13 @@ String noteLine(String sectionId, int barIndex, NoteMark note) {
 List<String> notesOnPage(WidgetTester tester) =>
     notesOf(shownPainter(tester).song);
 
-/// Selects a cell of the drawn page and opens the note palette from the selection line's action.
+/// Selects a place of the drawn page and opens the note palette from the selection line's action.
+///
+/// THE PLACE IS A DISTANCE ALONG THE BAR, AND IT IS THE FIXTURE'S. THE OLD HELPER, QUOTED: it took
+/// `int beat` and tapped `centreOf(cell)` — the middle of the bar — whatever `beat` it was given, so
+/// every note this file wrote landed on one spot and the argument reached only the palette's header.
+/// A bar has no columns now; a note's place is its x, so this aims at the x the case names, in the
+/// same 18-pixel slot pitch the tree's fixtures use.
 Future<void> openNotePaletteFor(
   WidgetTester tester,
   int barIndex,
@@ -148,7 +154,11 @@ Future<void> openNotePaletteFor(
         placed.barIndex == barIndex && placed.sectionId == 'A',
   );
   final LayoutRect cell = bar.bounds;
-  await tapEngraved(tester, centreOf(cell));
+  final Offset place = Offset(
+    cell.left + fixtureX(beat),
+    cell.top + cell.size.height / 2,
+  );
+  await tapEngraved(tester, place);
   expect(
     find.byKey(const ValueKey<String>('viewer-selection-note')),
     findsOneWidget,
@@ -189,7 +199,7 @@ void main() {
       await tapPalette(tester, 'note-palette-base-whole');
       await tapPalette(tester, 'note-palette-degree-b');
       expect(notesOnPage(tester), <String>[
-        'A[0] 0.0:B4 whole',
+        'A[0] 8.0:B4 whole',
       ], reason: 'the degree button must insert the pitch it names');
       await tapPalette(tester, 'note-palette-new');
       await tapPalette(tester, 'note-palette-base-quarter');
@@ -209,7 +219,7 @@ void main() {
       // it is the same claim about not replacing, stated with its order.
       expect(
         notesOnPage(tester),
-        <String>['A[0] 0.0:B4 whole', 'A[0] 0.1:E4 quarter'],
+        <String>['A[0] 8.0:B4 whole', 'A[0] 8.0:E4 quarter'],
         reason:
             'a second note on one beat must be added, not replace the first — and it must be added '
             'AFTER it, because the first tap came first',
@@ -222,9 +232,9 @@ void main() {
       await tapPalette(tester, 'note-palette-degree-a');
       await tapPalette(tester, 'note-palette-tie');
       expect(notesOnPage(tester), <String>[
-        'A[0] 0.0:B4 whole',
-        'A[0] 0.1:E4 quarter',
-        'A[0] 1.0:A4 eighth~',
+        'A[0] 8.0:B4 whole',
+        'A[0] 8.0:E4 quarter',
+        'A[0] 26.0:A4 eighth~',
       ], reason: 'the tie is one field of the note the palette just wrote');
 
       // --- BAR 2 BEAT 1: an octave up, which the engraver must place on a ledger line ------
@@ -234,10 +244,10 @@ void main() {
       await tapPalette(tester, 'note-palette-octave-up');
       await tapPalette(tester, 'note-palette-degree-c');
       expect(notesOnPage(tester), <String>[
-        'A[0] 0.0:B4 whole',
-        'A[0] 0.1:E4 quarter',
-        'A[0] 1.0:A4 eighth~',
-        'A[1] 0.0:C5 half',
+        'A[0] 8.0:B4 whole',
+        'A[0] 8.0:E4 quarter',
+        'A[0] 26.0:A4 eighth~',
+        'A[1] 8.0:C5 half',
       ], reason: 'the octave control must move the written octave');
 
       // --- A CHROMATIC NOTE, through the palette's own alteration chips --------------------
@@ -245,7 +255,7 @@ void main() {
       await tapPalette(tester, 'note-palette-degree-f');
       expect(
         notesOnPage(tester).last,
-        'A[1] 0.0:F#5 half',
+        'A[1] 8.0:F#5 half',
         reason: 'the alteration chip must raise the degree it is applied to',
       );
       // Put it back so the saved chart is the one the other assertions describe.
@@ -257,9 +267,9 @@ void main() {
       expect(
         notesOnPage(tester),
         <String>[
-          'A[0] 0.0:B4 whole',
-          'A[0] 0.1:E4 quarter',
-          'A[0] 1.0:A4 eighth~',
+          'A[0] 8.0:B4 whole',
+          'A[0] 8.0:E4 quarter',
+          'A[0] 26.0:A4 eighth~',
         ],
         reason: 'removal must take exactly the selected note and nothing else',
       );
@@ -319,7 +329,7 @@ void main() {
         reopened.song.barsInReadingOrder[0].melody.map(
           (NoteMark n) => n.offsetX,
         ),
-        <int>[0, 1, 0],
+        <double>[8, 8, 26],
         reason: 'the steps of each beat must come back as they were written',
       );
     },
@@ -364,7 +374,7 @@ void main() {
       final double beat = fixtureX(2);
       final LayoutRect cell = bar.bounds;
       final Offset tapPoint = Offset(
-        cell.left + cell.size.width / 2,
+        cell.left + beat,
         bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
       );
       stdout.writeln(
@@ -407,7 +417,7 @@ void main() {
       await tapPalette(tester, 'note-palette-degree-c');
       expect(
         notesOnPage(tester),
-        <String>['A[0] 2.0:C4 quarter'],
+        <String>['A[0] 44.0:C4 quarter'],
         reason:
             'the note must be stored on beat 3 of bar 1 — the column the finger touched — with the '
             'pitch the degree button names',
