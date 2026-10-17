@@ -6,6 +6,8 @@
 //          twelve semitones, and once as twelve successive one-semitone moves that also advance
 //          the key, which is how a musician actually transposes through the cycle.
 // KEYWORDS: test, transposition, round-trip, twelve-keys, property, spelling-preservation
+import 'dart:io';
+
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
@@ -244,8 +246,18 @@ void main() {
       expect(moved.toString(), 'D major');
     });
 
-    test('keeps the source key direction rather than flipping notation', () {
-      // A flat key moved a whole tone stays a flat key.
+    test('a flat key moved a whole tone lands on the flat name, because that is the name', () {
+      // THE TITLE THIS TEST USED TO CARRY, QUOTED BECAUSE THE RULE IT NAMED IS GONE: "keeps the
+      // source key direction rather than flipping notation". It described what `transposeKey` did
+      // with its `automatic` preference — resolve it from the source key's signature before choosing
+      // the spelling — and that is exactly the rule that produced `Gb minor` and `D# major`. The
+      // automatic answer is now the name a musician writes (fewest accidentals in the key signature,
+      // and the flat side of the six-accidental signature), so the direction no longer decides.
+      //
+      // The assertions below never asked for the direction, they asked that Eb major up a whole tone
+      // is F — and F is now the answer for a better reason: it is the only spelling of that pitch
+      // class whose signature exists. Left in place, unchanged, because the defect this test has
+      // always guarded against is a flat chart coming out as `E# major`, and that is still guarded.
       const Key eFlatMajor = Key(
         tonic: WrittenNote(NoteLetter.e, -1),
         mode: Mode.major,
@@ -254,6 +266,42 @@ void main() {
       expect(moved.tonicPitchClass, 5);
       expect(moved.tonic.toString(), 'F');
       expect(moved.prefersSharps, isFalse);
+    });
+
+    test('a source key direction is asked for explicitly, and is honoured where a signature exists', () {
+      // What replaced "keeps the source key direction": the direction is an OVERRIDE now, and it is
+      // honoured only where the notation can honour it — never at the cost of an impossible key.
+      const Key eMajor = Key(
+        tonic: WrittenNote(NoteLetter.e, 0),
+        mode: Mode.major,
+      );
+      final Key askedSharp = transposer.transposeKey(
+        eMajor,
+        11,
+        preference: SpellingPreference.sharp,
+      );
+      // E major down a semitone is the pitch class of Eb. Asking for the sharp side would be D#
+      // major — nine sharps, which no key signature expresses — so the flat name is returned.
+      expect(askedSharp.toString(), 'Eb major');
+      expect(askedSharp.isPracticallySpelled, isTrue);
+      // Where the sharp side DOES exist, the override is honoured: the pitch class of F#/Gb has two
+      // real signatures, and this is the only pair in the twelve where a caller's choice matters.
+      final Key tieSharp = transposer.transposeKey(
+        eMajor,
+        2,
+        preference: SpellingPreference.sharp,
+      );
+      final Key tieFlat = transposer.transposeKey(
+        eMajor,
+        2,
+        preference: SpellingPreference.flat,
+      );
+      expect(tieSharp.toString(), 'F# major');
+      expect(tieFlat.toString(), 'Gb major');
+      stdout.writeln(
+        'transposer.override sharp=$tieSharp flat=$tieFlat '
+        'fifths=${tieSharp.signatureFifths}/${tieFlat.signatureFifths}',
+      );
     });
 
     test('preserves the mode', () {

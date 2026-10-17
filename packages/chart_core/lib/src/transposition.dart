@@ -83,8 +83,12 @@ class TranspositionTarget {
 
   /// Whether [key] is a spelling the practical circle of fifths produces.
   ///
-  /// False only for a pitch class that neither accidental direction can write conventionally; a
-  /// control must mark such a target unavailable rather than transpose into a key it cannot name.
+  /// It is ALWAYS TRUE for a target this class offers, and the field is kept because a target can be
+  /// built by hand — `setlist_scene.dart` does, to label a pitch class it could not resolve — and a
+  /// control must still refuse a key it cannot name rather than transpose into it. What changed is
+  /// that the refusal is no longer reachable from the twelve pitch classes: `KeyVocabulary` names
+  /// every one of them in both modes, so this reports a property of the key rather than a fallback's
+  /// last resort.
   final bool available;
 
   /// Whether this target is the written key itself, which the interval alone decides.
@@ -116,16 +120,26 @@ class TranspositionGrid {
 
   // PURPOSE: Offer every key a chart can be moved to, so a musician can pick one by name instead
   //          of picking an interval and hoping the spelling comes out right.
-  // INPUTS: written — the key the chart is written in, which sets the accidental direction the
-  //         automatic spelling starts from.
+  // INPUTS: written — the key the chart is written in, which decides the twelve INTERVALS and the
+  //         MODE they are named in.
   // OUTPUTS: Exactly twelve targets, ordered by pitch class from C so the grid has fixed
-  //          positions a musician can learn. The tonic is spelled in the practical direction:
-  //          the transposer's automatic choice is kept when it lands on the circle of fifths, and
-  //          the opposite direction is tried when it does not. That is what turns the transposer's
-  //          documented "Gb minor where a musician writes F# minor" case into F# minor here,
-  //          without a key-name vocabulary. A target whose pitch class neither direction can
-  //          spell is marked unavailable rather than transposed into.
-  // KEYWORDS: key-grid, twelve-keys, practical-spelling, enharmonic-choice, total-function
+  //          positions a musician can learn. Every tonic is named by [KeyVocabulary], so the twelve
+  //          names are the twelve a musician writes and, in particular, a minor chart offers the
+  //          practical minor tonics (`C`, `C#`, `D`, `Eb`, … `G#`) instead of the major ones
+  //          respelled or of a spelling nobody writes. All twelve are available: the vocabulary is
+  //          total over the twelve pitch classes in both modes. A target whose pitch class cannot
+  //          be named conventionally would be marked unavailable rather than transposed into, and
+  //          no such case exists any more — the field stays because a caller may build a target it
+  //          cannot name, and a control must still refuse it.
+  //
+  //          WHAT THIS REPLACED, STATED BECAUSE IT WAS A SPECIAL CASE AND THE FILE IS BETTER
+  //          WITHOUT IT: the tonic used to be spelled by the transposer's chromatic rule and then
+  //          MIRRORED into the opposite direction when the first answer was off the circle — two
+  //          attempts at the same question, with the second one silently succeeding where the first
+  //          had already failed. The choice now happens once, inside [KeyVocabulary], for the grid
+  //          and for the transposer alike, so a key the grid offers and a key `transposeKey`
+  //          produces for the same pitch class are the same key by construction.
+  // KEYWORDS: key-grid, twelve-keys, practical-spelling, key-vocabulary, total-function
   /// Returns the twelve keys [written] can be shown in.
   List<TranspositionTarget> targets(Key written) {
     final List<TranspositionTarget> targets = <TranspositionTarget>[];
@@ -135,50 +149,42 @@ class TranspositionGrid {
     return targets;
   }
 
-  // PURPOSE: Choose the displayed key for one target pitch class, preferring the spelling that
-  //          sits on the practical circle so a chart is not labelled with a key nobody writes.
-  // INPUTS: written — the written key. pitchClass — the target tonic's sounding pitch.
-  // OUTPUTS: A target carrying the interval from [written], the chosen key and whether a
-  //          practical spelling was found. The first attempt keeps the written key's accidental
-  //          direction; when that spelling is off the circle the opposite direction is tried; if
-  //          both are off it, the first spelling is reported as unavailable.
-  // KEYWORDS: spelling-policy, practical-circle, fallback, availability
+  // PURPOSE: Choose the displayed key for one target pitch class, so that a chart is never labelled
+  //          with a key nobody writes.
+  // INPUTS: written — the written key, read for the interval that reaches [pitchClass] and for the
+  //         MODE the target is to be named in. pitchClass — the target tonic's sounding pitch.
+  // OUTPUTS: A target carrying the interval from [written], the key [KeyVocabulary] names for that
+  //          pitch class in the written key's mode, and whether that key is practically spelled —
+  //          which is what a control reads to disable a cell, and which is true for every one of
+  //          the twelve except a chart written in a spelling the circle does not produce.
+  //
+  //          THE WRITTEN KEY'S ACCIDENTAL DIRECTION IS NOT PASSED ON AS A PREFERENCE, and that is
+  //          the difference between a grid a musician can use and one he cannot. The grid offers the
+  //          TWELVE NAMES, and those are a property of the notation rather than of the chart: a chart
+  //          in D major and a chart in Bb major are offered the same twelve keys, spelled the same
+  //          way, because `Eb` is what both of them call that pitch class. Asking for the written
+  //          key's side instead offers a sharp chart `C#` where every chart writes `Db`, and — the
+  //          case that matters — offers `Ab minor` (seven flats) where the key is `G# minor`.
+  //
+  //          THE TARGET IS PRODUCED BY TRANSPOSING THE WRITTEN KEY, which makes the zero-interval
+  //          target the written key ITSELF. That is load-bearing for a chart written in a key the
+  //          twelve-name rule would not choose — C# major, F# major — because the grid must offer the
+  //          chart's own name under "written"; a musician opening the grid on his F# major chart and
+  //          finding its current key called `Gb` would be watching his own title change. Such a cell
+  //          reports `available: false` when its spelling is beyond the practical circle, which is a
+  //          true statement about the file rather than a rename.
+  // KEYWORDS: spelling-policy, practical-circle, twelve-names, mode-preserved, identity-target
   TranspositionTarget _targetFor(Key written, int pitchClass) {
     final int semitones = _shortestInterval(
       written.tonicPitchClass,
       pitchClass,
     );
-    final Transposer transposer = Transposer(spellingTable: spellingTable);
-    final Key automatic = transposer.transposeKey(written, semitones);
-    if (automatic.isPracticallySpelled) {
-      return TranspositionTarget(
-        semitones: semitones,
-        key: automatic,
-        available: true,
-      );
-    }
-    // The first attempt followed the WRITTEN key's accidental direction, so the mirror must
-    // reverse that direction — not the direction of [automatic], whose off-circle tonic reports
-    // no direction at all ([Key.prefersSharps] is false when a key cannot be placed) and would
-    // therefore retry the same spelling and report a practical key as unavailable.
-    final Key mirrored = transposer.transposeKey(
-      written,
-      semitones,
-      preference: written.prefersSharps
-          ? SpellingPreference.flat
-          : SpellingPreference.sharp,
-    );
-    if (mirrored.isPracticallySpelled) {
-      return TranspositionTarget(
-        semitones: semitones,
-        key: mirrored,
-        available: true,
-      );
-    }
+    final Key key = Transposer(spellingTable: spellingTable)
+        .transposeKey(written, semitones);
     return TranspositionTarget(
       semitones: semitones,
-      key: automatic,
-      available: false,
+      key: key,
+      available: key.isPracticallySpelled,
     );
   }
 }
@@ -217,7 +223,6 @@ int _shortestInterval(int from, int to) {
 // KEYWORDS: song-transposition, chord-line, melody, display-key, immutable, editor-key
 /// Returns [song] with its chord line and melody moved by [semitones], labelled [toKey].
 Song transposeSong(Song song, int semitones, {required Key toKey}) {
-  const Transposer transposer = Transposer();
   final List<Section> sections = <Section>[
     for (final Section section in song.sections)
       Section(
@@ -225,37 +230,11 @@ Song transposeSong(Song song, int semitones, {required Key toKey}) {
         label: section.label,
         bars: <Bar>[
           for (final Bar bar in section.bars)
-            Bar(
-              timeSignature: bar.timeSignature,
-              // THE SIZE TRAVELS WITH THE BAR, and it is carried as the VALUE the musician set
-              // rather than re-measured: the factor is a multiple of the bar's own content, so a bar
-              // at ×2 stays "twice whatever these chords need" and is neither lost nor doubled by a
-              // transposition. Dropping it here would be invisible in the editor — the page would
-              // still draw — and would reset the chart's engraving the first time the musician
-              // transposed it.
-              size: bar.size,
-              chords: <BeatChord>[
-                for (final BeatChord placed in bar.chords)
-                  BeatChord(
-                    chord: transposer.transposeChord(placed.chord, semitones),
-                    beat: placed.beat,
-                    step: placed.step,
-                    size: placed.size,
-                  ),
-              ],
-              melody: <BeatNote>[
-                for (final BeatNote note in bar.melody)
-                  _transposedNote(note, transposer, semitones, song.key, toKey),
-              ],
-              percussion: bar.percussion,
-              openingBarline: bar.openingBarline,
-              closingBarline: bar.closingBarline,
-              volta: bar.volta,
-              repeatPrevious: bar.repeatPrevious,
-              slashRepeat: bar.slashRepeat,
-              noChord: bar.noChord,
-              marks: bar.marks,
-              staffText: bar.staffText,
+            transposedBar(
+              bar,
+              semitones,
+              writtenKey: song.key,
+              targetKey: toKey,
             ),
         ],
       ),
@@ -269,6 +248,67 @@ Song transposeSong(Song song, int semitones, {required Key toKey}) {
     tempo: song.tempo,
     sections: sections,
     staffSet: song.staffSet,
+  );
+}
+
+// PURPOSE: Move ONE bar's chord line and melody by an interval, so that transposing a whole chart and
+//          transposing a SELECTION of bars are one rule rather than two that could disagree about how
+//          a chord is spelled or whether a note's duration survives.
+// INPUTS: bar — the bar as written. semitones — the signed interval. writtenKey — the key the bar is
+//         written in. targetKey — the key the result is labelled with; EQUAL to [writtenKey] for a
+//         selection transposition, because a selection is not a modulation and the chart keeps the
+//         key it is filed under.
+// OUTPUTS: A new [Bar] carrying every field of [bar] unchanged — metre, size, percussion, barlines,
+//          volta, repeat marks, escape marks, staff text, the whole of it — with each chord root,
+//          slash bass and alternate chord moved by [semitones] and each melody note moved and
+//          re-spelled in [targetKey]. The input is not mutated, and transposing by 0 with the key
+//          unchanged returns an equal bar.
+//
+//          WHY THE SIZE TRAVELS AS THE VALUE THE MUSICIAN SET rather than being re-measured: the
+//          factor is a multiple of the bar's own natural width, so a bar at x2 stays "twice whatever
+//          these chords need" and is neither lost nor doubled by a transposition. Dropping it here
+//          would be invisible in the editor — the page would still draw — and would reset the
+//          chart's engraving the first time the musician transposed it.
+//
+//          WHY THIS IS PUBLIC AND [_transposedNote] IS NOT. A selection transposition must move the
+//          melody with the chords for the reason the whole-chart one does (see the file header): the
+//          two halves of a bar have to agree about the key they are in. Reusing this function is what
+//          keeps a transposed SELECTION spelled exactly like a transposed CHART.
+// KEYWORDS: bar-transposition, chord-line, melody, selection-transpose, size-preserved,
+//           whole-value-copy, immutable
+/// Returns [bar] with its chord line and melody moved by [semitones], keeping every other field.
+Bar transposedBar(
+  Bar bar,
+  int semitones, {
+  required Key writtenKey,
+  required Key targetKey,
+}) {
+  const Transposer transposer = Transposer();
+  return Bar(
+    timeSignature: bar.timeSignature,
+    size: bar.size,
+    chords: <BeatChord>[
+      for (final BeatChord placed in bar.chords)
+        BeatChord(
+          chord: transposer.transposeChord(placed.chord, semitones),
+          beat: placed.beat,
+          step: placed.step,
+          size: placed.size,
+        ),
+    ],
+    melody: <BeatNote>[
+      for (final BeatNote note in bar.melody)
+        _transposedNote(note, transposer, semitones, writtenKey, targetKey),
+    ],
+    percussion: bar.percussion,
+    openingBarline: bar.openingBarline,
+    closingBarline: bar.closingBarline,
+    volta: bar.volta,
+    repeatPrevious: bar.repeatPrevious,
+    slashRepeat: bar.slashRepeat,
+    noChord: bar.noChord,
+    marks: bar.marks,
+    staffText: bar.staffText,
   );
 }
 

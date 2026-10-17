@@ -1,11 +1,11 @@
 // PURPOSE: Turn the pitched notes a bar carries (`Bar.melody`) into the geometry of an engraved
 //          melody staff: where each notehead's centre lies on the five lines, how many ledger lines
-//          its pitch needs, which way its stem points, where its accidental and its augmentation
-//          dot are drawn, and the two endpoints and control point of the curve that joins a tied
-//          pair. This is the arithmetic half of engraving, kept beside the layout engine rather
-//          than inside the painter for the same reason the engine itself is pure: a notehead's
-//          position is a musical statement, and it must be assertable without a device and without
-//          a window.
+//          its pitch needs, which way its stem points, WHICH NOTES ONE BEAM JOINS AND WHERE THAT
+//          BEAM LIES, where its accidental and its augmentation dot are drawn, and the two
+//          endpoints and control point of the curve that joins a tied pair. This is the arithmetic
+//          half of engraving, kept beside the layout engine rather than inside the painter for the
+//          same reason the engine itself is pure: a notehead's position and a beam's grouping are
+//          musical statements, and they must be assertable without a device and without a window.
 // INPUTS: A `note.dart` pitch and its bar address, plus the geometry the layout engine already
 //         decided — the bar's left edge and width, the y of the staff's middle line, the distance
 //         between two staff lines, and the x of each of the bar's cells. The proportions of every
@@ -17,11 +17,13 @@
 //          handed rather than re-deriving a position from a pitch. A note whose pitch lies beyond
 //          what five ledger lines can write is CLAMPED to the last writable position rather than
 //          dropped; see [melodyStepOf] for why that direction of failure is chosen.
-// KEYWORDS: melody-staff, engraving-geometry, notehead, stem, ledger-line, accidental, tie, staff,
-//           pure-dart, notation
+// KEYWORDS: melody-staff, engraving-geometry, notehead, stem, flag, beam, ledger-line, accidental,
+//           tie, staff, pure-dart, notation
 import '../pitch.dart';
 import '../song/bar.dart';
 import '../song/note.dart';
+import '../song/note_value.dart';
+import '../song/time_signature.dart';
 import 'geometry.dart';
 
 /// The proportions every melody glyph is drawn at, in multiples of one staff space.
@@ -46,6 +48,10 @@ class MelodyMetrics {
     this.tieMinimumInset = 0.3,
     this.tieArch = 0.5,
     this.ledgerWidth = 2.6,
+    this.beamThickness = 0.5,
+    this.beamGap = 0.25,
+    this.beamSlopeLimit = 0.5,
+    this.beamletLength = 1,
   });
 
   /// How wide a notehead is, in staff spaces.
@@ -100,6 +106,40 @@ class MelodyMetrics {
   /// How wide a ledger line is, in staff spaces.
   final double ledgerWidth;
 
+  /// How thick a beam is, in staff spaces.
+  ///
+  /// HALF A SPACE IS THE CONVENTION, AND IT IS WHY A BEAM READS AS A BEAM. A stem is a hairline
+  /// ([strokeWidth], about an eighth of a space) and a beam is roughly four times that, which is
+  /// what tells a reader at a glance that two noteheads are joined rather than merely adjacent.
+  /// Drawn at a stem's weight the group would read as two notes with a rule between them, and at a
+  /// notehead's height it would read as a ledger line lying across the staff.
+  final double beamThickness;
+
+  /// The clear space between two beams of one group, in staff spaces.
+  ///
+  /// Half the beam's own thickness, which is the ordinary engraved proportion: the pair of beams
+  /// over sixteenths must read as two strokes with a gap, because an engraver who lets them touch
+  /// has drawn one beam of double weight and told the reader the value is an eighth.
+  final double beamGap;
+
+  /// The steepest a beam may slope, in staff spaces of rise per staff space of run.
+  ///
+  /// A BEAM FOLLOWS THE CONTOUR OF ITS GROUP AND IS NOT ALLOWED TO RUN AWAY WITH IT. Notes a step
+  /// apart horizontally (which is what a beat's notes are) and a step apart vertically would give a
+  /// slope of about a third at these proportions, which is inside this limit — so a scale run is
+  /// drawn as it sounds. A leap of a fifth across one gap would ask for a slope near two, and a
+  /// beam at that angle reads as a line drawn by mistake rather than as a joining of notes; it is
+  /// limited to a half, and the stems take up the difference.
+  final double beamSlopeLimit;
+
+  /// How far a partial beam reaches from its own stem, in staff spaces.
+  ///
+  /// A partial beam is the short stroke a sixteenth carries when its neighbours in the group are
+  /// eighths: the value's second beam has no partner to run to, so it is drawn as a stub whose
+  /// length is this, always stopping short of the neighbouring stem so it cannot be read as
+  /// joining it.
+  final double beamletLength;
+
   /// How far a later note on the same beat moves right of the first, in staff spaces.
   final double stepOffset = 1.6;
 }
@@ -117,8 +157,18 @@ enum MelodyGlyphKind {
   /// The vertical stroke from a notehead's edge.
   stem,
 
-  /// The curve of a flag on a stem, for an eighth note or shorter.
+  /// The curve of a flag on a stem, for a note that is beamed to nothing: an eighth note or shorter
+  /// whose beat holds no other note it could join.
   flag,
+
+  /// A thick, straight, possibly slanted stroke joining two or more stems: the beam that makes a run
+  /// of eighth notes or shorter ONE rhythmic group rather than several.
+  ///
+  /// Its geometry is [MelodyGlyph.from] and [MelodyGlyph.to] — two ends of one line — plus
+  /// [MelodyGlyph.strokeWidth] for its thickness, because a beam is nothing but a heavy line. A
+  /// group of sixteenths carries two of these, one per beam; a mixed group carries a full-width one
+  /// and shorter ones over the notes that need them.
+  beam,
 
   /// A sharp, flat or natural drawn to the left of a notehead.
   accidental,
@@ -141,7 +191,8 @@ enum MelodyGlyphKind {
 /// [text] carries it. A tie is the ONE kind whose box is not the whole of its geometry: its curve
 /// is the three points [from], [control] and [to], and the box is the bounding box of those three,
 /// published so that a caller measuring what a system needs still does not have to reconstruct the
-/// curve.
+/// curve. A beam is the same shape of statement — one line, two ends — with no curve and no control
+/// point.
 class MelodyGlyph {
   /// Creates a glyph of [kind] occupying [bounds].
   const MelodyGlyph({
@@ -193,13 +244,15 @@ class MelodyGlyph {
   /// False for a whole or a half note, which are engraved hollow.
   final bool filled;
 
-  /// A tie's first endpoint, for [MelodyGlyphKind.tie] alone.
+  /// A tie's first endpoint, for [MelodyGlyphKind.tie] alone; a beam's first end for
+  /// [MelodyGlyphKind.beam].
   final LayoutOffset from;
 
   /// A tie's control point, for [MelodyGlyphKind.tie] alone.
   final LayoutOffset control;
 
-  /// A tie's second endpoint, for [MelodyGlyphKind.tie] alone.
+  /// A tie's second endpoint, for [MelodyGlyphKind.tie] alone; a beam's second end for
+  /// [MelodyGlyphKind.beam].
   final LayoutOffset to;
 
   @override
@@ -491,6 +544,403 @@ String? melodyAccidentalOf(WrittenNote note) => switch (note.alter) {
   _ => note.alter > 0 ? 'x' : 'bb',
 };
 
+// PURPOSE: Report how many beams a written value carries, which is the number that makes a run of
+//          sixteenths read as sixteenths rather than as eighths.
+// INPUTS: value — a written duration from the model: a base, optional dots and an optional tuplet.
+// OUTPUTS: 0 for a quarter note or anything longer, 1 for an eighth, 2 for a sixteenth and 3 for a
+//          thirty-second, counting DOWN FROM the eighth by halving the base. Dots and tuplets change
+//          how LONG a note is written, not how many beams it carries, so a dotted sixteenth takes
+//          the same two beams as a plain one — which is what a musician reading it expects.
+//
+//          WHY THE COUNT IS DERIVED FROM THE BASE RATHER THAN LISTED. A value added to the model
+//          later (a sixty-fourth, say) is then treated as the shorter note it is instead of falling
+//          through a list nobody remembered to extend.
+// KEYWORDS: beam, beam-count, note-value, eighth, sixteenth, thirty-second, notation
+/// Returns the number of beams [value] is written with: 0 for a quarter or longer.
+int melodyBeamCount(NoteValue value) {
+  int beams = 0;
+  int base = value.base.denominator;
+  while (base > NoteBase.quarter.denominator) {
+    base ~/= 2;
+    beams++;
+  }
+  return beams;
+}
+
+// PURPOSE: Join a bar's beamed notes into groups and lay the beams over them, so that the rhythm a
+//          musician reads from the page is the rhythm the model holds.
+//
+//          A BEAM IS NOT DECORATION, IT IS THE RHYTHM. Sixteenths written as separate flagged notes
+//          are read as a different grouping from the same notes beamed in fours, and a jazz player
+//          reads grouping before he reads pitch; an engraver that draws the right notes with the
+//          wrong beams has written a different bar. That is why this is geometry with rules in it
+//          rather than a stroke drawn between two heads.
+// INPUTS: notes — the bar's placed notes, in the order the model stores them. staffSpace — the
+//         distance between two staff lines, the unit every proportion here is a multiple of.
+//         metrics — the beam proportions ([MelodyMetrics.beamThickness] and the three values beside
+//         it). timeSignature — the meter, whose own division into beats is what says how long a beat
+//         is and therefore which notes sound in the same one. staffMiddleLineY and staffSpace also
+//         place the band limit.
+// OUTPUTS: One `_Beams` value: for each note, the stem it must draw when it is beamed (and null when
+//          it is not), and the [MelodyGlyphKind.beam] glyphs themselves. A bar with no note short
+//          enough to beam yields no beam glyph at all, and every note then keeps its own flag.
+//
+//          THE RULES, WHICH ARE NOTATION RATHER THAN TASTE. Each is stated where it is applied:
+//            1. A beam joins notes that SOUND IN ONE BEAT — never two (see [_beamRuns]). In 4/4 that
+//               gives eighth notes in pairs and sixteenths in fours, because that is how a beat
+//               divides; in 6/8 it gives eighths in threes, because the beat there is the dotted
+//               quarter.
+//            2. A beam never crosses a barline. The grouping is built from one bar's notes, and the
+//               horizontal room a beat's run takes is fitted into the bar (see [_notesOf]), so the
+//               rule is structural rather than checked after the fact.
+//            3. A beam does not span a rest: a cell that holds no note cannot be in a run, and a
+//               note that is not short enough to carry a beam ends the run it would have joined.
+//            4. The number of beams over the group is the number its SHORTEST value needs, drawn
+//               one below the other, and each shorter value's extra beam covers only the notes that
+//               need it — see [_beamEnds] and the level loop in [_addBeamGroup].
+//            5. The stems of one group all point ONE WAY, decided once for the group, and the beam
+//               sits at their ends — see [_beamStemUp].
+//            6. The beam is [MelodyMetrics.beamThickness] thick, and it slopes toward the side of
+//               the group whose notes are higher, by no more than [MelodyMetrics.beamSlopeLimit];
+//               a group of one pitch is LEVEL, exactly.
+// KEYWORDS: beam, beaming, rhythm-grouping, beat-boundary, rest-break, stem-direction, beam-slope,
+//           partial-beam, bar-local, notation
+_Beams _beamsOf({
+  required List<_MelodyNote> notes,
+  required double staffSpace,
+  required MelodyMetrics metrics,
+  required TimeSignature timeSignature,
+  required double staffMiddleLineY,
+}) {
+  final List<_NoteStem?> stems = List<_NoteStem?>.filled(notes.length, null);
+  final List<MelodyGlyph> glyphs = <MelodyGlyph>[];
+  for (final List<int> run in _beamRuns(
+    notes: notes,
+    timeSignature: timeSignature,
+  )) {
+    _addBeamGroup(
+      run: run,
+      notes: notes,
+      stems: stems,
+      glyphs: glyphs,
+      staffSpace: staffSpace,
+      metrics: metrics,
+      staffMiddleLineY: staffMiddleLineY,
+    );
+  }
+  return _Beams(stems: stems, glyphs: glyphs);
+}
+
+// PURPOSE: Cut a bar's notes into the runs a beam may join, which is the whole musical question of
+//          beaming expressed as a partition rather than as a drawing.
+// INPUTS: notes — the bar's placed notes. timeSignature — the bar's meter, which is what says how long
+//         one beat is.
+// OUTPUTS: The notes of each run, as indices into [notes], in bar order. A run holds at least two
+//          notes; every run is inside ONE BEAT.
+//
+//          WHERE A RUN ENDS, AND WHY EACH ENDING IS A MUSICAL FACT RATHER THAN A CONDITION:
+//            * THE BEAT CHANGES. Beams group by beat, not by the bar. In 4/4 the beat is the quarter
+//              and a beat boundary therefore breaks the beam: an eighth-note run of eight notes is
+//              four beams of two, not one beam of eight. In 6/8 the beat is the dotted quarter and
+//              `TimeSignature` gives two cells for the bar, so the same rule writes eighths in
+//              threes without a second rule being added for compound meter.
+//            * THE NOTE IS TOO LONG TO BEAM. A quarter note carries no beam, so a beam cannot pass
+//              over one: the run that would have spanned it is cut on both sides.
+//            * THE NOTE NO LONGER SOUNDS IN THE BEAT ITS CELL STARTS. A note's place in time is the
+//              sum of the written durations before it, because the model orders a cell's notes by
+//              `step` and gives each one a duration; the model has no rest object, so a silence is
+//              either an empty cell or a cell that ran out of room. A cell that holds more than a
+//              beat's worth of notes — four eighths addressed to one beat — therefore carries notes
+//              that sound in the FOLLOWING beat, and those are beamed among themselves: the rule is
+//              about where a note sounds, so it survives an address that is coarser than the music.
+// KEYWORDS: beam-run, beat-boundary, rest-break, non-beamed-note, cell-duration, partition
+List<List<int>> _beamRuns({
+  required List<_MelodyNote> notes,
+  required TimeSignature timeSignature,
+}) {
+  final Map<int, List<int>> byBeat = <int, List<int>>{};
+  for (int index = 0; index < notes.length; index++) {
+    (byBeat[notes[index].note.beat] ??= <int>[]).add(index);
+  }
+  final List<int> beats = byBeat.keys.toList()..sort();
+  // THE LENGTH OF ONE BEAT IS THE METER'S FACT AND NOT THE LAYOUT'S. A 4/4 bar is four quarters, so a
+  // beat is a quarter, and a 6/8 bar is two dotted quarters, so a beat is three eighths — which is
+  // what `TimeSignature.cellsPerBar` already says, and reading it from there is what keeps the beam
+  // grouping of a compound meter correct without a second rule for it.
+  final double beatLength =
+      timeSignature.numerator /
+      (timeSignature.denominator * timeSignature.cellsPerBar);
+  final List<List<int>> runs = <List<int>>[];
+  for (final int beat in beats) {
+    List<int> run = <int>[];
+    int? runBeat;
+    double elapsed = 0;
+    for (final int index in byBeat[beat]!) {
+      final NoteValue value = notes[index].note.value;
+      // Which beat of the bar this note actually sounds in: the cell it is addressed to, plus the
+      // whole beats the durations before it have already filled.
+      final int sounding = beatLength <= 0
+          ? beat
+          : beat + (elapsed / beatLength).floor();
+      final bool beamable = melodyBeamCount(value) > 0;
+      if (!beamable || (run.isNotEmpty && sounding != runBeat)) {
+        if (run.length > 1) {
+          runs.add(run);
+        }
+        run = <int>[];
+      }
+      if (beamable) {
+        run.add(index);
+        runBeat = sounding;
+      }
+      elapsed += value.wholeNumerator / value.wholeDenominator;
+    }
+    if (run.length > 1) {
+      runs.add(run);
+    }
+  }
+  return runs;
+}
+
+// PURPOSE: Place one beamed group: decide the direction its stems take, lay the beam line over them
+//          and give every note of the group the stem that reaches it.
+// INPUTS: run — the group's note indices, from [_beamRuns]. notes — the bar's notes. stems — the
+//         per-note stem array being filled, and glyphs — the bar's glyph list being appended to.
+//         staffSpace, metrics, staffMiddleLineY — the proportions and the staff's own height.
+// OUTPUTS: Nothing; [stems] gains one entry per note of the group and [glyphs] gains one beam glyph
+//          per beam the group carries.
+// KEYWORDS: beam-placement, stem-direction, beam-slope, beam-level, partial-beam, page-coordinates
+void _addBeamGroup({
+  required List<int> run,
+  required List<_MelodyNote> notes,
+  required List<_NoteStem?> stems,
+  required List<MelodyGlyph> glyphs,
+  required double staffSpace,
+  required MelodyMetrics metrics,
+  required double staffMiddleLineY,
+}) {
+  final double headWidth = metrics.noteheadWidth * staffSpace;
+  final double headHeight = metrics.noteheadHeight * staffSpace;
+  final double stroke = metrics.strokeWidth * staffSpace;
+  final double stemLength = metrics.stemLength * staffSpace;
+  final double thickness = metrics.beamThickness * staffSpace;
+  final double gap = metrics.beamGap * staffSpace;
+  // Left to right, because a beam is drawn from its first stem to its last. The model stores a cell's
+  // notes in step order, which is their order in time, but a chart that has been read back from a
+  // file is not guaranteed to be sorted, and a beam whose ends were taken in storage order would be
+  // drawn backwards on such a chart.
+  final List<int> ordered = run.toList()
+    ..sort((int a, int b) {
+      final int byX = notes[a].centerX.compareTo(notes[b].centerX);
+      return byX != 0 ? byX : notes[a].note.step.compareTo(notes[b].note.step);
+    });
+  final bool up = _beamStemUp(<_MelodyNote>[
+    for (final int i in ordered) notes[i],
+  ]);
+  // The axis each stem is drawn on, and the y its standard-length stem would end at. The axis is the
+  // centre of the stem's own box, because that is the line the painter draws down: a stroked glyph's
+  // box is its ink, everywhere on this staff.
+  final List<double> stemX = <double>[];
+  final List<double> naturalEnd = <double>[];
+  bool level = true;
+  final int firstStep = notes[ordered.first].step;
+  for (final int index in ordered) {
+    final _MelodyNote note = notes[index];
+    stemX.add(note.centerX + headWidth / 2 - stroke / 2);
+    final double headEdge = up
+        ? note.centerY - headHeight / 2
+        : note.centerY + headHeight / 2;
+    naturalEnd.add(up ? headEdge - stemLength : headEdge + stemLength);
+    if (note.step != firstStep) {
+      level = false;
+    }
+  }
+  final double dx = stemX.last - stemX.first;
+  // RULE 6, FIRST HALF: a group of one pitch is LEVEL, exactly — not "level to within rounding",
+  // because a beam over repeated notes that tilts by a hundredth of a pixel is a beam that has been
+  // computed from the contour of a contour with no direction.
+  final double limit = metrics.beamSlopeLimit;
+  double slope = 0;
+  if (!level && dx.abs() > 0) {
+    final double wanted = (naturalEnd.last - naturalEnd.first) / dx;
+    slope = wanted.clamp(-limit, limit);
+  }
+  // THE BEAM SITS WHERE THE OUTERMOST NOTE PUTS IT AND EVERY OTHER STEM REACHES IT. A stem is never
+  // shortened below [MelodyMetrics.stemLength]: with the stems up the beam goes above the highest
+  // note's own stem end, and the lower notes grow longer stems to it — which is exactly how an
+  // engraved descending group looks. Doing it per note instead would give every note a standard stem
+  // and a beam broken into steps, which is a picture of the pitches and not a joining of them.
+  final List<double> shifted = <double>[
+    for (int i = 0; i < stemX.length; i++)
+      naturalEnd[i] - slope * (stemX[i] - stemX.first),
+  ];
+  double base = shifted.first;
+  for (final double value in shifted) {
+    base = up ? (value < base ? value : base) : (value > base ? value : base);
+  }
+  // AND IT STAYS INSIDE THE BAND THE PAGE RESERVED. The limit is the same one [melodyStepOf] clamps
+  // a pitch to, moved one step out: a beam that left the band would be drawn over the system above,
+  // and a glyph on top of the next system is read as a broken chart rather than as a wrong note —
+  // the trade-off [melodyLedgerLimit] already makes for a pitch.
+  final double bandTop = melodyStepCenterY(
+    staffMiddleLineY: staffMiddleLineY,
+    staffSpace: staffSpace,
+    step: melodyHighestStep + 1,
+  );
+  final double bandBottom = melodyStepCenterY(
+    staffMiddleLineY: staffMiddleLineY,
+    staffSpace: staffSpace,
+    step: melodyLowestStep - 1,
+  );
+  final double y0 = base.clamp(bandTop, bandBottom);
+  final double y1 = (base + slope * dx).clamp(bandTop, bandBottom);
+  double beamYAt(double x) =>
+      dx.abs() < 1e-9 ? y0 : y0 + (y1 - y0) * (x - stemX.first) / dx;
+  for (int i = 0; i < ordered.length; i++) {
+    stems[ordered[i]] = _NoteStem(up: up, endY: beamYAt(stemX[i]));
+  }
+  // RULE 4: one beam per level, each covering the notes that need that level. Level 0 is the beam a
+  // group always carries; level 1 is the second beam of the sixteenths, level 2 the third of the
+  // thirty-seconds. The extra beams are drawn one step INSIDE the group's own direction, toward the
+  // noteheads, which is where an engraved second beam lives: outside the first it would read as a
+  // longer note rather than a shorter one.
+  int maxLevel = 0;
+  for (final int index in ordered) {
+    final int count = melodyBeamCount(notes[index].note.value);
+    if (count > maxLevel) {
+      maxLevel = count;
+    }
+  }
+  for (int level = 0; level < maxLevel; level++) {
+    final double offset = (up ? 1 : -1) * level * (thickness + gap);
+    int start = 0;
+    while (start < ordered.length) {
+      if (melodyBeamCount(notes[ordered[start]].note.value) <= level) {
+        start++;
+        continue;
+      }
+      int end = start;
+      while (end + 1 < ordered.length &&
+          melodyBeamCount(notes[ordered[end + 1]].note.value) > level) {
+        end++;
+      }
+      final List<double> ends = _beamEnds(
+        level: level,
+        start: start,
+        end: end,
+        ordered: ordered,
+        notes: notes,
+        stemX: stemX,
+        stroke: stroke,
+        metrics: metrics,
+        staffSpace: staffSpace,
+      );
+      if (ends.isNotEmpty) {
+        final double xa = ends[0];
+        final double xb = ends[1];
+        final double ya = beamYAt(xa) + offset;
+        final double yb = beamYAt(xb) + offset;
+        final double left = xa < xb ? xa : xb;
+        final double top = (ya < yb ? ya : yb) - thickness / 2;
+        glyphs.add(
+          MelodyGlyph(
+            kind: MelodyGlyphKind.beam,
+            strokeWidth: thickness,
+            from: LayoutOffset(xa, ya),
+            to: LayoutOffset(xb, yb),
+            // The box is the stroke's INK, so a caller measuring what the page must hold and the
+            // painter drawing the line are one statement rather than two.
+            bounds: LayoutRect.fromLTWH(
+              left,
+              top,
+              (xb - xa).abs(),
+              (yb - ya).abs() + thickness,
+            ),
+          ),
+        );
+      }
+      start = end + 1;
+    }
+  }
+}
+
+// PURPOSE: Give the two x ends of one beam of a group — a full beam between two stems, or a stub when
+//          the level covers a single note.
+// INPUTS: level — which beam this is (0 is the group's own); start and end — the first and last note
+//         of the run needing it, as positions in [ordered]; ordered, notes and stemX — the group;
+//         stroke — the stem's weight, so a beam covers the stems' own ink; metrics and staffSpace —
+//         the stub's length.
+// OUTPUTS: Two page x values, first end then second, or an empty list when no beam can be drawn.
+//          A run of ONE note gets a [MelodyMetrics.beamletLength] stub pointing toward the rest of
+//          the group and stopping well short of the neighbouring stem, because a second beam with no
+//          second sixteenth to sit over is drawn as a short stroke: an engraver who ran it to the
+//          neighbour would be beaming a note the neighbour does not share.
+// KEYWORDS: beam-span, partial-beam, stub, beamlet, direction, x-only
+List<double> _beamEnds({
+  required int level,
+  required int start,
+  required int end,
+  required List<int> ordered,
+  required List<_MelodyNote> notes,
+  required List<double> stemX,
+  required double stroke,
+  required MelodyMetrics metrics,
+  required double staffSpace,
+}) {
+  if (end > start) {
+    // The beam runs from the outer edge of the first stem to the outer edge of the last, so the
+    // stroke's ink and the stem's ink meet instead of overlapping.
+    return <double>[stemX[start] - stroke / 2, stemX[end] + stroke / 2];
+  }
+  final double reach = metrics.beamletLength * staffSpace;
+  final bool hasNext = end + 1 < ordered.length;
+  final bool hasPrevious = start > 0;
+  if (!hasNext && !hasPrevious) {
+    return const <double>[];
+  }
+  // Toward the rest of the group, and never close enough to the neighbouring stem to be read as
+  // joining it: nine tenths of the gap leaves a visible break.
+  final double gapToNeighbour = hasNext
+      ? stemX[end + 1] - stemX[end]
+      : stemX[start] - stemX[start - 1];
+  final double length = reach < gapToNeighbour * 0.9
+      ? reach
+      : gapToNeighbour * 0.9;
+  final double from = stemX[start];
+  return hasNext
+      ? <double>[from, from + length]
+      : <double>[from - length, from];
+}
+
+// PURPOSE: Decide, once for a beamed group, which way its stems point — the rule a group of notes
+//          needs and the one most often got wrong, because a per-note rule gives a group a ladder of
+//          stems turning in the middle of it.
+// INPUTS: group — the group's notes, any order.
+// OUTPUTS: True when the group's stems point UP.
+//
+//          THE NOTE FARTHEST FROM THE MIDDLE LINE DECIDES, which is the ordinary engraved rule: a
+//          group sitting high on the staff takes stems down and one sitting low takes them up,
+//          whatever the individual notes do. A group whose extremes are equally far from the middle
+//          line takes stems DOWN, which is the same answer the per-note rule already gives for a note
+//          ON the middle line (A70: a note on or above the middle line takes a stem down), so this
+//          function is a generalisation of that rule and not a second rule beside it: for a group of
+//          one note it returns exactly what [placeMelodyStaff] returns for an unbeamed note.
+// KEYWORDS: stem-direction, group-decision, middle-line, distance-from-middle, tie-break
+bool _beamStemUp(List<_MelodyNote> group) {
+  int above = 0;
+  int below = 0;
+  for (final _MelodyNote note in group) {
+    final int delta = note.step - 4;
+    if (delta > above) {
+      above = delta;
+    }
+    if (-delta > below) {
+      below = -delta;
+    }
+  }
+  return above < below;
+}
+
 // PURPOSE: Build the melody staff of ONE bar: its five-line box and every glyph on it. This is the
 //          only place a pitch becomes a page position, so the notehead, its ledger lines, its stem
 //          and its accidental cannot be placed by four arithmetics that disagree.
@@ -507,7 +957,7 @@ String? melodyAccidentalOf(WrittenNote note) => switch (note.alter) {
 //          glyph per drawn element, in draw order. A bar with no melody yields no glyphs but still
 //          yields its box, because the five lines run across every bar of a system. A note on a
 //          negative beat, or on a beat past the last cell, is skipped.
-// KEYWORDS: melody-placement, bar-engraving, draw-order, per-cell-address, glyph-list, clef
+// KEYWORDS: melody-placement, bar-engraving, draw-order, per-cell-address, glyph-list, clef, beam
 /// Returns the melody staff of [bar], with every glyph of its notes.
 PlacedMelodyStaff placeMelodyStaff({
   required Bar bar,
@@ -540,20 +990,31 @@ PlacedMelodyStaff placeMelodyStaff({
   final List<MelodyGlyph> glyphs = <MelodyGlyph>[];
   final List<_MelodyNote> notes = _notesOf(
     bar: bar,
+    left: left,
+    width: width,
     staffMiddleLineY: staffMiddleLineY,
     staffSpace: staffSpace,
     clef: clef,
     cellX: cellX,
     stepOffset: metrics.stepOffset * staffSpace,
-    left: left,
     headHalf: metrics.noteheadWidth * staffSpace / 2,
+    edgeClearance: metrics.strokeWidth * staffSpace,
     accidentalCharWidth: metrics.accidentalWidth * staffSpace,
     accidentalGap: metrics.accidentalGap * staffSpace,
   );
-  for (final _MelodyNote note in notes) {
+  final _Beams beams = _beamsOf(
+    notes: notes,
+    staffSpace: staffSpace,
+    metrics: metrics,
+    timeSignature: bar.timeSignature,
+    staffMiddleLineY: staffMiddleLineY,
+  );
+  for (int index = 0; index < notes.length; index++) {
+    final _MelodyNote note = notes[index];
     _addNoteGlyphs(
       glyphs: glyphs,
       note: note,
+      stem: beams.stems[index],
       staffSpace: staffSpace,
       metrics: metrics,
       // The accidental is drawn on the first note of a beat and on no other, so a chord written as
@@ -562,6 +1023,9 @@ PlacedMelodyStaff placeMelodyStaff({
           note.atBeatStart && melodyAccidentalOf(note.pitch) != null,
     );
   }
+  // The beams go down AFTER the stems they join, so a stroke and a stem meet cleanly instead of the
+  // stem's end showing through the beam where the two overlap at a slant.
+  glyphs.addAll(beams.glyphs);
   _addTies(
     glyphs: glyphs,
     notes: notes,
@@ -585,6 +1049,36 @@ PlacedMelodyStaff placeMelodyStaff({
 /// `G` and `F` name the line the clef circles, which is the mnemonic a musician was taught. Anything
 /// else is read as treble, matching [melodyStepOf].
 String _clefLetter(String clef) => clef == 'bass' ? 'F' : 'G';
+
+/// How one beamed note's stem is drawn: the direction the whole group takes, and the y the stem must
+/// reach — which is where the group's beam lies at that note's own x.
+///
+/// It is one value rather than two parameters on [_addNoteGlyphs] because the two facts are decided
+/// together by [_addBeamGroup] and must not be applied one without the other: a stem turned the
+/// group's way but stopping at its standard length would end in the air beside the beam, and a stem
+/// long enough for the beam but turned its own way would cross the staff to reach it.
+class _NoteStem {
+  const _NoteStem({required this.up, required this.endY});
+
+  /// Whether the stem points up, which for a beamed note is the GROUP's decision.
+  final bool up;
+
+  /// The y the stem's free end reaches, in page coordinates: the beam's line at this note's x.
+  final double endY;
+}
+
+/// What the beaming of one bar produced: a stem for each note that is beamed, and the beam strokes
+/// themselves.
+class _Beams {
+  const _Beams({required this.stems, required this.glyphs});
+
+  /// One entry per note of the bar, in the bar's own order; null where the note is not beamed and
+  /// therefore keeps the stem and the flag its own value asks for.
+  final List<_NoteStem?> stems;
+
+  /// The beams, in the order they are drawn: one per level per run, widest first.
+  final List<MelodyGlyph> glyphs;
+}
 
 /// One melody note already placed on the staff, in page coordinates.
 class _MelodyNote {
@@ -622,29 +1116,51 @@ class _MelodyNote {
 
 // PURPOSE: Turn a bar's model notes into placed notes, in the order they are drawn, so that a later
 //          function can reason about one note rather than re-reading the model.
-// INPUTS: As [placeMelodyStaff], minus the glyph list. [left] is the bar's own left edge, which is
-//         the origin [cellX] is measured from; [cellX] holds offsets RELATIVE to it. accidentalRoom
-//         — the horizontal room an accidental needs to the left of its notehead, which is added to
-//         the first note of the bar's first beat when that note carries one, so the sign cannot be
-//         drawn across the barline.
+// INPUTS: As [placeMelodyStaff], minus the glyph list. [left] and [width] are the bar's own extent,
+//         and [cellX] holds the cell offsets RELATIVE to [left]. [stepOffset] is the greatest stride
+//         between two notes of one beat, [headHalf] the half-width of a notehead, and
+//         [edgeClearance] the ink one stroke wide that a note keeps clear of the barline — the three
+//         numbers the barline's clearance and the room left for a run are measured in.
 // OUTPUTS: The notes the staff can draw, in the bar's own storage order. A note is dropped when its
 //          beat has no cell: the bar's left padding is not a position in time, and a note drawn
 //          there would be one the musician can neither point at nor play where they wrote it.
-// KEYWORDS: note-placement, address-filter, cell-column, draw-order
+//
+//          AND EVERY NOTE IS KEPT INSIDE ITS OWN BAR, which is the horizontal half of a rule the
+//          beam rules state vertically: no sign of one bar may reach into the next. A beat's notes
+//          march right of their column by [stepOffset] each, and a beat that holds several of them
+//          — a sixteenth run, which is the case this engraving has to get right — can reach past the
+//          barline on the bar's last beat. So the stride SHRINKS when the run would not fit in the
+//          room the bar has left, and a note that still fell outside is pulled back to the bar's
+//          edge. Cramped notes inside their own bar are a blemish of this renderer, which the layout
+//          engine's note says it accepts ("a note wider than its column overhangs it"); notes outside
+//          their bar are a barline a reader cannot trust.
+// KEYWORDS: note-placement, address-filter, cell-column, draw-order, barline-containment,
+//           stride-fitting
 List<_MelodyNote> _notesOf({
   required Bar bar,
   required double left,
+  required double width,
   required double staffMiddleLineY,
   required double staffSpace,
   required String clef,
   required List<double> cellX,
   required double stepOffset,
   required double headHalf,
+  required double edgeClearance,
   required double accidentalCharWidth,
   required double accidentalGap,
 }) {
   final List<_MelodyNote> notes = <_MelodyNote>[];
   final Set<int> claimedBeats = <int>{};
+  // How many notes each cell holds, counted before anything is placed, because the stride of a beat's
+  // run depends on how many notes the run has.
+  final Map<int, int> notesPerBeat = <int, int>{};
+  for (final BeatNote note in bar.melody) {
+    if (note.beat < 0 || note.beat >= cellX.length) {
+      continue;
+    }
+    notesPerBeat[note.beat] = (notesPerBeat[note.beat] ?? 0) + 1;
+  }
   for (final BeatNote note in bar.melody) {
     if (note.beat < 0 || note.beat >= cellX.length) {
       continue;
@@ -679,18 +1195,44 @@ List<_MelodyNote> _notesOf({
         accidentalShift = needed - cellX[0];
       }
     }
+    // WHERE A BEAT'S RUN GOES HORIZONTALLY. [stepOffset] is the spacing a pair of notes gets when the
+    // bar has room for it, and a bar with room keeps exactly the geometry it had before this was
+    // written. When the run would overrun the bar, the notes are drawn NEARER EACH OTHER rather than
+    // past the barline, so the group ends inside its own bar and still starts where its beat is.
+    //
+    // THE COMPROMISE IS NAMED HERE BECAUSE IT IS ONE. A row that is squeezed this way has noteheads
+    // that overlap, which is a blemish no engraver would accept — but the alternative is worse in the
+    // two ways that matter: sliding the group left so it keeps its spacing would put it over the
+    // PREVIOUS beat's notes (two beats interleaved is a wrong rhythm, not a cramped one), and letting
+    // it run on would cross the barline. The room is short because the layout engine reserves a
+    // cell's width for its CHORDS and refuses to let a melody widen one — see `_cellWidths`, whose
+    // note says a note that is wider than its column overhangs it. A bar spaced for its melody would
+    // be the real fix, and it is not this change.
+    final double firstX = cellX[note.beat] + headroom + accidentalShift;
+    final int peers = notesPerBeat[note.beat] ?? 1;
+    // A NOTE'S INK STOPS ONE STROKE SHORT OF THE BARLINE, and that stroke is the beam's own end: the
+    // outermost stem sits inside its head by half a stroke and the beam reaches half a stroke past
+    // the stem, so exactly one stroke of room is what keeps a beam ENDING at a barline instead of
+    // merging with it. Drawn flush the two marks read as one line, and a barline a reader cannot see
+    // the end of is the same defect as a beam crossing it.
+    final double inside = headHalf + edgeClearance;
+    final double room = width - inside - firstX;
+    final double stride = peers <= 1 || room <= 0
+        ? stepOffset
+        : (room / (peers - 1) < stepOffset ? room / (peers - 1) : stepOffset);
     notes.add(
       _MelodyNote(
         pitch: note.pitch.note,
         octave: note.pitch.octave,
         note: note,
         step: step,
-        centerX:
-            left +
-            cellX[note.beat] +
-            headroom +
-            accidentalShift +
-            note.step * stepOffset,
+        // Contained in the bar as a hard guarantee, whatever the stride worked out to: the head's own
+        // half-width inside the bar's edge, less the stroke, so not even the beam's ink reaches the
+        // barline.
+        centerX: (left + firstX + note.step * stride).clamp(
+          left + headHalf,
+          left + width - inside,
+        ),
         centerY: melodyStepCenterY(
           staffMiddleLineY: staffMiddleLineY,
           staffSpace: staffSpace,
@@ -706,14 +1248,18 @@ List<_MelodyNote> _notesOf({
 // PURPOSE: Add every glyph one note draws except its tie: ledger lines first so the notehead lies
 //          over them, then the stem so a filled head covers its own stem, then the notehead itself,
 //          and last the accidental and the dot, which sit clear of the head.
-// INPUTS: glyphs — the list to append to, in draw order. note — the placed note. staffSpace — the
-//         distance between two staff lines. metrics — the glyph proportions. withAccidental —
-//         whether this note carries the accidental for its beat.
-// OUTPUTS: Nothing; [glyphs] gains between two and five entries.
-// KEYWORDS: glyph-emission, ledger-line, stem, notehead, accidental, dot, draw-order
+// INPUTS: glyphs — the list to append to, in draw order. note — the placed note. stem — the stem the
+//         note must draw when it belongs to a beamed group, or null when it does not; see
+//         [_NoteStem]. staffSpace — the distance between two staff lines. metrics — the glyph
+//         proportions. withAccidental — whether this note carries the accidental for its beat.
+// OUTPUTS: Nothing; [glyphs] gains between two and five entries. A beamed note draws NO flag: the
+//          beam is what joins it to its neighbours, and a flag beside a beam would tell the reader
+//          the note were alone.
+// KEYWORDS: glyph-emission, ledger-line, stem, beam-vs-flag, notehead, accidental, dot, draw-order
 void _addNoteGlyphs({
   required List<MelodyGlyph> glyphs,
   required _MelodyNote note,
+  required _NoteStem? stem,
   required double staffSpace,
   required MelodyMetrics metrics,
   required bool withAccidental,
@@ -727,13 +1273,21 @@ void _addNoteGlyphs({
   // what this did — puts every ledger line half its own distance away from the note it belongs to.
   final double topLineY = note.centerY + (note.step - 8) * staffSpace / 2;
   for (final double offset in melodyLedgerLineOffsets(note.step)) {
+    final double lineY = topLineY - offset * staffSpace;
     glyphs.add(
       MelodyGlyph(
         kind: MelodyGlyphKind.ledgerLine,
         strokeWidth: stroke,
+        // THE BOX IS THE STROKE'S OWN INK, WHICH MEANS IT IS CENTRED ON THE LINE IT NAMES. Every box
+        // on this staff is the ink it draws — a notehead's box is its ellipse, a stem's box is its
+        // stroke — and the painter draws a stroked glyph down the centre of the box it is handed.
+        // This one box put its TOP on the line's y instead and was therefore painted half a stroke
+        // LOW: 0.78 page pixels at a 13-pixel space, found and named rather than fixed when the
+        // engraving tests were written (A70), and fixed here by making the box mean what every other
+        // box means instead of by moving the painter's arithmetic for one kind of glyph.
         bounds: LayoutRect.fromLTWH(
           note.centerX - ledgerWidth / 2,
-          topLineY - offset * staffSpace,
+          lineY - stroke / 2,
           ledgerWidth,
           stroke,
         ),
@@ -743,30 +1297,51 @@ void _addNoteGlyphs({
 
   final double headWidth = metrics.noteheadWidth * staffSpace;
   final double headHeight = metrics.noteheadHeight * staffSpace;
-  // The stem's own x is measured from the notehead's centre rather than its edge so that the
-  // stroke, which is drawn centred on that x, stays inside the head on one side and clears it on
-  // the other. Its weight is published on the glyph, so the painter never measures it again.
-  final double stemX = note.centerX + headWidth / 2 - stroke;
+  // The stem is drawn as a line down the CENTRE of its own box, so its axis is the box's centre and
+  // the head it leaves is its own centre plus half a head — less half a stroke, so the stroke's ink
+  // sits inside the head on one side and clears it on the other. A beam is laid over the same axis,
+  // which is why the axis is stated here rather than left implicit in the box's left edge.
+  final double stemAxisX = note.centerX + headWidth / 2 - stroke / 2;
+  final double stemX = stemAxisX - stroke / 2;
   final double stemLength = metrics.stemLength * staffSpace;
-  final bool stemUp = note.step < 4;
-  // A written value of an eighth or shorter carries a flag; a quarter and longer carry none. The
-  // test is the value's own denominator rather than a list of the enum's members, so a value added
-  // to the model later is treated as the shorter one it describes.
-  final bool needsFlag = note.note.value.base.denominator >= 8;
+  // THE GROUP DECIDES, OR THE NOTE DECIDES WHEN IT IS NOT IN ONE. A beamed group's stems all run one
+  // way — the beam sits at their ends, so a group whose notes turned individually would have no end
+  // to sit at — and a note alone keeps the rule A70 pinned: below the middle line a stem points up,
+  // on it or above it points down.
+  final bool stemUp = stem?.up ?? note.step < 4;
+  final double headEdgeY = stemUp
+      ? note.centerY - headHeight / 2
+      : note.centerY + headHeight / 2;
+  // A written value of an eighth or shorter carries a flag UNLESS IT IS BEAMED; a quarter and longer
+  // carry neither. The test is the value's own denominator rather than a list of the enum's members,
+  // so a value added to the model later is treated as the shorter one it describes.
+  final bool needsFlag = stem == null && melodyBeamCount(note.note.value) > 0;
+  // A beamed stem reaches the beam and stops at the notehead's edge; an unbeamed stem is the standard
+  // length and runs into the head, where a filled head hides its end. The beamed case needs no
+  // overlap with the head: the beam, not the head, is what hides the far end.
+  final LayoutRect stemBounds;
+  if (stem != null) {
+    stemBounds = LayoutRect.fromLTWH(
+      stemX,
+      stemUp ? stem.endY : headEdgeY,
+      stroke,
+      (headEdgeY - stem.endY).abs(),
+    );
+  } else {
+    stemBounds = LayoutRect.fromLTWH(
+      stemX,
+      stemUp ? headEdgeY - stemLength : headEdgeY,
+      stroke,
+      stemLength + headHeight / 2,
+    );
+  }
   glyphs.add(
     MelodyGlyph(
       kind: MelodyGlyphKind.stem,
       stemUp: stemUp,
       flagLength: needsFlag ? metrics.flagLength * staffSpace : 0,
       strokeWidth: stroke,
-      bounds: LayoutRect.fromLTWH(
-        stemX,
-        stemUp
-            ? note.centerY - headHeight / 2 - stemLength
-            : note.centerY + headHeight / 2,
-        stroke,
-        stemLength + headHeight / 2,
-      ),
+      bounds: stemBounds,
     ),
   );
   glyphs.add(

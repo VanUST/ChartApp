@@ -1,4 +1,4 @@
-// PURPOSE: Produce the numbers and the pictures that answer owner decision D29 and the beat half of
+﻿// PURPOSE: Produce the numbers and the pictures that answer owner decision D29 and the beat half of
 //          D28: whether a staff exists because the chart DECLARED it, what a musician sees that
 //          tells him which beat he is choosing, and whether a chord-symbol chart is unaffected.
 //          Four claims that would otherwise be impressions become files and figures here:
@@ -7,11 +7,16 @@
 //               musician could write on — the closed circle D29 records, where the staff appeared
 //               only once a note was already written.
 //            2. The same chart with notes in it draws those notes on the same staff.
-//            3. A chart that declares NO pitched staff — every imported chart — is BYTE-IDENTICAL to
-//               the page the same chart produced before this change, proved on the file's bytes and
-//               on the file's SHA-256 rather than on an adjective.
+//            3. A chart that declares NO pitched staff — every imported chart — used to be proved
+//               BYTE-IDENTICAL to the page it printed before a melody staff existed. That promise is
+//               RETIRED and this instrument says so: the chart now states its key and its metre above
+//               its first system, so page one's music sits lower by that band and its pixels changed.
+//               What is still measured is the part a finger depends on — the cells and chords keep
+//               their positions relative to the bar, and page two onwards is untouched.
 //            4. Every beat of a bar is named where the musician counts it, and the staff's own hit
 //               test answers that beat's address.
+//            5. The key and the metre are ON THE PAGE, above the first system and clear of both the
+//               section letter and the first bar's chord, with the metre stated once.
 //
 //          It is an instrument, not part of the suite: it lives in `tool/`, so `flutter test`'s
 //          default run and the `melos run verify` gate do not pick it up. Run it from
@@ -135,20 +140,26 @@ Future<String?> _loadFont() async {
 // INPUTS: staves — the [StaffSet] the chart declares. WithNotes — whether every bar carries one
 //         quarter note, which is the pair that shows the SAME space drawn empty and then written
 //         into. ChordsOnly — whether the bars carry chord symbols at all; the identity case must be
-//         a real chart rather than eight empty bars.
-// OUTPUTS: An eight-bar one-section song in C major. The eighth bar carries a second note on the
-//          same beat, so the picture shows two voices of one beat's column as well.
-// KEYWORDS: fixture, declared-staff, empty-staff, with-notes, chords-only, comparable
+//         a real chart rather than eight empty bars. Key and meter — the chart's own key and the
+//         meter of every bar, so the header case can be drawn in a minor key that does not open in
+//         4/4 without a second fixture.
+// OUTPUTS: An eight-bar one-section song in C major 4/4 by default. The eighth bar carries a second
+//          note on the same beat, so the picture shows two voices of one beat's column as well. The
+//          FIRST bar carries a chord in its first cell and the section letter A, which is the case
+//          the header must not collide with.
+// KEYWORDS: fixture, declared-staff, empty-staff, with-notes, chords-only, comparable, header-case
 Song _chart({
   required StaffSet staves,
   required bool withNotes,
   bool chords = true,
+  Key key = Key.cMajor,
+  TimeSignature meter = TimeSignature.fourFour,
 }) => Song(
   id: 'chartapp-staff-probe',
   title: 'Staff probe',
   composer: 'ChartApp',
   style: 'Medium Swing',
-  key: Key.cMajor,
+  key: key,
   tempo: 120,
   staffSet: staves,
   sections: <Section>[
@@ -158,6 +169,7 @@ Song _chart({
       bars: <Bar>[
         for (int index = 0; index < 8; index++)
           Bar(
+            timeSignature: meter,
             chords: chords
                 ? <BeatChord>[
                     for (int cell = 0; cell < 4; cell++)
@@ -389,6 +401,351 @@ void _reportHits(String label, PageLayout page) {
   );
 }
 
+// PURPOSE: Report the line that states the chart's key and meter where its music begins, and prove
+//          by measurement that it collides with neither the section letter nor the first bar's
+//          chord. The owner asked for the metre to be written at the start of the composition
+//          together with the key; a header that covered the chord the chart opens with would be a
+//          worse answer than none.
+// INPUTS: label — the case's name. song, page and style — what was engraved.
+// OUTPUTS: `probe.header` on stdout: the text, the band it occupies, its height, the top of the
+//          first system, the section letter's band and the first bar with its first chord, plus a
+//          `clear=` flag that is true only when the header is entirely above all three. Also
+//          `probe.header.meter` with the meter signs the page shows, so the claim "the metre is
+//          stated once" is a printed map rather than a sentence.
+// KEYWORDS: chart-header, key, meter, collision, section-letter, first-bar-chord, measurement
+void _reportHeader(
+  String label,
+  Song song,
+  PageLayout page,
+  LayoutStyle style,
+) {
+  final PlacedChartHeader? header = page.header;
+  if (header == null) {
+    stdout.writeln('probe.header name=$label header=none');
+    return;
+  }
+  final PlacedSystem system = page.systems.first;
+  final PlacedBar bar = system.bars.first;
+  final String chord = bar.chords.isEmpty
+      ? 'none'
+      : '(${bar.chords.first.bounds.left.toStringAsFixed(1)},'
+            '${bar.chords.first.bounds.top.toStringAsFixed(1)}..'
+            '${bar.chords.first.bounds.bottom.toStringAsFixed(1)})';
+  final LayoutRect? labelBand = system.labelBand;
+  final bool clear =
+      header.bounds.bottom <= system.bounds.top &&
+      (labelBand == null || header.bounds.bottom <= labelBand.top) &&
+      header.bounds.bottom <= bar.bounds.top;
+  stdout.writeln(
+    'probe.header name=$label text="${header.text}" '
+    'band=(${header.bounds.left.toStringAsFixed(1)},'
+    '${header.bounds.top.toStringAsFixed(1)},'
+    '${header.bounds.size.width.toStringAsFixed(1)},'
+    '${header.bounds.size.height.toStringAsFixed(1)}) '
+    'height=${header.bounds.size.height.toStringAsFixed(1)} '
+    'gap=${style.chartHeaderGap} '
+    'first_system_top=${system.bounds.top.toStringAsFixed(1)} '
+    'label_band=${labelBand == null ? 'none' : '(${labelBand.top.toStringAsFixed(1)}..${labelBand.bottom.toStringAsFixed(1)})'} '
+    'section_label=${system.sectionLabel} '
+    'first_bar_top=${bar.bounds.top.toStringAsFixed(1)} '
+    'first_chord=$chord '
+    'clear=$clear',
+  );
+  stdout.writeln(
+    'probe.header.meter name=$label signs=${meterSignsOnPage(song, page)}',
+  );
+}
+
+// PURPOSE: Build the chart the beam cases are engraven on: one bar per case, each holding the notes a
+//          musician would write for it, so that the numbers and the pictures describe the same bar.
+// INPUTS: None.
+// OUTPUTS: An eight-bar one-section song in C major that declares a pitched staff. Every bar carries
+//          four chords, which is what gives it the width a real chart's bar has — a bar narrower than
+//          its own notes would test the engraving's fit-to-bar arithmetic rather than its beaming.
+//          The eight cases, in order:
+//            0. an EIGHTH PAIR inside one beat,
+//            1. a SIXTEENTH GROUP of four inside one beat,
+//            2. a MIXED group — an eighth and two sixteenths — inside one beat,
+//            3. two sixteenth groups in two beats, which is where a BEAT BOUNDARY must break a beam,
+//            4. a sixteenth group on the LAST beat, which is where a beam could cross a BARLINE,
+//            5. four notes of ONE PITCH, which is where a beam must be LEVEL,
+//            6. a rising run, which is where a beam must SLOPE,
+//            7. a lone eighth and a rest, which is where a note must keep its FLAG.
+// KEYWORDS: probe, fixture, beam, eighth, sixteenth, mixed-group, beat-boundary, barline, level,
+//           slope, flag
+Song _beamChart() {
+  /// One melody note at [letter]/[octave] of [value] on ([beat], [step]).
+  BeatNote at(
+    NoteLetter letter,
+    int octave,
+    NoteBase base,
+    int beat,
+    int step,
+  ) => BeatNote(
+    pitch: PitchedNote(note: WrittenNote(letter, 0), octave: octave),
+    value: NoteValue.plain(base),
+    beat: beat,
+    step: step,
+  );
+
+  /// A stepwise run of [count] notes from [from] up the C major scale, one per [base].
+  List<BeatNote> run(
+    List<NoteLetter> letters,
+    int octave,
+    NoteBase base,
+    int beat,
+  ) => <BeatNote>[
+    for (int index = 0; index < letters.length; index++)
+      at(letters[index], octave, base, beat, index),
+  ];
+
+  // THE RUNS ARE STEPWISE, because that is the shape a musician writes and the one whose beam has to
+  // be judged: a run that stepped up a third at a time would test the slope limit instead of the
+  // beaming. `efga` sits inside the treble staff; `cdef` starts a ledger line below it, which is the
+  // case where the beam is steepest and the outer stem longest.
+  const List<NoteLetter> efga = <NoteLetter>[
+    NoteLetter.e,
+    NoteLetter.f,
+    NoteLetter.g,
+    NoteLetter.a,
+  ];
+  const List<NoteLetter> cdef = <NoteLetter>[
+    NoteLetter.c,
+    NoteLetter.d,
+    NoteLetter.e,
+    NoteLetter.f,
+  ];
+  return Song(
+    id: 'chartapp-beam-probe',
+    title: 'Beam probe',
+    composer: 'ChartApp',
+    style: 'Medium Swing',
+    key: Key.cMajor,
+    tempo: 120,
+    staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
+    sections: <Section>[
+      Section(
+        id: 'A',
+        label: const SectionLabel.letter('A'),
+        bars: <Bar>[
+          // 0: an eighth pair in beat 1.
+          Bar(
+            chords: _probeChords(),
+            melody: <BeatNote>[
+              at(NoteLetter.g, 4, NoteBase.eighth, 0, 0),
+              at(NoteLetter.a, 4, NoteBase.eighth, 0, 1),
+            ],
+          ),
+          // 1: four sixteenths in beat 1 — the owner's «шестнадцатые соединяются сверху чертой».
+          Bar(
+            chords: _probeChords(),
+            melody: run(efga, 4, NoteBase.sixteenth, 0),
+          ),
+          // 2: a mixed group in beat 1: eighth, sixteenth, sixteenth.
+          Bar(
+            chords: _probeChords(),
+            melody: <BeatNote>[
+              at(NoteLetter.g, 4, NoteBase.eighth, 0, 0),
+              at(NoteLetter.a, 4, NoteBase.sixteenth, 0, 1),
+              at(NoteLetter.b, 4, NoteBase.sixteenth, 0, 2),
+            ],
+          ),
+          // 3: the same sixteenth run twice, in beats 1 and 3.
+          Bar(
+            chords: _probeChords(),
+            melody: <BeatNote>[
+              ...run(efga, 4, NoteBase.sixteenth, 0),
+              ...run(efga, 4, NoteBase.sixteenth, 2),
+            ],
+          ),
+          // 4: a sixteenth run on the LAST beat, where a beam that outran its column would cross the
+          //    barline into the next bar.
+          Bar(
+            chords: _probeChords(),
+            melody: run(efga, 4, NoteBase.sixteenth, 3),
+          ),
+          // 5: four sixteenths of one pitch: the beam must be level.
+          Bar(
+            chords: _probeChords(),
+            melody: run(
+              const <NoteLetter>[
+                NoteLetter.b,
+                NoteLetter.b,
+                NoteLetter.b,
+                NoteLetter.b,
+              ],
+              4,
+              NoteBase.sixteenth,
+              0,
+            ),
+          ),
+          // 6: the same shape rising, where the beam must follow it.
+          Bar(
+            chords: _probeChords(),
+            melody: run(cdef, 4, NoteBase.sixteenth, 0),
+          ),
+          // 7: one eighth and then a beat of silence: no beam, and the note keeps its flag.
+          Bar(
+            chords: _probeChords(),
+            melody: <BeatNote>[
+              at(NoteLetter.g, 4, NoteBase.eighth, 0, 0),
+              at(NoteLetter.a, 4, NoteBase.eighth, 2, 0),
+            ],
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+/// Four chord symbols for one bar, which is the width a real chart's bar is measured at.
+List<BeatChord> _probeChords() => <BeatChord>[
+  for (int cell = 0; cell < 4; cell++)
+    BeatChord(
+      chord: Chord(
+        root: ChordRoot(cell * 3),
+        quality: cell.isEven
+            ? ChordQuality.majorSeventh
+            : ChordQuality.minorSeventh,
+      ),
+      beat: cell,
+    ),
+];
+
+// PURPOSE: Print, for every note the melody staff drew, the pitch, the staff step it landed on, the
+//          ledger lines it needed, which way its stem points and whether a beam replaced its flag.
+// INPUTS: label — the case's name. song and page — the chart and its first laid-out page.
+// OUTPUTS: One `probe.notes` line per bar: the bar index, then one entry per note.
+// KEYWORDS: probe, notes, staff-step, ledger-line, stem-direction, beam-vs-flag
+void _reportNotes(String label, Song song, PageLayout page) {
+  for (final PlacedBar placed in page.bars) {
+    final Bar? bar = song.barAt(placed.sectionId, placed.barIndex);
+    if (bar == null || bar.melody.isEmpty) {
+      continue;
+    }
+    final List<String> described = <String>[];
+    for (int index = 0; index < bar.melody.length; index++) {
+      final BeatNote note = bar.melody[index];
+      final int step = melodyStepOf(
+        note.pitch.note,
+        octave: note.pitch.octave,
+        clef: placed.melody.clef ?? 'treble',
+      );
+      described.add(
+        '${note.pitch}:b${note.beat}.${note.step} step=$step '
+        'ledger=${melodyLedgerLineOffsets(step).length}',
+      );
+    }
+    stdout.writeln(
+      'probe.notes name=$label bar=${placed.barIndex} count=${bar.melody.length} '
+      '${described.join(' | ')}',
+    );
+  }
+}
+
+// PURPOSE: Print every beam the melody staff drew as numbers — where it starts and ends, how thick it
+//          is, how steep, how many stems it reaches and which way those stems point — so that a claim
+//          about a beam's shape can be read off a run instead of being taken from a picture.
+// INPUTS: label — the case's name. page — the laid-out page.
+// OUTPUTS: `probe.beams` for each bar: the count, the stems of the bar, and one `beam#k` entry per
+//          beam with its ends, thickness in staff spaces, slope and reach.
+// KEYWORDS: probe, beam, thickness, slope, span, stem-direction, measurement
+void _reportBeams(String label, PageLayout page) {
+  for (final PlacedBar placed in page.bars) {
+    final List<MelodyGlyph> beams = <MelodyGlyph>[
+      for (final MelodyGlyph glyph in placed.melody.glyphs)
+        if (glyph.kind == MelodyGlyphKind.beam) glyph,
+    ];
+    if (beams.isEmpty) {
+      continue;
+    }
+    final List<MelodyGlyph> stems = <MelodyGlyph>[
+      for (final MelodyGlyph glyph in placed.melody.glyphs)
+        if (glyph.kind == MelodyGlyphKind.stem) glyph,
+    ];
+    final double space = placed.melody.bounds.size.height / 4;
+    final List<String> described = <String>[];
+    for (int index = 0; index < beams.length; index++) {
+      final MelodyGlyph beam = beams[index];
+      final double dx = beam.to.x - beam.from.x;
+      final double slope = dx.abs() < 1e-9 ? 0 : (beam.to.y - beam.from.y) / dx;
+      final double start = beam.from.x < beam.to.x ? beam.from.x : beam.to.x;
+      final double end = beam.from.x < beam.to.x ? beam.to.x : beam.from.x;
+      int reached = 0;
+      for (final MelodyGlyph stem in stems) {
+        final double axis = stem.bounds.left + stem.bounds.size.width / 2;
+        if (axis >= start - 1e-6 && axis <= end + 1e-6) {
+          reached++;
+        }
+      }
+      described.add(
+        'beam#$index x=[${start.toStringAsFixed(1)}..${end.toStringAsFixed(1)}] '
+        'y=[${beam.from.y.toStringAsFixed(2)}..${beam.to.y.toStringAsFixed(2)}] '
+        'stems=$reached thick=${(beam.strokeWidth / space).toStringAsFixed(3)}sp '
+        'slope=${slope.toStringAsFixed(3)}',
+      );
+    }
+    stdout.writeln(
+      'probe.beams name=$label bar=${placed.barIndex} count=${beams.length} '
+      'stem_up=${stems.map((MelodyGlyph stem) => stem.stemUp).join(",")} '
+      'flags=${stems.where((MelodyGlyph stem) => stem.flagLength > 0).length} '
+      '${described.join(' | ')}',
+    );
+  }
+}
+
+// PURPOSE: Paint ONE REGION of a laid-out page at a magnification, so a shape whose thickness and
+//          slope are the whole of what it means can be judged by eye at a size the eye can judge.
+// INPUTS: page, song and metrics — what to draw. out — the file. region — the part of the page to
+//          show, in page coordinates. zoom — surface pixels per page pixel.
+// OUTPUTS: Writes the PNG and returns the bytes written, exactly as [_renderToPng] does for a whole
+//          page. The image and the picture are disposed.
+//
+//          WHY IT PAINTS THE WHOLE PAGE AND THEN CROPS, RATHER THAN HANDING THE PAINTER A SMALLER
+//          SURFACE. The painter fills its background and clips to the box it is given, and it does
+//          that in the PAGE's own coordinates — so a caller that passed the REGION as the size would
+//          be handing it the page's top-left corner instead, and the crop would come out blank. It
+//          did, and the blank file is why this note exists. The magnification and the offset are
+//          therefore a canvas transform, and the crop is a clip in SURFACE coordinates laid down
+//          before the painter draws anything.
+// KEYWORDS: probe, crop, magnification, png, eye, beam, thickness, slope, clip-in-surface-space
+Future<List<int>> _renderCrop(
+  PageLayout page,
+  Song song,
+  FlutterTextMetrics metrics,
+  File out, {
+  required LayoutRect region,
+  required double zoom,
+}) async {
+  final ui.PictureRecorder recorder = ui.PictureRecorder();
+  final ui.Canvas canvas = ui.Canvas(recorder);
+  canvas.clipRect(
+    ui.Rect.fromLTWH(0, 0, region.size.width * zoom, region.size.height * zoom),
+  );
+  canvas.scale(zoom);
+  canvas.translate(-region.left, -region.top);
+  ChartPainter(
+    song: song,
+    page: page,
+    metrics: metrics,
+  ).paint(canvas, ui.Size(page.size.width, page.size.height));
+  final ui.Picture picture = recorder.endRecording();
+  final ui.Image image = await picture.toImage(
+    (region.size.width * zoom).round(),
+    (region.size.height * zoom).round(),
+  );
+  final ByteData? png = await image.toByteData(format: ui.ImageByteFormat.png);
+  if (png == null) {
+    throw StateError('the engine produced no PNG bytes for ${out.path}');
+  }
+  image.dispose();
+  picture.dispose();
+  out.parent.createSync(recursive: true);
+  final List<int> bytes = png.buffer.asUint8List();
+  out.writeAsBytesSync(bytes);
+  return bytes;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test('the declared staff, the beats it names, and the identity of a chart that declares none', () async {
@@ -419,6 +776,7 @@ void main() {
       pageHeight: _pageHeight,
     );
     _reportStaff('declared-empty', emptyPages.first, style);
+    _reportHeader('declared-empty', declaredEmpty, emptyPages.first, style);
     _reportBeats('declared-empty', emptyPages.first);
     _reportHits('declared-empty', emptyPages.first);
     final List<int> emptyBytes = await _renderToPng(
@@ -446,6 +804,7 @@ void main() {
       pageHeight: _pageHeight,
     );
     _reportStaff('declared-notes', notePages.first, style);
+    _reportHeader('declared-notes', declaredWithNotes, notePages.first, style);
     _reportBeats('declared-notes', notePages.first);
     _reportHits('declared-notes', notePages.first);
     final List<int> noteBytes = await _renderToPng(
@@ -466,9 +825,15 @@ void main() {
 
     // --- CASE 3: A CHART THAT DECLARES NO STAFF ----------------------------------------------
     //
-    // Every imported chart. It must be BYTE-IDENTICAL to the page the same chart produced before
-    // this change. The reference is a run of THIS probe against the tree before the layout engine
-    // and the painter changed, written to another directory; the shell compares the two files.
+    // Every imported chart. This case used to be a BYTE-IDENTITY reference — the page it printed
+    // before a melody staff existed — and THAT PROMISE IS NOW FALSE, stated here rather than left for
+    // a reader to discover from two differing files: the chart now states its key and its metre in a
+    // band above its first system, which moves page one's music down by that band and changes every
+    // pixel of the page. What survives, and what this case still measures, is the geometry that
+    // matters to a musician's finger: the bar, its cell columns and its chords keep their positions
+    // RELATIVE to the bar, and a page other than the first is untouched. `probe.header` prints the
+    // band and the first system's top, `probe.hit` prints what a tap on each cell names, and the
+    // pixel-level proof lives in `apps/mobile/test/chart_header_render_test.dart`.
     final Song chordsOnly = _chart(
       staves: StaffSet.chordsOnly,
       withNotes: false,
@@ -479,6 +844,7 @@ void main() {
       pageHeight: _pageHeight,
     );
     _reportStaff('chords-only', plainPages.first, style);
+    _reportHeader('chords-only', chordsOnly, plainPages.first, style);
     _reportBeats('chords-only', plainPages.first);
     _reportHits('chords-only', plainPages.first);
     final List<int> plainBytes = await _renderToPng(
@@ -492,8 +858,258 @@ void main() {
       'digest=${_digestOf(plainBytes)}',
     );
     stdout.writeln('probe.out dir=$outDir');
+
+    // --- CASE 4: THE KEY AND THE METER, ON THE PAGE, IN A MINOR KEY THAT IS NOT IN 4/4 ------
+    //
+    // The chart the owner asked to be able to read at a stand: its key and its metre stated where
+    // the music begins. Eb minor is chosen because it is the name the key vocabulary had to be built
+    // to produce (the transposer used to answer `D# major`/`Gb minor` for pitch classes like this
+    // one), and 3/4 because a chart that does not open in 4/4 is the only case where the bar's own
+    // meter sign could double the header's statement.
+    const Key eFlatMinor = Key(
+      tonic: WrittenNote(NoteLetter.e, -1),
+      mode: Mode.minor,
+    );
+    final Song waltz = _chart(
+      staves: const StaffSet(pitched: StaffSpec.pitched()),
+      withNotes: true,
+      key: eFlatMinor,
+      meter: TimeSignature.threeFour,
+    );
+    final List<PageLayout> waltzPages = engine.layout(
+      waltz,
+      pageWidth: _pageWidth,
+      pageHeight: _pageHeight,
+    );
+    _reportHeader('minor-waltz', waltz, waltzPages.first, style);
+    final List<int> waltzBytes = await _renderToPng(
+      waltzPages.first,
+      waltz,
+      metrics,
+      File('$outDir${Platform.pathSeparator}staff-minor-waltz@2x.png'),
+    );
+    stdout.writeln(
+      'probe.identity name=minor-waltz png_bytes=${waltzBytes.length} '
+      'digest=${_digestOf(waltzBytes)}',
+    );
+
     _reportTypedChords(Key.cMajor);
     _reportActionCounts();
+  });
+
+  // PURPOSE: Answer the owner's own criterion for a note engraving — «Распознавание нот и их верное
+  //          визуальное соединение (шестнадцатые соединяются сверху чертой) должно быть почти
+  //          идеальным» — with numbers AND with pictures, from one run.
+  // INPUTS: STAFF_PROBE_OUT names the directory. The chart is built above so the run never depends on
+  //         the owner's export.
+  // OUTPUTS: `probe.beams` and `probe.notes` per bar, a whole-page PNG, a strip of the first system,
+  //          and one magnified crop per case, because a beam's THICKNESS AND SLOPE are the whole of
+  //          what a reader judges and neither can be read off a number alone. The assertions are the
+  //          musical facts the picture is looked at against: two beams over the sixteenths, one over
+  //          the eighths, a level beam over repeated notes, no beam across a barline, and a flag left
+  //          on a note with nothing to join.
+  // KEYWORDS: probe, beam, sixteenths, owner-criterion, rhythm-grouping, png, crop, magnification
+  test('the beam joins what one beat holds, and the pictures and the numbers are one run', () async {
+    final String? family = await _loadFont();
+    expect(
+      family,
+      isNotNull,
+      reason: 'the chord symbols must be letters, not boxes',
+    );
+    final FlutterTextMetrics metrics = _metricsFor(family!);
+    final LayoutStyle style = _styleFor(metrics);
+    final LayoutEngine engine = LayoutEngine(style: style);
+    final String outDir =
+        Platform.environment['STAFF_PROBE_OUT'] ?? staffProbeDirectory;
+    Directory(outDir).createSync(recursive: true);
+    final Song song = _beamChart();
+    final List<PageLayout> pages = engine.layout(
+      song,
+      pageWidth: _pageWidth,
+      pageHeight: _pageHeight,
+    );
+    final PageLayout page = pages.first;
+    _reportStaff('beams', page, style);
+    _reportNotes('beams', song, page);
+    _reportBeams('beams', page);
+    final List<int> bytes = await _renderToPng(
+      page,
+      song,
+      metrics,
+      File('$outDir${Platform.pathSeparator}beams-page@2x.png'),
+    );
+    stdout.writeln(
+      'probe.identity name=beams png_bytes=${bytes.length} '
+      'digest=${_digestOf(bytes)} bars=${page.bars.length} '
+      'systems=${page.systems.length}',
+    );
+    // A strip of the first system's staff, at three times the size: the whole line of cases, so a
+    // reader can see that the groups are where the beats are.
+    final PlacedBar firstBar = page.bars.first;
+    final double space = firstBar.melody.bounds.size.height / 4;
+    final List<int> stripBytes = await _renderCrop(
+      page,
+      song,
+      metrics,
+      File('$outDir${Platform.pathSeparator}beams-system@3x.png'),
+      region: LayoutRect.fromLTWH(
+        page.systems.first.bounds.left,
+        firstBar.melody.bounds.top - 3 * space,
+        page.systems.first.bounds.size.width,
+        firstBar.melody.bounds.size.height + 6 * space,
+      ),
+      zoom: 3,
+    );
+    stdout.writeln(
+      'probe.crop name=system file=beams-system@3x.png bytes=${stripBytes.length} '
+      'zoom=3',
+    );
+    // ONE CROP PER CASE, each wide enough to show the barlines on both sides of the bar it pictures,
+    // because the question "does the beam stay inside the bar" is answered by the barline in the
+    // picture and not by a number.
+    for (final PlacedBar placed in page.bars) {
+      final LayoutRect staff = placed.melody.bounds;
+      final LayoutRect region = LayoutRect.fromLTWH(
+        staff.left - 2,
+        staff.top - 4 * space,
+        staff.size.width + 16,
+        staff.size.height + 8 * space,
+      );
+      final List<int> cropBytes = await _renderCrop(
+        page,
+        song,
+        metrics,
+        File(
+          '$outDir${Platform.pathSeparator}beams-bar${placed.barIndex}@5x.png',
+        ),
+        region: region,
+        zoom: 5,
+      );
+      stdout.writeln(
+        'probe.crop name=bar${placed.barIndex} '
+        'file=beams-bar${placed.barIndex}@5x.png bytes=${cropBytes.length} zoom=5 '
+        'bar_x=[${staff.left.toStringAsFixed(1)}..${staff.right.toStringAsFixed(1)}]',
+      );
+    }
+
+    /// The beams of a bar, left to right — the same order the engraving draws them in.
+    List<MelodyGlyph> beamsOfBar(int bar) {
+      final List<MelodyGlyph> beams = <MelodyGlyph>[
+        for (final MelodyGlyph glyph in page.bars[bar].melody.glyphs)
+          if (glyph.kind == MelodyGlyphKind.beam) glyph,
+      ];
+      beams.sort(
+        (MelodyGlyph a, MelodyGlyph b) =>
+            (a.from.x < a.to.x ? a.from.x : a.to.x).compareTo(
+              b.from.x < b.to.x ? b.from.x : b.to.x,
+            ),
+      );
+      return beams;
+    }
+
+    /// The stems a beam reaches, which is the number of notes it joins.
+    int stemsUnder(int bar, MelodyGlyph beam) {
+      final double start =
+          (beam.from.x < beam.to.x ? beam.from.x : beam.to.x) - 1e-6;
+      final double end =
+          (beam.from.x < beam.to.x ? beam.to.x : beam.from.x) + 1e-6;
+      return <MelodyGlyph>[
+        for (final MelodyGlyph glyph in page.bars[bar].melody.glyphs)
+          if (glyph.kind == MelodyGlyphKind.stem &&
+              glyph.bounds.left + glyph.bounds.size.width / 2 >= start &&
+              glyph.bounds.left + glyph.bounds.size.width / 2 <= end)
+            glyph,
+      ].length;
+    }
+
+    // THE MUSICAL FACTS, ASSERTED SO A REGRESSION FAILS THE INSTRUMENT INSTEAD OF PRINTING A WRONG
+    // NUMBER QUIETLY. Each is the criterion the owner stated, in his own terms.
+    expect(
+      beamsOfBar(0).length,
+      1,
+      reason: 'an eighth pair in one beat is joined by one beam',
+    );
+    expect(
+      stemsUnder(0, beamsOfBar(0).single),
+      2,
+      reason: 'and it joins both notes',
+    );
+    expect(
+      beamsOfBar(1).length,
+      2,
+      reason: 'sixteenths are joined by TWO beams — «шестнадцатые соединяются сверху чертой»',
+    );
+    for (final MelodyGlyph beam in beamsOfBar(1)) {
+      expect(
+        stemsUnder(1, beam),
+        4,
+        reason:
+            'each of the two beams runs over all four sixteenths of the beat',
+      );
+    }
+    expect(
+      beamsOfBar(2).length,
+      2,
+      reason: 'a mixed group takes the first beam over all of it and one more over the sixteenths',
+    );
+    // TWO GROUPS IN TWO BEATS ARE TWO GROUPS AND NOT ONE: each sixteenth run carries two beams of
+    // its own, so the bar holds four beams in two x-spans. A single beam reaching across the beat
+    // between them would be the defect this case exists for.
+    expect(
+      beamsOfBar(3).length,
+      4,
+      reason:
+          'two sixteenth groups in two beats are two groups of two beams each — a beat boundary '
+          'breaks the beam even inside one bar',
+    );
+    expect(
+      beamsOfBar(3)[1].to.x,
+      lessThan(beamsOfBar(3)[2].from.x),
+      reason: 'and the two groups do not overlap: the beat between them is empty of beam',
+    );
+    final List<MelodyGlyph> lastBeat = beamsOfBar(4);
+    expect(
+      lastBeat,
+      isNotEmpty,
+      reason: 'the last-beat case must draw a beam to contain',
+    );
+    for (final MelodyGlyph beam in lastBeat) {
+      final double start = beam.from.x < beam.to.x ? beam.from.x : beam.to.x;
+      final double end = beam.from.x < beam.to.x ? beam.to.x : beam.from.x;
+      stdout.writeln(
+        'probe.beams.containment bar=4 '
+        'bar_x=[${page.bars[4].melody.bounds.left.toStringAsFixed(1)}..'
+        '${page.bars[4].melody.bounds.right.toStringAsFixed(1)}] '
+        'beam_x=[${start.toStringAsFixed(1)}..${end.toStringAsFixed(1)}]',
+      );
+      expect(
+        start,
+        greaterThanOrEqualTo(page.bars[4].melody.bounds.left),
+        reason: 'a beam never crosses a barline',
+      );
+      expect(
+        end,
+        lessThanOrEqualTo(page.bars[4].melody.bounds.right),
+        reason: 'a beam never crosses a barline',
+      );
+    }
+    for (final MelodyGlyph beam in beamsOfBar(5)) {
+      expect(
+        beam.from.y,
+        closeTo(beam.to.y, 1e-9),
+        reason: 'four notes of one pitch are joined by a LEVEL beam',
+      );
+    }
+    expect(
+      beamsOfBar(6).first.to.y,
+      lessThan(beamsOfBar(6).first.from.y),
+      reason: 'a rising run is joined by a rising beam',
+    );
+    expect(
+      beamsOfBar(7),
+      isEmpty,
+      reason: 'an eighth with no neighbour in its beat is flagged, not beamed',
+    );
   });
 }
 

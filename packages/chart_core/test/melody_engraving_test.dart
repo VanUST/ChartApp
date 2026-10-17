@@ -2,7 +2,8 @@
 //          that engraves it: which letter each of a staff's five lines names, which line or space a
 //          written pitch must occupy, how many ledger lines a pitch outside the staff needs and
 //          where they stand, that an accidental belongs to the letter of its note, which way a stem
-//          points, and that the staff publishes its clef without drawing one.
+//          points, that the staff publishes its clef without drawing one, WHICH NOTES ONE BEAM JOINS
+//          AND WHERE THAT BEAM LIES, and what a glyph's box means.
 //
 //          WHY THIS FILE EXISTS, IN ONE SENTENCE OF HISTORY. The engraver counted a pitch's position
 //          from `7 * (octave - 4)`, which puts a written C4 on the treble staff's BOTTOM LINE where
@@ -20,14 +21,23 @@
 //          twelfth between the two clefs' bottom lines — it is counted from the letters and octaves
 //          themselves by [Written.stepsAbove], which is the arithmetic a musician does reading from
 //          line to space to line.
+//
+//          AND THE BEAMING CASES FOLLOW THE SAME RULE, because a beam is a musical statement and not
+//          a stroke: the number of beams is the written VALUE (one for an eighth, two for a
+//          sixteenth), the group is one BEAT, and the direction the group's stems take is the one a
+//          note farthest from the middle line dictates. Each expectation names the notation it comes
+//          from — "a beat boundary breaks the beam", "a group of one pitch is level" — so a change in
+//          the engraver fails a sentence about music rather than a sentence about the engraver.
 // INPUTS: None. The staff the geometry cases are engraved on is declared below with the
 //         application's own staff-space proportion, so the case needs no device, no font and no
-//         fixture file.
-// OUTPUTS: Pass/fail per musical fact, plus `notation.*` lines on stdout naming every letter, step
-//          and ledger-line distance the assertions rest on, so a failure shows the staff rather
-//          than only a boolean.
+//         fixture file. The one case that asks about a PAGE — whether a beam crosses a barline —
+//         engraves a two-bar song through the layout engine, because a barline is a fact of a page.
+// OUTPUTS: Pass/fail per musical fact, plus `notation.*` lines on stdout naming every letter, step,
+//          ledger-line distance, beam span, slope and thickness the assertions rest on, so a failure
+//          shows the staff rather than only a boolean.
 // KEYWORDS: test, melody-staff, engraving, music-theory, treble-clef, bass-clef, ledger-line,
-//           accidental, stem, clef-published-not-drawn, falsifiable
+//           accidental, stem, beam, beaming, rhythm-grouping, beat-boundary, glyph-box,
+//           clef-published-not-drawn, falsifiable
 import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
@@ -139,12 +149,16 @@ BeatNote _note(
 );
 
 /// The melody staff of a one-bar song holding [melody], engraved on the geometry declared above.
+///
+/// [timeSignature] is the bar's meter. It matters to beaming, which is grouped by BEAT, and in a
+/// compound meter the beat is not the note the numerator counts: 6/8 has two beats of three eighths.
 PlacedMelodyStaff _engrave(
   List<BeatNote> melody, {
   String clef = 'treble',
   bool includeClef = false,
+  TimeSignature timeSignature = TimeSignature.fourFour,
 }) => placeMelodyStaff(
-  bar: Bar(melody: melody),
+  bar: Bar(timeSignature: timeSignature, melody: melody),
   left: _barLeft,
   width: _barWidth,
   staffMiddleLineY: _middleLineY,
@@ -161,6 +175,49 @@ List<MelodyGlyph> _glyphsOf(PlacedMelodyStaff staff, MelodyGlyphKind kind) =>
         if (glyph.kind == kind) glyph,
     ];
 
+/// An eighth note's written value, spelled once so a beam case reads as `_eighth` instead of as a
+/// constructor call between the notes whose values it is comparing.
+const NoteValue _eighth = NoteValue.plain(NoteBase.eighth);
+
+/// A run of [count] notes of [base] in ONE beat, one note per entry of [pitches], in the order given.
+///
+/// The notes land at ([beat], 0), ([beat], 1) … which is how a run inside a beat is addressed: one
+/// cell, one note after another. [pitches] is read from its start, so a case that names four pitches
+/// and asks for four notes says exactly what it means.
+List<BeatNote> _run(
+  int count,
+  NoteBase base,
+  List<Written> pitches, {
+  int beat = 0,
+}) => <BeatNote>[
+  for (int index = 0; index < count; index++)
+    _note(
+      pitches[index],
+      beat: beat,
+      step: index,
+      value: NoteValue.plain(base),
+    ),
+];
+
+/// A song of one section whose bars carry [melodies], one bar per entry.
+///
+/// It exists for the claims that are about a PAGE rather than about one bar — whether a beam crosses
+/// a barline is one of those, and it cannot be answered by engraving a bar on its own.
+Song _beamSong(List<List<BeatNote>> melodies) => Song(
+  title: 'Beam cases',
+  key: Key.cMajor,
+  staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
+  sections: <Section>[
+    Section(
+      id: 'B',
+      label: const SectionLabel.letter('B'),
+      bars: <Bar>[
+        for (final List<BeatNote> melody in melodies) Bar(melody: melody),
+      ],
+    ),
+  ],
+);
+
 /// The one glyph of [kind] the staff drew.
 ///
 /// A `single` rather than a first-or-null because every case that uses it engraves exactly one note:
@@ -168,6 +225,76 @@ List<MelodyGlyph> _glyphsOf(PlacedMelodyStaff staff, MelodyGlyphKind kind) =>
 /// that is a failure worth seeing.
 MelodyGlyph _oneOf(PlacedMelodyStaff staff, MelodyGlyphKind kind) =>
     _glyphsOf(staff, kind).single;
+
+/// The beams the staff drew, ordered left to right, because that is the direction a beam is read in.
+List<MelodyGlyph> _beamsOf(PlacedMelodyStaff staff) =>
+    _glyphsOf(staff, MelodyGlyphKind.beam)..sort(
+      (MelodyGlyph a, MelodyGlyph b) => _beamStart(a).compareTo(_beamStart(b)),
+    );
+
+/// The x where a beam begins, whichever way round its two ends were published.
+double _beamStart(MelodyGlyph beam) =>
+    beam.from.x <= beam.to.x ? beam.from.x : beam.to.x;
+
+/// The x where a beam ends.
+double _beamEnd(MelodyGlyph beam) =>
+    beam.from.x <= beam.to.x ? beam.to.x : beam.from.x;
+
+/// The y of a beam's own line at [x], which is the line its two published ends define.
+///
+/// A beam is drawn as one straight stroke between its ends, so this is the whole of its geometry: a
+/// case that asks where the beam is at a stem does not have to guess at a thickness or a slope.
+double _beamYAt(MelodyGlyph beam, double x) {
+  final double span = beam.to.x - beam.from.x;
+  if (span.abs() < 1e-9) {
+    return beam.from.y;
+  }
+  return beam.from.y + (beam.to.y - beam.from.y) * (x - beam.from.x) / span;
+}
+
+/// How many notes one beam joins, counted by the STEMS it reaches.
+///
+/// A beam joins stems, not noteheads: it starts and ends at the outer stems of its group, and the
+/// noteheads hang beside those stems, inside the group but outside the beam's own x range. So the
+/// count a reader makes — "this beam joins four notes" — is the number of stems whose axis the beam
+/// covers, and taking it from where the notes are DRAWN means a beam that spans the wrong notes fails
+/// however it was computed.
+int _headsUnder(PlacedMelodyStaff staff, MelodyGlyph beam) {
+  final double start = _beamStart(beam) - 1e-6;
+  final double end = _beamEnd(beam) + 1e-6;
+  return <MelodyGlyph>[
+    for (final MelodyGlyph stem in _glyphsOf(staff, MelodyGlyphKind.stem))
+      if (_stemAxis(stem) >= start && _stemAxis(stem) <= end) stem,
+  ].length;
+}
+
+/// The x the stem is drawn on, which is the centre of its own box.
+double _stemAxis(MelodyGlyph stem) =>
+    stem.bounds.left + stem.bounds.size.width / 2;
+
+/// The stem that belongs to [head]: the one drawn at the head's right edge.
+///
+/// A stem's box starts at the head's right edge less its own weight (the stroke is inside the head on
+/// one side and clears it on the other), so the vertical stroke nearest that x is the head's own. It
+/// is found by x rather than by position in the list because a chord's stems and a beat's run are
+/// both emitted in the model's order, which is not the reading order of the notes.
+MelodyGlyph _stemOf(PlacedMelodyStaff staff, MelodyGlyph head) {
+  final List<MelodyGlyph> stems = _glyphsOf(staff, MelodyGlyphKind.stem);
+  MelodyGlyph? nearest;
+  double best = double.infinity;
+  for (final MelodyGlyph stem in stems) {
+    final double distance = (stem.bounds.left - head.bounds.right).abs();
+    if (distance < best) {
+      best = distance;
+      nearest = stem;
+    }
+  }
+  return nearest!;
+}
+
+/// The x of a glyph's centre.
+double _cx(MelodyGlyph glyph) =>
+    glyph.bounds.left + glyph.bounds.size.width / 2;
 
 void main() {
   group('the staff a musician reads', () {
@@ -714,6 +841,577 @@ void main() {
         _engrave(<BeatNote>[_note(const Written(NoteLetter.c, 4))]).clef,
         isNull,
         reason: 'a bar that does not open a system does not print the clef',
+      );
+    });
+  });
+
+  group('beaming, which is the rhythm and not a decoration', () {
+    test('one beam joins eighths and two join sixteenths, inside one beat', () {
+      // THE NUMBER OF BEAMS IS THE VALUE, AND A MUSICIAN READS IT BEFORE HE READS A PITCH: one beam
+      // is an eighth, two are sixteenths, three are thirty-seconds, and a group of notes written
+      // without them is read as a different rhythm. The RUN is what a beat holds: in 4/4 a beat is a
+      // quarter, so it holds two eighths or four sixteenths, and each case below is exactly one beat
+      // — the number of notes is therefore part of the musical fact being asserted, not a fixture
+      // detail.
+      const List<Written> pitches = <Written>[
+        Written(NoteLetter.c, 4),
+        Written(NoteLetter.e, 4),
+        Written(NoteLetter.f, 4),
+        Written(NoteLetter.g, 4),
+      ];
+      const Map<NoteBase, (int, int)> beatOf = <NoteBase, (int, int)>{
+        NoteBase.eighth: (2, 1),
+        NoteBase.sixteenth: (4, 2),
+        NoteBase.thirtySecond: (4, 3),
+      };
+      for (final MapEntry<NoteBase, (int, int)> entry in beatOf.entries) {
+        final int runLength = entry.value.$1;
+        final int expectedBeams = entry.value.$2;
+        final PlacedMelodyStaff staff = _engrave(
+          _run(runLength, entry.key, pitches),
+        );
+        final List<MelodyGlyph> beams = _beamsOf(staff);
+        stdout.writeln(
+          'notation.beam value=${entry.key.name} notes=$runLength beams=${beams.length} '
+          'stems_per_beam=${beams.map((MelodyGlyph b) => _headsUnder(staff, b)).join(",")} '
+          'thickness=${beams.isEmpty ? 0 : beams.first.strokeWidth} space=$_staffSpace',
+        );
+        expect(
+          beams.length,
+          expectedBeams,
+          reason:
+              'a run of ${entry.key.name} notes is written with $expectedBeams '
+              '${expectedBeams == 1 ? 'beam' : 'beams'} — that is the sign that tells the reader the '
+              'value, and it is why the owner named beaming rather than any other missing shape',
+        );
+        for (final MelodyGlyph beam in beams) {
+          expect(
+            _headsUnder(staff, beam),
+            runLength,
+            reason:
+                'every beam of the group runs the whole group: the notes all take the first beam, '
+                'and a shorter note\'s extra beams arrive beside it rather than instead of it',
+          );
+        }
+        // AND A BEAMED NOTE CARRIES NO FLAG. A flag on a beamed note tells the reader the note is
+        // alone in its beat, which is the opposite of what the beam says.
+        for (final MelodyGlyph stem in _glyphsOf(staff, MelodyGlyphKind.stem)) {
+          expect(
+            stem.flagLength,
+            0,
+            reason: 'a beamed note is joined, so it is not flagged',
+          );
+        }
+        expect(
+          _glyphsOf(staff, MelodyGlyphKind.flag),
+          isEmpty,
+          reason: 'a flag is drawn from a stem and never published on its own',
+        );
+      }
+
+      // A LONE EIGHTH KEEPS ITS FLAG, because there is no other note of its beat to join: an
+      // engraver who beamed it to nothing would draw a single-note group, and one who beamed it to
+      // the next beat would join two different beats.
+      final PlacedMelodyStaff lone = _engrave(<BeatNote>[
+        _note(
+          const Written(NoteLetter.e, 4),
+          value: const NoteValue.plain(NoteBase.eighth),
+        ),
+      ]);
+      stdout.writeln(
+        'notation.beam lone_eighth beams=${_beamsOf(lone).length} '
+        'flag=${_oneOf(lone, MelodyGlyphKind.stem).flagLength}',
+      );
+      expect(
+        _beamsOf(lone),
+        isEmpty,
+        reason: 'one note is not a group, so it carries a flag and no beam',
+      );
+      expect(
+        _oneOf(lone, MelodyGlyphKind.stem).flagLength,
+        greaterThan(0),
+        reason: 'an eighth note alone in its beat is flagged, which is how it is read as an eighth',
+      );
+    });
+
+    test('a beat boundary breaks the beam, and a beam never crosses a barline', () {
+      // BEAMS GROUP BY BEAT AND NOT BY THE BAR. In 4/4 a run of four eighth notes is two beams of
+      // two and not one beam of four, because the beat is the quarter and a reader's eye is looking
+      // for the beat. The two cases below are the same four notes: the first in two beats, the
+      // second in one — and the engraving must not be the same picture for both.
+      const List<Written> pitches = <Written>[
+        Written(NoteLetter.c, 4),
+        Written(NoteLetter.e, 4),
+        Written(NoteLetter.f, 4),
+        Written(NoteLetter.g, 4),
+      ];
+      final List<BeatNote> acrossTwoBeats = <BeatNote>[
+        _note(pitches[0], beat: 0, step: 0, value: _eighth),
+        _note(pitches[1], beat: 0, step: 1, value: _eighth),
+        _note(pitches[2], beat: 1, step: 0, value: _eighth),
+        _note(pitches[3], beat: 1, step: 1, value: _eighth),
+      ];
+      final PlacedMelodyStaff split = _engrave(acrossTwoBeats);
+      final List<MelodyGlyph> splitBeams = _beamsOf(split);
+      stdout.writeln(
+        'notation.beam across_two_beats beams=${splitBeams.length} '
+        'sizes=${splitBeams.map((MelodyGlyph b) => _headsUnder(split, b)).join(",")} '
+        'spans=${splitBeams.map((MelodyGlyph b) => '[${_beamStart(b)}..${_beamEnd(b)}]').join(" ")}',
+      );
+      expect(
+        splitBeams.length,
+        2,
+        reason:
+            'four eighth notes in two beats are two beams of two: a beat boundary breaks the beam, '
+            'and a single beam across both beats would tell the reader the run is one group',
+      );
+      for (final MelodyGlyph beam in splitBeams) {
+        expect(
+          _headsUnder(split, beam),
+          2,
+          reason: 'each beam joins the two notes of one beat and no note of the other',
+        );
+      }
+      expect(
+        _beamEnd(splitBeams[0]),
+        lessThan(_beamStart(splitBeams[1])),
+        reason:
+            'the two groups do not overlap, so no reader can take them for one',
+      );
+
+      // AND A BEAM STAYS INSIDE ITS BAR. Engraved through the layout engine, because "does it cross
+      // the barline" is a question about a page: two bars whose last beat is a sixteenth run, and
+      // every beam of the page must lie inside the bar that owns it.
+      final Song song = _beamSong(<List<BeatNote>>[
+        for (int bar = 0; bar < 2; bar++)
+          _run(4, NoteBase.sixteenth, pitches, beat: 3),
+      ]);
+      final List<PageLayout> pages = const LayoutEngine().layout(
+        song,
+        pageWidth: 1200,
+        pageHeight: 3000,
+      );
+      final PageLayout page = pages.single;
+      int inspected = 0;
+      for (final PlacedBar placed in page.bars) {
+        final List<MelodyGlyph> beams = _beamsOf(placed.melody);
+        for (final MelodyGlyph beam in beams) {
+          stdout.writeln(
+            'notation.beam bar=${placed.barIndex} '
+            'barX=[${placed.melody.bounds.left.toStringAsFixed(1)}..'
+            '${placed.melody.bounds.right.toStringAsFixed(1)}] '
+            'beamX=[${_beamStart(beam).toStringAsFixed(1)}..${_beamEnd(beam).toStringAsFixed(1)}]',
+          );
+          expect(
+            _beamStart(beam),
+            greaterThanOrEqualTo(placed.melody.bounds.left),
+            reason:
+                'a beam begins inside the bar that owns it: a beam reaching past a barline joins '
+                'notes of two bars, which no musician wrote',
+          );
+          expect(
+            _beamEnd(beam),
+            lessThanOrEqualTo(placed.melody.bounds.right),
+            reason:
+                'a beam ends inside its own bar. The barline is the one line that says a measure '
+                'has ended, and a beam drawn across it says the opposite',
+          );
+          inspected++;
+        }
+      }
+      expect(
+        inspected,
+        greaterThanOrEqualTo(2),
+        reason: 'both bars must contribute a beam, or the containment above proves nothing',
+      );
+
+      // AND IN A COMPOUND METER THE BEAT IS THE DOTTED ONE, so the same rule writes eighths in
+      // THREES. 6/8 has two beats, each a dotted quarter long; six eighth notes are therefore two
+      // beams of three and not three beams of two. This is the assertion that a rule counting the
+      // meter's numerator instead of its beats would fail — and it is the difference between an
+      // engraving a jazz musician reads as 6/8 and one he reads as 3/4 written oddly.
+      final PlacedMelodyStaff compound = _engrave(<BeatNote>[
+        for (int beat = 0; beat < 2; beat++)
+          for (int step = 0; step < 3; step++)
+            _note(pitches[0], beat: beat, step: step, value: _eighth),
+      ], timeSignature: TimeSignature.sixEight);
+      final List<MelodyGlyph> compoundBeams = _beamsOf(compound);
+      stdout.writeln(
+        'notation.beam compound=6/8 beams=${compoundBeams.length} '
+        'sizes=${compoundBeams.map((MelodyGlyph b) => _headsUnder(compound, b)).join(",")}',
+      );
+      expect(
+        compoundBeams.length,
+        2,
+        reason:
+            'six eighths in 6/8 are two groups, one per dotted-quarter beat',
+      );
+      for (final MelodyGlyph beam in compoundBeams) {
+        expect(
+          _headsUnder(compound, beam),
+          3,
+          reason:
+              'a beat of 6/8 holds THREE eighths, so the beam joins three notes: a beam of two '
+              'would be the grouping of 3/4, which is a different meter read the same way',
+        );
+      }
+    });
+
+    test('the shorter value\'s extra beam sits inside the longer one\'s span', () {
+      // A MIXED GROUP STACKS ITS BEAMS. An eighth and a sixteenth in one group share the first beam,
+      // because both are eighths or shorter, and the sixteenth's second beam covers only the notes
+      // that need it — inside the group, between the first beam and the noteheads, which is the side
+      // a reader's eye searches for the extra stroke.
+      //
+      // THE GROUP IS A 6/8 BEAT, and that is a musical fact rather than a convenience: the beat in
+      // 6/8 is the dotted quarter, so it holds an eighth, two sixteenths and an eighth — six
+      // sixteenths exactly — which is a mixed group with a longer note at BOTH ends. In 4/4 a beat
+      // holds only an eighth and two sixteenths, and the shorter value's beam would then run to the
+      // group's own edge on one side, which is a weaker picture of the same rule.
+      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+        _note(const Written(NoteLetter.c, 4), beat: 0, step: 0, value: _eighth),
+        _note(
+          const Written(NoteLetter.e, 4),
+          beat: 0,
+          step: 1,
+          value: const NoteValue.plain(NoteBase.sixteenth),
+        ),
+        _note(
+          const Written(NoteLetter.f, 4),
+          beat: 0,
+          step: 2,
+          value: const NoteValue.plain(NoteBase.sixteenth),
+        ),
+        _note(const Written(NoteLetter.g, 4), beat: 0, step: 3, value: _eighth),
+      ], timeSignature: TimeSignature.sixEight);
+      final List<MelodyGlyph> beams = _beamsOf(staff);
+      expect(
+        beams.length,
+        2,
+        reason:
+            'the group carries the first beam that every one of its notes takes, and one more for '
+            'the sixteenths — an eighth has one beam, so the group has exactly two',
+      );
+      final MelodyGlyph primary = beams[0];
+      final MelodyGlyph secondary = beams[1];
+      stdout.writeln(
+        'notation.beam mixed beams=${beams.length} '
+        'primary_heads=${_headsUnder(staff, primary)} '
+        'secondary_heads=${_headsUnder(staff, secondary)} '
+        'primary_x=[${_beamStart(primary)}..${_beamEnd(primary)}] '
+        'secondary_x=[${_beamStart(secondary)}..${_beamEnd(secondary)}]',
+      );
+      expect(
+        _headsUnder(staff, primary),
+        4,
+        reason: 'the first beam runs over every note of the group',
+      );
+      expect(
+        _headsUnder(staff, secondary),
+        2,
+        reason:
+            'the second beam covers the two sixteenths and stops: drawn over the eighths it would '
+            'say the eighths are sixteenths',
+      );
+      expect(
+        _beamStart(secondary),
+        greaterThan(_beamStart(primary)),
+        reason:
+            'the extra beam begins inside the group rather than at its edge',
+      );
+      expect(
+        _beamEnd(secondary),
+        lessThan(_beamEnd(primary)),
+        reason: 'and it ends inside the group, so it is a stroke WITHIN the longer one\'s span',
+      );
+      // INSIDE, WHICH IS A SIDE AND NOT ONLY A SPAN: the notes here sit low on the staff, so every
+      // stem points up and the extra beam hangs below the first one, toward the noteheads.
+      final double probeX = _beamStart(secondary);
+      final double primaryY = _beamYAt(primary, probeX);
+      final double secondaryY = _beamYAt(secondary, probeX);
+      stdout.writeln(
+        'notation.beam mixed primary_y=$primaryY secondary_y=$secondaryY '
+        'stem_up=${_stemOf(staff, _glyphsOf(staff, MelodyGlyphKind.notehead).first).stemUp}',
+      );
+      expect(
+        secondaryY,
+        greaterThan(primaryY),
+        reason:
+            'with the stems up the beams hang above the notes, and the shorter value\'s beam is the '
+            'one NEARER the notes — outside the first beam it would read as a longer note instead',
+      );
+    });
+
+    test('a beam is half a staff space thick, slopes toward the higher side, and is level for one pitch', () {
+      // A BEAM'S WEIGHT AND ITS SLOPE ARE CONVENTIONS A MUSICIAN READS, so both are asserted against
+      // the measure a musician knows rather than against the number the code uses: half a staff
+      // space is the ordinary thickness, and it is several times a stem's weight, which is what makes
+      // two joined notes look joined instead of adjacent.
+      final PlacedMelodyStaff pair = _engrave(<BeatNote>[
+        _note(const Written(NoteLetter.g, 4), beat: 0, step: 0, value: _eighth),
+        _note(const Written(NoteLetter.a, 4), beat: 0, step: 1, value: _eighth),
+      ]);
+      final MelodyGlyph beam = _beamsOf(pair).single;
+      final MelodyGlyph stem = _glyphsOf(pair, MelodyGlyphKind.stem).first;
+      stdout.writeln(
+        'notation.beam thickness=${beam.strokeWidth} '
+        'in_spaces=${beam.strokeWidth / _staffSpace} stem_weight=${stem.strokeWidth} '
+        'ratio=${beam.strokeWidth / stem.strokeWidth}',
+      );
+      expect(
+        beam.strokeWidth,
+        closeTo(_staffSpace / 2, 1e-9),
+        reason:
+            'a beam is half a staff space thick — an eighth of the staff\'s height over four lines '
+            '— which is the proportion printed music uses and the reason a beam reads as a joining',
+      );
+      expect(
+        beam.strokeWidth / stem.strokeWidth,
+        greaterThan(3),
+        reason:
+            'a beam must be several times a stem\'s weight: at a stem\'s weight the group reads as '
+            'two notes with a rule between them rather than as one rhythmic group',
+      );
+
+      // LEVEL FOR ONE PITCH, EXACTLY. Four notes of one pitch are written with a beam that is level:
+      // not "nearly level", because a tilt computed from a contour with no direction is a tilt a
+      // reader can see and cannot explain.
+      final PlacedMelodyStaff repeated = _engrave(
+        _run(4, NoteBase.sixteenth, const <Written>[
+          Written(NoteLetter.b, 4),
+          Written(NoteLetter.b, 4),
+          Written(NoteLetter.b, 4),
+          Written(NoteLetter.b, 4),
+        ]),
+      );
+      for (final MelodyGlyph level in _beamsOf(repeated)) {
+        expect(
+          level.from.y,
+          closeTo(level.to.y, 1e-12),
+          reason:
+              'a group of one pitch is drawn with a LEVEL beam: there is no higher side to slope '
+              'toward, and a tilt would invent a contour the music does not have',
+        );
+      }
+
+      // AND A GROUP THAT DOES RISE SLOPES UP, GENTLY. Written low-to-high, the beam's far end is
+      // higher on the page — that is the side whose notes are higher — and the slope is limited, so a
+      // leap is drawn as a beam a reader can follow rather than as a diagonal scribble.
+      final PlacedMelodyStaff rising = _engrave(
+        _run(4, NoteBase.sixteenth, const <Written>[
+          Written(NoteLetter.c, 4),
+          Written(NoteLetter.e, 4),
+          Written(NoteLetter.g, 4),
+          Written(NoteLetter.b, 4),
+        ]),
+      );
+      final MelodyGlyph upward = _beamsOf(rising).first;
+      final double slope =
+          (upward.to.y - upward.from.y) / (upward.to.x - upward.from.x);
+      stdout.writeln(
+        'notation.beam rising from_y=${upward.from.y} to_y=${upward.to.y} '
+        'slope=$slope levels=${_beamsOf(rising).length}',
+      );
+      expect(
+        upward.to.y,
+        lessThan(upward.from.y),
+        reason:
+            'the group rises, so its beam rises with it: y grows DOWN the page, so the end over the '
+            'higher notes has the smaller y',
+      );
+      expect(
+        slope.abs(),
+        lessThanOrEqualTo(0.5 + 1e-9),
+        reason:
+            'a beam slopes gently — no more than half a staff space of rise per space of run — so '
+            'that a leap inside the group is still a beam and not a diagonal line',
+      );
+
+      // AND THE DESCENDING CASE MIRRORS IT, which is the assertion a one-way tilt would pass by
+      // accident on either case alone.
+      final PlacedMelodyStaff falling = _engrave(
+        _run(4, NoteBase.sixteenth, const <Written>[
+          Written(NoteLetter.b, 4),
+          Written(NoteLetter.g, 4),
+          Written(NoteLetter.e, 4),
+          Written(NoteLetter.c, 4),
+        ]),
+      );
+      final MelodyGlyph downward = _beamsOf(falling).first;
+      stdout.writeln(
+        'notation.beam falling from_y=${downward.from.y} to_y=${downward.to.y}',
+      );
+      expect(
+        downward.to.y,
+        greaterThan(downward.from.y),
+        reason: 'a falling group is drawn with a falling beam',
+      );
+    });
+
+    test('a group\'s stems all turn one way, and the beam sits at their ends', () {
+      // THE DIRECTION IS THE GROUP'S, NOT THE NOTE'S. A beamed group has one beam, so it has one place
+      // for the stems to arrive: every stem of the group points the same way. The note FARTHEST FROM
+      // THE MIDDLE LINE decides, which is the engraved rule — and the pair below is chosen so that a
+      // per-note rule (the one A70 pins for a single note) gives a WRONG answer for the second note:
+      // F4 is below the middle line B4 and takes a stem up, D5 is above it and would take a stem
+      // down, and one group cannot have both.
+      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+        _note(const Written(NoteLetter.f, 4), beat: 0, step: 0, value: _eighth),
+        _note(const Written(NoteLetter.d, 5), beat: 0, step: 1, value: _eighth),
+      ]);
+      final MelodyGlyph beam = _beamsOf(staff).single;
+      final List<MelodyGlyph> heads = _glyphsOf(
+        staff,
+        MelodyGlyphKind.notehead,
+      );
+      final List<MelodyGlyph> stems = _glyphsOf(staff, MelodyGlyphKind.stem);
+      stdout.writeln(
+        'notation.beam group_f3_d5 stems_up=${stems.map((MelodyGlyph s) => s.stemUp).join(",")} '
+        'steps=${<int>[const Written(NoteLetter.f, 4).stepOn('treble'), const Written(NoteLetter.d, 5).stepOn('treble')].join(",")} '
+        'beam_y=[${beam.from.y}..${beam.to.y}]',
+      );
+      for (final MelodyGlyph stem in stems) {
+        expect(
+          stem.stemUp,
+          isTrue,
+          reason:
+              'F4 lies three steps below the middle line and D5 two above it, so the group is a LOW '
+              'group and every stem in it points up — the note farthest from the middle line decides '
+              'for the whole group, which is the rule a per-note decision gets wrong',
+        );
+      }
+      // AND THE BEAM IS AT THEIR ENDS: for every note, the stem's free end is the beam's own line at
+      // that stem, so the beam touches the stems rather than floating above them or cutting through
+      // them.
+      for (int index = 0; index < heads.length; index++) {
+        final MelodyGlyph stem = _stemOf(staff, heads[index]);
+        final double beamY = _beamYAt(beam, _stemAxis(stem));
+        expect(
+          stem.stemUp ? stem.bounds.top : stem.bounds.bottom,
+          closeTo(beamY, 1e-9),
+          reason:
+              'the stem of a beamed note ends ON the beam: the beam is what the stems run to, and a '
+              'stem that stopped short or ran through would leave the group unjoined',
+        );
+      }
+      // THE BEAM IS ON THE STEM SIDE OF EVERY NOTEHEAD, which is what "stems up" means when the beam
+      // is drawn: above the highest head of the group.
+      for (final MelodyGlyph head in heads) {
+        expect(
+          beam.bounds.top,
+          lessThan(head.bounds.top),
+          reason: 'with the stems up the beam is drawn above every note of the group',
+        );
+      }
+    });
+
+    test('a rest breaks the group, and a beam does not reach across one', () {
+      // A REST IS A SILENCE AND A BEAM IS A CLAIM THAT NOTES BELONG TOGETHER. Two eighths on beat one
+      // are a pair; the second half of beat two is a rest, so the eighth on beat two is NOT joined to
+      // them — it is written with its own flag, which is exactly how a musician sees that it stands
+      // alone.
+      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+        _note(const Written(NoteLetter.c, 4), beat: 0, step: 0, value: _eighth),
+        _note(const Written(NoteLetter.d, 4), beat: 0, step: 1, value: _eighth),
+        _note(const Written(NoteLetter.e, 4), beat: 1, step: 0, value: _eighth),
+      ]);
+      final List<MelodyGlyph> beams = _beamsOf(staff);
+      final List<MelodyGlyph> heads = _glyphsOf(
+        staff,
+        MelodyGlyphKind.notehead,
+      );
+      final MelodyGlyph afterTheRest = _stemOf(staff, heads.last);
+      stdout.writeln(
+        'notation.beam rest beams=${beams.length} '
+        'heads=${beams.map((MelodyGlyph b) => _headsUnder(staff, b)).join(",")} '
+        'flagged=${afterTheRest.flagLength > 0} '
+        'beam_end=${beams.isEmpty ? 0 : _beamEnd(beams.single)} '
+        'rest_note_x=${_cx(heads.last)}',
+      );
+      expect(
+        beams.length,
+        1,
+        reason: 'the two notes of beat one are joined; nothing else is',
+      );
+      expect(
+        _headsUnder(staff, beams.single),
+        2,
+        reason: 'the beam covers beat one and stops at the rest',
+      );
+      expect(
+        _beamEnd(beams.single),
+        lessThan(_cx(heads.last)),
+        reason:
+            'the beam ends before the note that follows the rest: a beam across a silence claims a '
+            'grouping the music does not have',
+      );
+      expect(
+        afterTheRest.flagLength,
+        greaterThan(0),
+        reason: 'the note after the rest keeps its flag',
+      );
+
+      // AND TWO NOTES SEPARATED BY A WHOLE REST ARE NOT A GROUP AT ALL: eighths on beats one and
+      // three are two single notes, so neither is beamed.
+      final PlacedMelodyStaff separated = _engrave(<BeatNote>[
+        _note(const Written(NoteLetter.c, 4), beat: 0, value: _eighth),
+        _note(const Written(NoteLetter.e, 4), beat: 2, value: _eighth),
+      ]);
+      stdout.writeln(
+        'notation.beam separated beams=${_beamsOf(separated).length}',
+      );
+      expect(
+        _beamsOf(separated),
+        isEmpty,
+        reason: 'two eighth notes with a beat of silence between them are two notes and not a pair',
+      );
+    });
+  });
+
+  group('what a glyph box means', () {
+    test('a ledger line box is the ink of the line, so its centre is the line it names', () {
+      // THE DECISION THIS CASE PINS, AND WHY IT IS STATED AS A DECISION. A glyph's box on this staff
+      // is THE INK IT DRAWS: a notehead's box is its ellipse and a stem's box is its stroke, and the
+      // painter draws a stroked glyph down the centre of the box it is handed. The ledger line was
+      // the one exception — its box put its TOP on the line's y and the painter then drew its centre
+      // half a stroke below that — so what a reader saw stood 0.78 page pixels low at a 13-point
+      // space (measured, named and left open when these tests were written; A70 §3). The fix is that
+      // the box means the ink, which makes the offset zero EXACTLY rather than small: the other
+      // reading — move the painter's arithmetic for one kind of glyph — would have left one kind
+      // drawn from a different rule than every other kind.
+      final PlacedMelodyStaff staff = _engrave(<BeatNote>[
+        _note(const Written(NoteLetter.c, 4)),
+      ]);
+      final MelodyGlyph head = _oneOf(staff, MelodyGlyphKind.notehead);
+      final MelodyGlyph ledger = _oneOf(staff, MelodyGlyphKind.ledgerLine);
+      final double bottomLineY = staff.bounds.bottom;
+      stdout.writeln(
+        'notation.ledger-box head_y=${_cy(head)} ledger_y=${_cy(ledger)} '
+        'offset=${_cy(ledger) - _cy(head)} '
+        'box_height=${ledger.bounds.size.height} stroke=${ledger.strokeWidth} '
+        'spaces_below_bottom=${(_cy(ledger) - bottomLineY) / _staffSpace}',
+      );
+      expect(
+        _cy(ledger),
+        _cy(head),
+        reason:
+            'the line a note is written ON runs through the notehead: the ledger glyph\'s centre is '
+            'the line\'s own y, so the two heights agree exactly and not merely to within a '
+            'tolerance',
+      );
+      expect(
+        (_cy(ledger) - bottomLineY) / _staffSpace,
+        closeTo(1, 1e-9),
+        reason:
+            'the first ledger line below the staff is exactly one staff space below the bottom line, '
+            'because that is the distance between any two lines',
+      );
+      expect(
+        ledger.bounds.size.height,
+        ledger.strokeWidth,
+        reason:
+            'a ledger line\'s box is as tall as its stroke and no taller: the box is the ink, which '
+            'is what lets the painter draw its centre and every caller read a musical height',
       );
     });
   });

@@ -9,6 +9,7 @@
 // KEYWORDS: transposition, semitones, key-change, immutability, spelling-preservation
 import 'chord.dart';
 import 'key.dart';
+import 'key_vocabulary.dart';
 import 'pitch.dart';
 import 'song/note.dart';
 import 'spelling_table.dart';
@@ -58,37 +59,67 @@ class Transposer {
 
   // PURPOSE: Move a whole key by [semitones], so that transposing a song can also move the key
   //          it is labelled with.
-  // INPUTS: key — the key to move. semitones — the interval. preference — how to spell the new
-  //         tonic; [SpellingPreference.automatic] keeps the source key's accidental direction,
-  //         on the reasoning that transposing a chart by a semitone or two should not flip its
-  //         notation from flats to sharps.
-  // OUTPUTS: A Key with the moved tonic pitch and the same mode.
+  // INPUTS: key — the key to move. semitones — the interval. preference — which side of the circle
+  //         the new tonic is written on. [SpellingPreference.automatic], the answer every caller
+  //         wants, gives the name a musician writes (see [KeyVocabulary]); [SpellingPreference.sharp]
+  //         or [.flat] is an OVERRIDE that asks for one side explicitly, and is honoured only where
+  //         the notation can honour it — a key signature has to exist on the side asked for.
+  // OUTPUTS: A Key with the moved tonic pitch and the same mode, named through [KeyVocabulary] —
+  //          which means the name is always one a key signature expresses, in either mode.
   //
-  //          LIMITATION, stated rather than hidden: the new tonic is spelled by the chromatic
-  //          rule of the spelling table, which produces a twelve-name chromatic set dominated by
-  //          the source key's direction. That set is right for major keys and wrong for some
-  //          minor ones — it will name the key a minor third below C as "A minor" correctly but
-  //          can produce a name such as "Gb minor" where a musician would write "F# minor". The
-  //          fix is a key-name vocabulary, which belongs with the chart grammar in spike S1
-  //          rather than in the transposer, so it is deferred and reported here instead of being
-  //          approximated with another special case.
-  // KEYWORDS: key-transposition, key-naming, limitation, documented-gap
-  /// Returns [key] moved by [semitones], with its new tonic spelled by [spellingTable].
+  //          THE LIMITATION THIS METHOD USED TO CARRY, QUOTED BECAUSE IT IS NOW FIXED RATHER THAN
+  //          FORGOTTEN: "it will name the key a minor third below C as 'A minor' correctly but can
+  //          produce a name such as 'Gb minor' where a musician would write 'F# minor'. The fix is
+  //          a key-name vocabulary, which belongs with the chart grammar in spike S1 rather than in
+  //          the transposer, so it is deferred and reported here instead of being approximated
+  //          with another special case."
+  //
+  //          The vocabulary was built and this method now calls it, so that sentence describes a
+  //          state that no longer exists. What it described is worth keeping, because it is the
+  //          shape of the defect: the new tonic was spelled by the CHROMATIC rule alone
+  //          (`spellingTable.spellChromatic`), which answers "how is this sounding pitch written" and
+  //          knows nothing about key signatures. A flat-side chart transposed onto the pitch class of
+  //          Gb was therefore labelled `Gb minor` — a key whose relative major would be Bbb major —
+  //          and `D# major` (nine sharps) was reachable from a sharp-side chart on the pitch class of
+  //          Eb. Both are now refused, by asking the model's own circle-of-fifths test whether the
+  //          name is one a key signature expresses (`Key.isPracticallySpelled`, which for a minor key
+  //          asks its RELATIVE MAJOR — the musical rule, already written once in `Key`).
+  //
+  //          WHAT ALSO CHANGED, AND IT IS NOT ONLY THE TWO IMPOSSIBLE NAMES. This method used to
+  //          resolve [SpellingPreference.automatic] from the source key's direction, so a sharp
+  //          chart transposed onto the pitch class of Eb was offered `D#` where Db has five flats and
+  //          D# nine. The automatic answer is now the one with the fewest accidentals, which is what a
+  //          musician writes; the source key's direction survives only as something a caller can ask
+  //          for explicitly. A chart transposed by a semitone or two therefore still reads in the same
+  //          accidental direction, because that is what the names on either side of it are — Eb major
+  //          up a tone is F major, not E# major.
+  // KEYWORDS: key-transposition, key-naming, key-vocabulary, practical-circle, minor-keys,
+  //           documented-gap-closed, identity-move
+  //
+  //          A MOVE OF ZERO SEMITONES RETURNS THE KEY ITSELF, and that is a rule rather than an
+  //          optimisation. The vocabulary answers "what is this pitch class called", and for a chart
+  //          WRITTEN in a key the twelve-name rule would not choose — C# major, F# major, anything a
+  //          hand-made or imported file can hold — the two questions have different answers: the
+  //          chart is called F# major because that is what is written on it, and a transposition of
+  //          nothing is not an opportunity to rename it. Without this the key grid's "written" cell
+  //          would offer `Gb` for a chart titled F# major, and the musician would watch his own key
+  //          change name the first time he opened the grid. Beyond that, the identity move must BE
+  //          the identity — the property `transposeChord`'s round trip rests on — and a key's name is
+  //          part of its value.
+  /// Returns [key] moved by [semitones], named through [KeyVocabulary].
   Key transposeKey(
     Key key,
     int semitones, {
     SpellingPreference preference = SpellingPreference.automatic,
   }) {
+    if (semitones == 0) {
+      return key;
+    }
     final int pitchClass = normalizePitchClass(key.tonicPitchClass + semitones);
-    final SpellingPreference resolved = switch (preference) {
-      SpellingPreference.automatic =>
-        key.prefersSharps ? SpellingPreference.sharp : SpellingPreference.flat,
-      SpellingPreference.sharp || SpellingPreference.flat => preference,
-    };
-    return Key(
-      tonic: spellingTable.spellChromatic(pitchClass, key, resolved),
-      mode: key.mode,
-    );
+    // The vocabulary is built per call rather than stored, so that it spells its candidates with
+    // THIS transposer's table: a name and the chords printed under it must come from one rule.
+    return KeyVocabulary(spellingTable: spellingTable)
+        .keyFor(pitchClass, key.mode, preference: preference);
   }
 
   // PURPOSE: Spell a transposed chord in a target key, which is the operation a renderer

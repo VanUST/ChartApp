@@ -213,6 +213,20 @@ class AppLocalizationsRu extends AppLocalizations {
   String get menuSettings => 'Настройки';
 
   @override
+  String get menuRecognitionOn => 'Распознавать тактовые черты: ВКЛ';
+
+  @override
+  String get menuRecognitionOff => 'Распознавать тактовые черты: ВЫКЛ';
+
+  @override
+  String get tooltipRecognitionOn =>
+      'Распознавание включено: проведённая вами черта рисуется идеальной линией';
+
+  @override
+  String get tooltipRecognitionOff =>
+      'Распознавание выключено: рукопись рисуется ровно так, как вы её написали';
+
+  @override
   String get selectionPrompt => 'Коснитесь такта, чтобы выбрать его.';
 
   @override
@@ -230,6 +244,119 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get selectionHintForm => '— коснитесь для тактов и разделов';
+
+  @override
+  String selectionRunRange(int from, int to) {
+    return 'выбрано: такты $from–$to';
+  }
+
+  @override
+  String selectionRunWindow(int bar, int from, int to) {
+    return 'выбран: такт $bar, доли $from–$to';
+  }
+
+  @override
+  String selectionQuality(int bars, int structured, int inkOnly, int empty) {
+    String _temp0 = intl.Intl.pluralLogic(
+      bars,
+      locale: localeName,
+      other: '$bars такта',
+      many: '$bars тактов',
+      few: '$bars такта',
+      one: '$bars такт',
+    );
+    return '$_temp0: структура $structured, только рукопись $inkOnly, пусто $empty';
+  }
+
+  @override
+  String selectionInkKept(int strokes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      strokes,
+      locale: localeName,
+      other: '$strokes штриха от руки',
+      many: '$strokes штрихов от руки',
+      few: '$strokes штриха от руки',
+      one: '$strokes штрих от руки',
+    );
+    return '$_temp0 — остаётся там, где написан: рукопись не транспонируется';
+  }
+
+  @override
+  String get selectionActionExtend => 'До сюда';
+
+  @override
+  String get selectionActionCopy => 'Копия';
+
+  @override
+  String get selectionActionPaste => 'Вставить';
+
+  @override
+  String get selectionActionTransposeUp => 'На полтона вверх';
+
+  @override
+  String get selectionExtendPrompt => 'Коснитесь последнего такта диапазона.';
+
+  @override
+  String get selectionCopyNothing => 'Ничего не скопировано: этих тактов нет.';
+
+  @override
+  String selectionCopied(int count, int bar) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'скопировано $count такта',
+      many: 'скопировано $count тактов',
+      few: 'скопировано $count такта',
+      one: 'скопирован $count такт',
+    );
+    return '$_temp0 с такта $bar';
+  }
+
+  @override
+  String selectionPastedAfter(int count, int bar) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'вставлено $count такта',
+      many: 'вставлено $count тактов',
+      few: 'вставлено $count такта',
+      one: 'вставлен $count такт',
+    );
+    return '$_temp0 после такта $bar';
+  }
+
+  @override
+  String selectionPastedInto(int bar, int beat) {
+    return 'доли вставлены в такт $bar, начиная с доли $beat';
+  }
+
+  @override
+  String get selectionPasteNeedsCell =>
+      'Ничего не вставлено: долям нужна доля-приёмник.';
+
+  @override
+  String get selectionPasteDoesNotFit =>
+      'Ничего не вставлено: эти доли не помещаются в такт.';
+
+  @override
+  String get selectionPasteNoBar => 'Ничего не вставлено: там нет такта.';
+
+  @override
+  String selectionTransposed(int changed, int bars) {
+    return 'поднято на полтона: из $bars тактов изменилось $changed';
+  }
+
+  @override
+  String get selectionTransposeNothing =>
+      'Ничего не транспонировано: в этих тактах нет ни аккорда, ни ноты.';
+
+  @override
+  String get selectionTransposeBeats =>
+      'Ничего не транспонировано: для транспонирования нужны целые такты.';
+
+  @override
+  String get selectionTransposeNoBar =>
+      'Ничего не транспонировано: этих тактов нет.';
 
   @override
   String get noBars => 'В этой песне нет тактов.';

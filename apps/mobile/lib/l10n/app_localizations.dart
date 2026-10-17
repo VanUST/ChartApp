@@ -380,6 +380,30 @@ abstract class AppLocalizations {
   /// **'Settings'**
   String get menuSettings;
 
+  /// The overflow menu row that turns barline recognition OFF; the label states the state in force, so a switched-off feature cannot be discovered only by its absence.
+  ///
+  /// In en, this message translates to:
+  /// **'Recognise my barlines: ON'**
+  String get menuRecognitionOn;
+
+  /// The overflow menu row that turns barline recognition ON; the label states the state in force.
+  ///
+  /// In en, this message translates to:
+  /// **'Recognise my barlines: OFF'**
+  String get menuRecognitionOff;
+
+  /// The recognition toggle's tooltip while recognition is on.
+  ///
+  /// In en, this message translates to:
+  /// **'Recognition is on: a barline you draw is drawn as an ideal line'**
+  String get tooltipRecognitionOn;
+
+  /// The recognition toggle's tooltip while recognition is off, which is the state every chart starts in.
+  ///
+  /// In en, this message translates to:
+  /// **'Recognition is off: your handwriting is drawn exactly as you wrote it'**
+  String get tooltipRecognitionOff;
+
   /// The selection line before anything is selected.
   ///
   /// In en, this message translates to:
@@ -409,6 +433,126 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'— tap for bars & sections'**
   String get selectionHintForm;
+
+  /// The selection line when the musician selected a run of bars. Both numbers are one-based, the way a musician counts bars.
+  ///
+  /// In en, this message translates to:
+  /// **'selected: bars {from}–{to}'**
+  String selectionRunRange(int from, int to);
+
+  /// The selection line when the musician selected a window of beats inside one bar.
+  ///
+  /// In en, this message translates to:
+  /// **'selected: bar {bar}, beats {from}–{to}'**
+  String selectionRunWindow(int bar, int from, int to);
+
+  /// The second run of the selection line: how many bars carry structured music and how many carry only handwriting. A musician must be able to tell which of the two levels a fragment is at, because only the structured part can be transposed.
+  ///
+  /// In en, this message translates to:
+  /// **'{bars, plural, one{{bars} bar} other{{bars} bars}}: structure {structured}, handwriting only {inkOnly}, empty {empty}'**
+  String selectionQuality(int bars, int structured, int inkOnly, int empty);
+
+  /// Stated whenever the selection carries ink: the one thing a transposition cannot move, said out loud rather than discovered after the fact.
+  ///
+  /// In en, this message translates to:
+  /// **'{strokes, plural, one{{strokes} handwritten stroke} other{{strokes} handwritten strokes}} — stays where it was drawn, handwriting is not transposed'**
+  String selectionInkKept(int strokes);
+
+  /// The selection line's action that makes the next tap name the other end of the run.
+  ///
+  /// In en, this message translates to:
+  /// **'Until here'**
+  String get selectionActionExtend;
+
+  /// The selection line's action that copies the selected run.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get selectionActionCopy;
+
+  /// The selection line's action that pastes the copied run after the selected bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste'**
+  String get selectionActionPaste;
+
+  /// The selection line's action that moves the selected bars' chords and melody up one semitone, leaving the chart's key alone.
+  ///
+  /// In en, this message translates to:
+  /// **'Up a semitone'**
+  String get selectionActionTransposeUp;
+
+  /// The selection line while the until-here action is armed, saying what the next tap will do.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap the last bar of the range.'**
+  String get selectionExtendPrompt;
+
+  /// Shown when a copy was asked for a selection the song no longer has.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was copied: those bars are not there.'**
+  String get selectionCopyNothing;
+
+  /// The result of a copy, stated with the numbers so it can be checked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{copied {count} bar} other{copied {count} bars}} from bar {bar}'**
+  String selectionCopied(int count, int bar);
+
+  /// The result of a paste of bars, saying exactly where they went.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} bar pasted} other{{count} bars pasted}} after bar {bar}'**
+  String selectionPastedAfter(int count, int bar);
+
+  /// The result of a paste of a window of beats, saying which bar and which beat it landed on.
+  ///
+  /// In en, this message translates to:
+  /// **'beats pasted into bar {bar}, from beat {beat}'**
+  String selectionPastedInto(int bar, int beat);
+
+  /// Shown when a window of beats was pasted at a bar-level selection.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was pasted: a window of beats needs a cell to land on.'**
+  String get selectionPasteNeedsCell;
+
+  /// Shown when a window of beats would leave the target bar's metre.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was pasted: those beats do not fit in that bar.'**
+  String get selectionPasteDoesNotFit;
+
+  /// Shown when the paste target no longer names a bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was pasted: there is no bar there.'**
+  String get selectionPasteNoBar;
+
+  /// The result of transposing a selection: how many of the selected bars actually had something to move.
+  ///
+  /// In en, this message translates to:
+  /// **'moved up a semitone: {changed} of {bars} bars changed'**
+  String selectionTransposed(int changed, int bars);
+
+  /// Shown when a selection has no structured content for an interval to move.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was transposed: those bars hold no chord and no note.'**
+  String get selectionTransposeNothing;
+
+  /// Shown when a window of beats was asked to transpose; a bar is the smallest fragment that holds a key.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was transposed: select whole bars to transpose.'**
+  String get selectionTransposeBeats;
+
+  /// Shown when the selection names a section the song no longer has.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing was transposed: those bars are not there.'**
+  String get selectionTransposeNoBar;
 
   /// Shown in place of a page when the chart has nothing to engrave.
   ///

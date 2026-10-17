@@ -415,6 +415,41 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// bar index then name different music.
   ChartHit? _selection;
 
+  /// The OTHER end of the selection when the musician selected a RUN, or null for a single hit.
+  ///
+  /// A selection is an ADDRESS in the interface, not an entity of the document (D36), so it lives
+  /// here and nowhere else: it is not stored in the `.chart` file, it is not an entry in the log and
+  /// it cannot be undone. Two hits — an anchor and a focus — are the whole of it, and the run is
+  /// DERIVED from them by [_selectionRange], so there is no second value that could disagree with the
+  /// first about what is selected. Cleared with [_selection], for the same reason: a section id and a
+  /// bar index name different music once a different song is shown.
+  ChartHit? _selectionEnd;
+
+  /// Whether the next tap finishes a run rather than starting a new selection.
+  ///
+  /// This is the state of the "until here" action in the selection line, and it is the only reason
+  /// the second tap of a run means something different from the first: a musician presses the word,
+  /// the line says what the next tap will do, and the tap names the other end. It is not a mode that
+  /// survives the tap that uses it.
+  bool _extendPending = false;
+
+  /// What the copy action took, or null before anything was copied.
+  ///
+  /// Interface state, like the selection: copying writes no event, so this is not in the document and
+  /// not in the log. It is what the paste action reads. It is deliberately NOT cleared when a
+  /// different song or library is shown: a clipboard is not part of the document, and pasting bars
+  /// copied from one chart into another is a legal edit on ordinary [Bar] values — the paste names
+  /// its own section, and the ink it carries is re-anchored to the bars it lands on.
+  ChartClip? _clip;
+
+  /// The result of the last action on the selection, as words, for the line beside the chart.
+  ///
+  /// One sentence, built from the catalogue when the action ran, so it can name what happened
+  /// ("pasted after bar 20", "moved up a semitone: 4 of 16 bars") instead of leaving the musician to
+  /// work it out from the picture. Cleared whenever the selection changes, because a message about a
+  /// selection that no longer exists is a lie.
+  String? _selectionStatus;
+
   /// The editing session of each loaded song, by [IRealSong.index].
   ///
   /// An entry is created the first time a song is shown and then lives until a different library is
@@ -604,6 +639,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          layer exists, and while the pen is the active tool.
   // KEYWORDS: eraser-mode, app-bar-state, default-off, null-when-empty, exclusive-with-pen
   bool get _eraserOn => _selectedInkLayer?.eraserMode ?? false;
+
+  /// Whether recognition is switched on for the chart on screen.
+  ///
+  /// OFF UNTIL THIS SESSION TURNS IT ON, which is the owner's rule 1 for recognition (D37): a
+  /// musician whose recognition works badly turns it off and keeps working, and every musician
+  /// starts there. It is deliberately NOT persisted: a preference nobody asked to keep would make
+  /// "the switch is off after a restart" impossible, and the rule that matters is that the app never
+  /// reads a chart it was not asked to read. See [IRealViewerScreen._toggleRecognition].
+  bool _recognitionOn = false;
 
   // PURPOSE: Return the ink layer of the song on screen WITHOUT creating one, which is what a
   //          read-only control needs: listing a chart must not open a capture layer, and an absent
@@ -1434,6 +1478,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         // A section id and a bar index from the previous library name different music here, so a
         // selection carried across a load would point at whatever happens to sit at that address.
         _selection = null;
+        _selectionEnd = null;
         _loading = false;
       });
       debugPrint(
@@ -1773,6 +1818,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       _sceneIndex = index;
       _selectedSong = found.index;
       _selection = null;
+      _selectionEnd = null;
       _chosenPageMode = PageMode.pages;
     });
     debugPrint(
@@ -2366,6 +2412,22 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         tooltip: l10n.tooltipSettings,
         onPressed: () => unawaited(_openSettings(context)),
       ),
+      // --- RECOGNITION OF BAR DIVISIONS (owner decision D37) ------------------------
+      // THE SWITCH THE OWNER ASKED FOR, and the reason it is a switch rather than a feature that is
+      // simply on: a musician whose recognition works badly turns it off and keeps working, and
+      // that is what makes a wrong recognition survivable. It therefore starts OFF, its icon states
+      // the state in force (a dashed line reads as "a division the application drew", a pencil-line
+      // reads as "your own hand"), and its tooltip says what is drawn in words rather than leaving
+      // the glyph to be guessed — the same rule the pen and the eraser follow here.
+      IconButton(
+        key: const ValueKey<String>('viewer-recognition-toggle'),
+        icon: Icon(_recognitionOn ? Icons.border_vertical : Icons.linear_scale),
+        isSelected: _recognitionOn,
+        tooltip: _recognitionOn
+            ? l10n.tooltipRecognitionOn
+            : l10n.tooltipRecognitionOff,
+        onPressed: session == null ? null : _toggleRecognition,
+      ),
     ];
   }
 
@@ -2410,6 +2472,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           );
         } else if (picked == 'settings') {
           unawaited(_openSettings(context));
+        } else if (picked == 'recognition') {
+          _toggleRecognition();
         }
       },
       itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
@@ -2429,6 +2493,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           child: Text(l10n.menuSetlist),
         ),
         PopupMenuItem<String>(value: 'file', child: Text(l10n.menuChartFile)),
+        // The recognition row STATES the state in force rather than naming the action, because a
+        // feature that is off is invisible otherwise: a musician looking for the barline recognition
+        // he was told about finds "OFF" and knows it exists and that he can have it.
+        PopupMenuItem<String>(
+          value: 'recognition',
+          enabled: session != null,
+          child: Text(
+            _recognitionOn ? l10n.menuRecognitionOn : l10n.menuRecognitionOff,
+          ),
+        ),
         // The settings row stands last, for the same reason its app-bar twin does: the rows above
         // it are the ones a musician opens a chart to reach.
         PopupMenuItem<String>(
@@ -2584,6 +2658,66 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
+  // PURPOSE: Turn RECOGNITION of bar divisions on or off in the top menu, which is the one organ
+  //          the owner's decision D37 requires: a musician whose recognition works badly turns it off
+  //          and keeps working, and nothing else in the application changes.
+  //
+  //          WHAT TURNING IT ON DOES, IN ONE SENTENCE, because a switch that changes what is on the
+  //          page without saying so would be the secret action D37 forbids: the application reads
+  //          the ink already on the page, records every vertical division it finds as structure, and
+  //          draws those as ideal lines INSTEAD of the handwriting they came from. Turning it off
+  //          draws the handwriting again and leaves every division in the document untouched — so
+  //          nothing the switch does can lose a mark, and the switch itself is the undo for a
+  //          recognition the musician does not want.
+  // INPUTS: None; reads the library, the selected song and its layer.
+  // OUTPUTS: Nothing. The layer's own flag and a screen rebuild; the document changes only by the
+  //          `division.set` events the pass appends, each of which undo reverses like any other.
+  // KEYWORDS: recognition-switch, top-menu, default-off, whole-pass, d37-rule-1, undoable
+  void _toggleRecognition() {
+    final IRealLibrary? library = _library;
+    if (library == null || library.songs.isEmpty) {
+      return;
+    }
+    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
+        ? _selectedSong
+        : 0;
+    final IRealSong entry = library.songs[index];
+    final InkCaptureLayer layer = _inkFor(entry);
+    final bool next = !_recognitionOn;
+    setState(() {
+      _recognitionOn = next;
+      layer.recognitionEnabled = next;
+    });
+    final int found = next ? _recogniseWholePage(layer, entry) : 0;
+    _publishInkState();
+    debugPrint(
+      'viewer.recognition.toggle song="${_rawTitleFor(entry)}" on=$next '
+      'found_now=$found divisions=${layer.documentDivisions.length} '
+      'strokes=${layer.strokeCount}',
+    );
+  }
+
+  // PURPOSE: Read the ink ALREADY on the page the moment recognition is switched on, so that the
+  //          musician sees his chart recognised rather than having to write everything again.
+  // INPUTS: layer — the layer of the song on screen. entry — that song, for the page it is drawn on.
+  // OUTPUTS: How many divisions the document held after the pass. The pass is the layer's own
+  //          whole-page recognition, run against the page the screen is currently showing; with no
+  //          page drawn yet there is nothing to read and the number is what the document already had.
+  // KEYWORDS: whole-page-pass, on-enable, idempotent, no-crash-without-a-page
+  int _recogniseWholePage(InkCaptureLayer layer, IRealSong entry) {
+    final List<PageLayout> pages = _engraved?.pages ?? const <PageLayout>[];
+    if (pages.isEmpty) {
+      return layer.documentDivisions.length;
+    }
+    // EVERY PAGE, not just the first: a chart the musician has paged through may hold ink on any of
+    // them, and recognising only the page in front of him would leave the rest of his chart
+    // unstructured with no way to ask for it.
+    for (final PageLayout page in pages) {
+      layer.recogniseBarDivisions(page);
+    }
+    return layer.documentDivisions.length;
+  }
+
   // PURPOSE: Give the save/open action the state a `.chart` file must store as its snapshot, which
   //          is the WRITTEN chart before its own operation tail rather than the chart on screen.
   // INPUTS: None; reads the library and the selection.
@@ -2714,6 +2848,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       // must not survive: a stroke appended through it would go to a document nothing is showing.
       _inkLayers.clear();
       _selection = null;
+      _selectionEnd = null;
       _error = null;
     });
   }
@@ -3011,6 +3146,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               // A selection belongs to the song it was made in; another song's bar at the same
               // address is a different bar.
               _selection = null;
+              _selectionEnd = null;
             });
             if (closeAfterPick) {
               Scaffold.of(context).closeDrawer();
@@ -3401,6 +3537,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             page: page,
             metrics: _metrics,
             selection: _selection,
+            // The RUN the musician selected, so sixteen bars look like sixteen bars. It is the same
+            // address the copy, paste and transpose actions read, so what is highlighted and what an
+            // operation acts on cannot come apart.
+            selectionRange: _selectionRange,
           ),
           child: const SizedBox.expand(),
         ),
@@ -3426,6 +3566,23 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           ),
           child: const SizedBox.expand(),
         ),
+        // --- RECOGNISED DIVISIONS, DRAWN AS STRUCTURE (owner decision D37) ---------------
+        // THE LAYER THAT MAKES "recognised" VISIBLE, and it is drawn ABOVE the ink and BELOW
+        // nothing, because while recognition is on the ink it came from is not drawn at all: see
+        // [_inkStrokes]. It is added to the stack only when recognition is on, so with the switch
+        // off this widget is not built and the page is composed exactly as it was before this
+        // feature existed — the property the owner's rule 1 requires of everything that worked
+        // before there was any recognition.
+        if (_recognitionOn)
+          CustomPaint(
+            painter: BarlinePainter(
+              divisions: _resolveDivisions(page, layer.documentDivisions),
+              pageScale: page.scale,
+              pageZoom: page.zoom,
+              pagePan: page.pan,
+            ),
+            child: const SizedBox.expand(),
+          ),
       ],
     );
   }
@@ -3456,19 +3613,58 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          stroke lies over an earlier one, and the live preview last, because it is the newest
   //          mark and the one the musician is watching. Strokes the armed eraser has crossed are
   //          left out, and no other stroke is affected: with nothing armed the filter is empty.
+  //
+  //          THE ONE OTHER THING THAT COMES OUT IS THE INK OF A RECOGNISED DIVISION, and only while
+  //          recognition is on. D37 rule 2 says that with recognition on the RECOGNISED variant is
+  //          what is drawn, so the hand-drawn line is replaced by the ideal one rather than covered
+  //          by it — a line drawn on top of his would be a line hiding his, which is the failure
+  //          that rule exists to prevent. The stroke is NOT deleted from the document: turn the
+  //          switch off and it is right here, because this filter is the whole of the hiding and it
+  //          is a decision made once per frame rather than a change to what is stored.
   // KEYWORDS: anchor-resolution, page-filter, render-order, transposition-survival, fit-survival,
-  //           live-source, no-cached-document, erase-preview
+  //           live-source, no-cached-document, erase-preview, recognised-ink-hidden, d37
   List<ResolvedInkStroke> _inkStrokes(PageLayout page, InkCaptureLayer layer) {
     final Set<String> erasedPreview = layer.pendingEraseIds;
+    final Set<String> recognised = _recognitionOn
+        ? <String>{
+            for (final BarDivision division in layer.documentDivisions)
+              if (division.sourceStrokeId.isNotEmpty) division.sourceStrokeId,
+          }
+        : const <String>{};
     return <ResolvedInkStroke>[
       ..._resolveStrokes(page, layer.documentStrokes).where(
         (ResolvedInkStroke resolved) =>
-            !erasedPreview.contains(resolved.stroke.id),
+            !erasedPreview.contains(resolved.stroke.id) &&
+            !recognised.contains(resolved.stroke.id),
       ),
       ...layer.liveStrokes.where(
         (ResolvedInkStroke resolved) => _isOnPage(page, resolved),
       ),
     ];
+  }
+
+  // PURPOSE: Turn every division of the document into the pair the barline painter needs, skipping
+  //          the ones this page cannot place.
+  // INPUTS: page — the page being drawn. divisions — the document's divisions, in render order.
+  // OUTPUTS: The divisions whose anchor this page resolves, with the anchor's origin. A division on
+  //          another page of a paginated document is simply not drawn here, which is the same rule
+  //          the ink follows and the same call (`resolveEventAnchor`) that resolves it.
+  // KEYWORDS: division-placement, anchor-resolution, page-filter, one-resolver
+  List<ResolvedDivision> _resolveDivisions(
+    PageLayout page,
+    List<BarDivision> divisions,
+  ) {
+    final List<ResolvedDivision> resolved = <ResolvedDivision>[];
+    for (final BarDivision division in divisions) {
+      final InkPlacement? placement = resolveEventAnchor(page, division.anchor);
+      if (placement == null) {
+        continue;
+      }
+      resolved.add(
+        ResolvedDivision(division: division, origin: placement.origin),
+      );
+    }
+    return resolved;
   }
 
   // PURPOSE: Turn every committed stroke into the pair a painter needs, skipping the ones this page
@@ -3642,10 +3838,47 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       localPosition.dx,
       localPosition.dy,
     );
+    // THE ONE-ACTION REPAIR FOR RECOGNITION, AND IT IS TRIED BEFORE ANYTHING ELSE. With recognition
+    // on and the pen off, a tap that lands ON INK changes the application's mind about that ink:
+    // a stroke that is a division is rejected (and the handwriting comes back into view), and a
+    // stroke that is not one becomes a division. Both errors are repaired exactly here, by one tap
+    // on the mark itself, which is the price the owner's rule puts on a wrong recognition.
+    //
+    // It costs nothing when the tap misses the ink — the layer answers null and the tap goes on to
+    // select the bar under it — and it cannot fire at all with recognition off, so the tap that
+    // selects a cell is the tap it always was.
+    if (_recognitionOn) {
+      final InkCaptureLayer? layer = _selectedInkLayer;
+      final String? repaired = layer?.toggleDivisionAt(
+        page: page,
+        surfacePoint: surface,
+      );
+      if (repaired != null) {
+        setState(() {});
+        publishInkStateWhenIdle();
+        debugPrint(
+          'viewer.select.repaired page=${page.index} what=$repaired '
+          'divisions=${layer?.documentDivisions.length}',
+        );
+        return;
+      }
+    }
     final LayoutOffset pagePoint = page.pagePointOf(surface);
     final ChartHit? staffHit = hitTestMelodyStaff(page, pagePoint);
+    // THE SECOND TAP OF A RUN IS NOT ANOTHER SELECTION, AND IT OPENS NOTHING. While the "until here"
+    // action is armed, the next touch names the OTHER END of the run: it must not open the note
+    // palette, because the musician is pointing at a bar and not at a beat to write into, and it must
+    // not replace the anchor, because that is the end he already named.
+    if (_extendPending) {
+      _extendTo(page, staffHit ?? hitTestPage(page, pagePoint));
+      return;
+    }
     if (staffHit != null) {
-      setState(() => _selection = staffHit);
+      setState(() {
+        _selection = staffHit;
+        _selectionEnd = null;
+        _selectionStatus = null;
+      });
       debugPrint(
         'viewer.select staff page=${page.index} scale=${page.scale} '
         'surface=(${surface.x.toStringAsFixed(1)},${surface.y.toStringAsFixed(1)}) '
@@ -3657,7 +3890,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       return;
     }
     final ChartHit? hit = hitTestPage(page, pagePoint);
-    setState(() => _selection = hit);
+    setState(() {
+      _selection = hit;
+      _selectionEnd = null;
+      _selectionStatus = null;
+    });
     debugPrint(
       'viewer.select page=${page.index} scale=${page.scale} '
       'surface=(${surface.x.toStringAsFixed(1)},${surface.y.toStringAsFixed(1)}) '
@@ -3665,6 +3902,270 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       '${pagePoint.y.toStringAsFixed(1)}) '
       'hit=${hit == null ? 'none' : '${hit.sectionId}#${hit.barIndex} '
                 'beat=${hit.beat}'}',
+    );
+  }
+
+  // PURPOSE: Name the RUN the musician has selected — from the bar (or cell) he touched to the one he
+  //          pointed at — so copy, paste and transpose all act on the same fragment the highlight
+  //          shows.
+  // INPUTS: None; reads [_selection] and [_selectionEnd].
+  // OUTPUTS: A [ChartSelection], or null when nothing is selected. A single hit gives a run of one,
+  //          at the hit's own depth: a cell gives a one-beat window and a bar gives a whole bar, which
+  //          is what makes the same two taps mean "this bar" and "these bars" without a mode.
+  //          The run is DERIVED and never stored: there is one value here and no second copy of the
+  //          selection that could disagree with it.
+  //
+  //          WHY THE DEPTH IS THE HIT'S AND NOT A SEPARATE CHOICE. A musician who touched a cell has
+  //          already said "this beat"; one who touched the bar's padding said "this bar". Reading the
+  //          depth from the touch is what keeps the interface from asking a question the gesture
+  //          already answered (D36's whole point: a selection can be finer than a bar).
+  // KEYWORDS: selection-range, derived-address, depth-from-touch, ui-state-not-document-state, d35,
+  //           d36
+  ChartSelection? get _selectionRange {
+    final ChartHit? anchor = _selection;
+    if (anchor == null) {
+      return null;
+    }
+    final ChartHit? focus = _selectionEnd;
+    if (focus == null) {
+      final int? beat = anchor.beat;
+      return beat == null
+          ? ChartSelection.bars(
+              sectionId: anchor.sectionId,
+              firstBar: anchor.barIndex,
+              lastBar: anchor.barIndex,
+            )
+          : ChartSelection.beats(
+              sectionId: anchor.sectionId,
+              barIndex: anchor.barIndex,
+              firstBeat: beat,
+              lastBeat: beat,
+            );
+    }
+    return ChartSelection.span(
+      sectionId: anchor.sectionId,
+      firstBar: anchor.barIndex,
+      firstBeat: anchor.beat,
+      lastBar: focus.barIndex,
+      lastBeat: focus.beat,
+    );
+  }
+
+  // PURPOSE: Finish a run with the bar the musician just pointed at, and say what was selected, so the
+  //          highlight he sees is the address the next operation will act on.
+  // INPUTS: page — the page the touch landed on, for the log. hit — the bar and cell it named, or null
+  //         for a touch that hit nothing.
+  // OUTPUTS: Nothing. Sets [_selectionEnd] and clears [_extendPending], or — on a miss, or on a bar of
+  //          another section — clears the pending state and says why in the log rather than building a
+  //          run that spans two sections. A run inside one section is the only run this model has: an
+  //          address is `(section, bar)` and bars of two sections are not a contiguous run of anything.
+  // KEYWORDS: selection-extend, range-finish, one-section, miss-refusal, structured-log
+  void _extendTo(PageLayout page, ChartHit? hit) {
+    final ChartHit? anchor = _selection;
+    if (hit == null || anchor == null) {
+      setState(() => _extendPending = false);
+      debugPrint(
+        'viewer.selection.extend.skipped reason=${hit == null ? 'miss' : 'no-anchor'} '
+        'page=${page.index}',
+      );
+      return;
+    }
+    if (hit.sectionId != anchor.sectionId) {
+      setState(() => _extendPending = false);
+      debugPrint(
+        'viewer.selection.extend.skipped reason=other-section '
+        'anchor=${anchor.sectionId}#${anchor.barIndex} '
+        'hit=${hit.sectionId}#${hit.barIndex}',
+      );
+      return;
+    }
+    setState(() {
+      _selectionEnd = hit;
+      _extendPending = false;
+      _selectionStatus = null;
+    });
+    final ChartSelection? range = _selectionRange;
+    debugPrint(
+      'viewer.selection.extend page=${page.index} '
+      'anchor=${anchor.sectionId}#${anchor.barIndex} beat=${anchor.beat} '
+      'focus=${hit.sectionId}#${hit.barIndex} beat=${hit.beat} '
+      'range=${range?.toString() ?? 'none'} bars=${range?.barCount ?? 0} '
+      'beats=${range?.beatCount ?? 0}',
+    );
+  }
+
+  // PURPOSE: Arm the "until here" action, so the next tap names the other end of the run rather than
+  //          starting a new selection.
+  // INPUTS: context — for the catalogue, which states what the next tap will do.
+  // OUTPUTS: Nothing. Only meaningful with a selection; with none there is no anchor to extend from
+  //          and the action is disabled.
+  // KEYWORDS: selection-extend, arm, next-tap, discoverable-state
+  void _armExtend(BuildContext context) {
+    setState(() {
+      _extendPending = true;
+      _selectionStatus = null;
+    });
+    debugPrint(
+      'viewer.selection.extend.armed '
+      'search=${_selection == null ? 'none' : '${_selection!.sectionId}'
+                '#${_selection!.barIndex}'}',
+    );
+  }
+
+  // PURPOSE: Take a copy of what is selected, so the musician can paste it at another address —
+  //          including when nothing on it was ever recognised as music.
+  // INPUTS: context — for the catalogue.
+  // OUTPUTS: Nothing. The clip is held in [_clip] and NOTHING is written to the log, because copying
+  //          changes no document (D36: only the result of an operation reaches the op-log). The line
+  //          beside the chart says what was taken, with the numbers that make it checkable: how many
+  //          bars, how many of them carried structure, and how many strokes came with them.
+  // KEYWORDS: copy, clipboard, no-event, ink-carried, numbers-stated, d35
+  void _copySelection(BuildContext context) {
+    final EditSession? session = _currentSession;
+    final ChartSelection? range = _selectionRange;
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    if (session == null || range == null) {
+      debugPrint('viewer.selection.copy.skipped reason=no-selection');
+      return;
+    }
+    final ChartClip? clip = session.copySelection(range);
+    final SelectionReport report = selectionReportOf(
+      song: session.song,
+      strokes: session.document.strokes,
+      selection: range,
+    );
+    if (clip == null) {
+      setState(() => _selectionStatus = l10n.selectionCopyNothing);
+      debugPrint('viewer.selection.copy.skipped reason=no-bars range=$range');
+      return;
+    }
+    setState(() {
+      _clip = clip;
+      _selectionStatus = l10n.selectionCopied(
+        range.barCount,
+        // The MUSICIAN's number, counted across the sections from the top of the chart, exactly as
+        // the selection label counts it: the log may keep the model's zero-based index, but a
+        // sentence a musician reads must not.
+        _writtenBarOrdinal(session.song, range.sectionId, range.firstBar),
+      );
+    });
+    debugPrint(
+      'viewer.selection.copy range=$range depth=${range.depth.name} '
+      'bars=${clip.barCount} beats=${clip.beatCount} '
+      'strokes=${clip.strokes.length} '
+      'structured=${report.structuredBars} minimal=${report.minimalBars} '
+      'ink_area=${report.inkArea.toStringAsFixed(1)}',
+    );
+  }
+
+  // PURPOSE: Put the copied fragment after the selected bar (or into the selected cell), as ONE edit.
+  // INPUTS: context — for the catalogue.
+  // OUTPUTS: Nothing. Appends at most one event, rebuilds the page, and states the outcome in words —
+  //          including every refusal, because a paste that silently did nothing is the defect the
+  //          outcome value exists to prevent.
+  // KEYWORDS: paste, one-undo, outcome-stated, refusal-logged, d35, d36
+  void _pasteSelection(BuildContext context) {
+    final EditSession? session = _currentSession;
+    final ChartSelection? range = _selectionRange;
+    final ChartClip? clip = _clip;
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    if (session == null || range == null || clip == null) {
+      debugPrint(
+        'viewer.selection.paste.skipped '
+        'session=${session == null ? 'none' : 'ok'} '
+        'range=${range == null ? 'none' : 'ok'} '
+        'clip=${clip == null ? 'none' : 'ok'}',
+      );
+      return;
+    }
+    // THE COUNT AND THE ORDINALS ARE READ BEFORE THE PASTE, because after it the questions have
+    // different answers: a log line that printed the same number twice would be a line nobody could
+    // check. The insertion moves nothing before its own address, so the ordinals read here are still
+    // the ones the sentence means.
+    final int before =
+        session.document.song.sectionById(range.sectionId)?.bars.length ?? 0;
+    final ClipPasteOutcome outcome = session.pasteClip(at: range, clip: clip);
+    // The numbers the sentence needs, in the musician's own counting.
+    final int targetOrdinal = _writtenBarOrdinal(
+      session.song,
+      range.sectionId,
+      range.lastBar,
+    );
+    final int cellBarOrdinal = _writtenBarOrdinal(
+      session.song,
+      range.sectionId,
+      range.firstBar,
+    );
+    setState(() {
+      _selectionStatus = switch (outcome) {
+        ClipPasteOutcome.pasted =>
+          clip.depth == SelectionDepth.bars
+              ? l10n.selectionPastedAfter(targetOrdinal, clip.barCount)
+              : l10n.selectionPastedInto(
+                  cellBarOrdinal,
+                  (range.firstBeat ?? 0) + 1,
+                ),
+        ClipPasteOutcome.needsCell => l10n.selectionPasteNeedsCell,
+        ClipPasteOutcome.windowDoesNotFit => l10n.selectionPasteDoesNotFit,
+        ClipPasteOutcome.noSuchSection ||
+        ClipPasteOutcome.noSuchBar ||
+        ClipPasteOutcome.noSuchRun => l10n.selectionPasteNoBar,
+      };
+      // A pasted run of bars moves the address the selection names — the bar the musician was on is
+      // still the bar he was on, and the run landed after it — so the pending range is dropped rather
+      // than left to name bars that have shifted under it.
+      if (outcome == ClipPasteOutcome.pasted &&
+          clip.depth == SelectionDepth.bars) {
+        _selectionEnd = null;
+      }
+    });
+    debugPrint(
+      'viewer.selection.paste outcome=${outcome.name} at=$range '
+      'depth=${clip.depth.name} bars=${clip.barCount} '
+      'strokes=${clip.strokes.length} '
+      'undo=${session.undoDepth} bars_before=$before '
+      'bars_after=${session.document.song.sectionById(range.sectionId)?.bars.length ?? 0}',
+    );
+  }
+
+  // PURPOSE: Move the chords and the melody of the selected bars up a semitone, as ONE edit, leaving
+  //          the chart's key and every bar outside the selection alone — and saying out loud what
+  //          happened to the handwriting, which cannot move.
+  // INPUTS: context — for the catalogue.
+  // OUTPUTS: Nothing. Appends at most one event and states the counts: how many of the selected bars
+  //          changed, and how many strokes the selection carries that stay exactly where they were
+  //          drawn. A selection with nothing structured says so instead of writing an empty event.
+  // KEYWORDS: transpose-selection, one-undo, key-unchanged, ink-not-transposed, counts-stated, d35
+  void _transposeSelection(BuildContext context) {
+    final EditSession? session = _currentSession;
+    final ChartSelection? range = _selectionRange;
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    if (session == null || range == null) {
+      debugPrint('viewer.selection.transpose.skipped reason=no-selection');
+      return;
+    }
+    final SelectionTransposition report = session.transposeSelection(
+      selection: range,
+      semitones: 1,
+    );
+    setState(() {
+      _selectionStatus = switch (report.outcome) {
+        SelectionTransposeOutcome.applied => l10n.selectionTransposed(
+          report.barsChanged,
+          report.barsTotal,
+        ),
+        SelectionTransposeOutcome.nothingToTranspose =>
+          l10n.selectionTransposeNothing,
+        SelectionTransposeOutcome.beatsOnly => l10n.selectionTransposeBeats,
+        SelectionTransposeOutcome.noSuchSection => l10n.selectionTransposeNoBar,
+      };
+    });
+    debugPrint(
+      'viewer.selection.transpose outcome=${report.outcome.name} '
+      'range=$range bars_changed=${report.barsChanged} '
+      'bars_total=${report.barsTotal} strokes_kept=${report.strokesKept} '
+      'semitones=${report.semitones} key=${session.song.key} '
+      'undo=${session.undoDepth}',
     );
   }
 
@@ -3832,7 +4333,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         session: session,
         sectionId: hit.sectionId,
         barIndex: hit.barIndex,
-        onChanged: () => setState(() => _selection = null),
+        onChanged: () => setState(() {
+          _selection = null;
+          _selectionEnd = null;
+        }),
       ),
     );
   }
@@ -3962,7 +4466,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ? (_viewLocked
               ? l10n.viewLockActiveHint
               : (_eraserOn ? l10n.eraserActiveHint : l10n.selectionPrompt))
-        : _selectionLabel(song, hit, l10n);
+        : _runLabel(song, hit, l10n);
     final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
     );
@@ -4011,6 +4515,30 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // already follow. `WrapCrossAlignment.center` keeps the two texts on the buttons' centre line
     // rather than at their top, which is what makes one row read as one row.
     final bool cellSelected = editable && session != null;
+    // THE RUN, AND WHAT IT IS MADE OF. `range` is the same address the copy, paste and transpose
+    // actions act on, and `report` is what makes the two levels of quality sayable: a musician has to
+    // be able to tell a fragment that will transpose from one that will only travel (D37 point 4),
+    // and "12 bars selected" says neither. Both are computed from the document, not from a cached
+    // copy of it, so an edit that changes a bar changes the sentence.
+    final ChartSelection? range = _selectionRange;
+    final SelectionReport? report = session == null || range == null
+        ? null
+        : selectionReportOf(
+            song: session.song,
+            strokes: session.document.strokes,
+            selection: range,
+          );
+    final String? quality = report == null
+        ? null
+        : l10n.selectionQuality(
+            report.barCount,
+            report.structuredBars,
+            report.inkOnlyBars,
+            report.emptyBars,
+          );
+    final String? inkNote = report == null || report.strokeCount == 0
+        ? null
+        : l10n.selectionInkKept(report.strokeCount);
     return Padding(
       padding: UiKit.paneRowPadding,
       child: Wrap(
@@ -4029,6 +4557,31 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                 child: label,
               ),
             ),
+          // THE TWO LEVELS OF QUALITY, BESIDE THE RANGE AND NOT BEHIND A TAP. A fragment that looks
+          // the same but behaves differently is the lie this project spent a day removing, so the
+          // sentence stands in the same line as the selection, every time: how many bars carry
+          // structure (and will therefore transpose), how many carry only handwriting (and will
+          // therefore only travel), and — when there is ink in the selection — that the ink cannot be
+          // transposed and will stay exactly where it was drawn.
+          if (quality != null)
+            Text(
+              quality,
+              key: const ValueKey<String>('viewer-selection-quality'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (inkNote != null)
+            Text(
+              inkNote,
+              key: const ValueKey<String>('viewer-selection-ink'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (_selectionStatus != null)
+            Text(
+              _selectionStatus!,
+              key: const ValueKey<String>('viewer-selection-status'),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
           if (cellSelected) ...<Widget>[
             _SelectionAction(
               widgetKey: 'viewer-selection-chord',
@@ -4041,8 +4594,72 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               onTap: () => _editNoteSelection(context),
             ),
           ],
+          // THE FOUR ACTIONS OF THE OWNER'S WORKFLOW, in the order he says it in: select, copy,
+          // paste, transpose (D35). They live in this line rather than in the app bar because the app
+          // bar's width is the scarce resource A49 measured, and because every one of them acts on
+          // exactly what this line names — putting them anywhere else would separate the words from
+          // the address they apply to.
+          if (range != null && session != null) ...<Widget>[
+            _SelectionAction(
+              widgetKey: 'viewer-selection-extend',
+              label: l10n.selectionActionExtend,
+              onTap: () => _armExtend(context),
+            ),
+            _SelectionAction(
+              widgetKey: 'viewer-selection-copy',
+              label: l10n.selectionActionCopy,
+              onTap: () => _copySelection(context),
+            ),
+            if (_clip != null)
+              _SelectionAction(
+                widgetKey: 'viewer-selection-paste',
+                label: l10n.selectionActionPaste,
+                onTap: () => _pasteSelection(context),
+              ),
+            _SelectionAction(
+              widgetKey: 'viewer-selection-transpose',
+              label: l10n.selectionActionTransposeUp,
+              onTap: () => _transposeSelection(context),
+            ),
+          ],
+          // WHAT THE NEXT TAP WILL DO, while "until here" is armed. It replaces the edit hint rather
+          // than standing beside it: the hint says what a tap on the LINE does, and while a run is
+          // being completed the question a musician has is what a tap on the PAGE will do.
+          if (_extendPending)
+            Text(
+              l10n.selectionExtendPrompt,
+              key: const ValueKey<String>('viewer-selection-extend-prompt'),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
         ],
       ),
+    );
+  }
+
+  // PURPOSE: Say what is selected when a RUN is selected rather than a single bar, so the words beside
+  //          the chart name the same fragment the highlight covers.
+  // INPUTS: song — the chart on screen, for the musician's bar numbering. hit — the anchor of the run.
+  //         l10n — the catalogue.
+  // OUTPUTS: The run sentence for a run, and the single-hit sentence otherwise (through
+  //          [_selectionLabel]), which keeps the one-bar case worded exactly as it was: nothing about
+  //          selecting one bar changed, so nothing about how it is described should.
+  // KEYWORDS: selection-label, run, beat-window, one-based, single-hit-unchanged
+  String _runLabel(Song song, ChartHit hit, AppLocalizations l10n) {
+    final ChartSelection? range = _selectionRange;
+    if (_selectionEnd == null || range == null) {
+      return _selectionLabel(song, hit, l10n);
+    }
+    if (range.isBeatWindow) {
+      return l10n.selectionRunWindow(
+        _writtenBarOrdinal(song, range.sectionId, range.firstBar),
+        range.firstBeat! + 1,
+        range.lastBeat! + 1,
+      );
+    }
+    return l10n.selectionRunRange(
+      _writtenBarOrdinal(song, range.sectionId, range.firstBar),
+      _writtenBarOrdinal(song, range.sectionId, range.lastBar),
     );
   }
 

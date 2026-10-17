@@ -12,6 +12,7 @@
 // KEYWORDS: layout-result, placed-chord, hit-testing, value-equality, cache-key, anchor-address,
 //           view-transform, zoom, pan, single-bridge
 import '../chord.dart';
+import 'chart_header.dart';
 import 'geometry.dart';
 import 'melody_staff.dart';
 
@@ -458,6 +459,7 @@ class PageLayout {
     required this.index,
     required this.size,
     required this.systems,
+    this.header,
     this.scale = 1,
     this.zoom = 1,
     this.pan = LayoutOffset.zero,
@@ -472,6 +474,16 @@ class PageLayout {
 
   /// The systems on this page, top to bottom.
   final List<PlacedSystem> systems;
+
+  /// The key and meter the chart states about itself, on the ONE page where its music begins.
+  ///
+  /// Null on every page but the first, and null for a song with no bars at all — the header states
+  /// what the music is written in, and a chart with no music has nothing to state. It lives on the
+  /// PAGE rather than on the first system because it is the chart's own statement and not a line of
+  /// music: the systems keep meaning "one line of bars", the vertical room it needs is taken from
+  /// the page's content height before the systems are packed, and a touch on it names no bar because
+  /// it sits above the first system's own band.
+  final PlacedChartHeader? header;
 
   /// The factor that maps this page's coordinates onto the surface it is drawn on.
   ///
@@ -617,6 +629,7 @@ class PageLayout {
       index: index,
       size: size,
       systems: systems,
+      header: header,
       scale: scale,
       zoom: zoom,
       pan: clamped,
@@ -628,6 +641,7 @@ class PageLayout {
     if (other is! PageLayout ||
         other.index != index ||
         other.size != size ||
+        other.header != header ||
         other.scale != scale ||
         other.zoom != zoom ||
         other.pan != pan ||
@@ -643,12 +657,20 @@ class PageLayout {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(index, size, scale, zoom, pan, Object.hashAll(systems));
+  int get hashCode => Object.hash(
+    index,
+    size,
+    header,
+    scale,
+    zoom,
+    pan,
+    Object.hashAll(systems),
+  );
 
   @override
   String toString() =>
       'PageLayout($index, ${systems.length} system(s), ${bars.length} bar(s)'
+      '${header == null ? '' : ', header "$header"'}'
       '${scale == 1 ? '' : ', scale $scale'}'
       '${zoom == 1 ? '' : ', zoom $zoom'}'
       '${pan == LayoutOffset.zero ? '' : ', pan $pan'})';

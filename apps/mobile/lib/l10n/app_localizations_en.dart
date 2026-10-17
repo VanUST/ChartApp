@@ -202,6 +202,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuSettings => 'Settings';
 
   @override
+  String get menuRecognitionOn => 'Recognise my barlines: ON';
+
+  @override
+  String get menuRecognitionOff => 'Recognise my barlines: OFF';
+
+  @override
+  String get tooltipRecognitionOn =>
+      'Recognition is on: a barline you draw is drawn as an ideal line';
+
+  @override
+  String get tooltipRecognitionOff =>
+      'Recognition is off: your handwriting is drawn exactly as you wrote it';
+
+  @override
   String get selectionPrompt => 'Tap a bar to select it.';
 
   @override
@@ -219,6 +233,113 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get selectionHintForm => '— tap for bars & sections';
+
+  @override
+  String selectionRunRange(int from, int to) {
+    return 'selected: bars $from–$to';
+  }
+
+  @override
+  String selectionRunWindow(int bar, int from, int to) {
+    return 'selected: bar $bar, beats $from–$to';
+  }
+
+  @override
+  String selectionQuality(int bars, int structured, int inkOnly, int empty) {
+    String _temp0 = intl.Intl.pluralLogic(
+      bars,
+      locale: localeName,
+      other: '$bars bars',
+      one: '$bars bar',
+    );
+    return '$_temp0: structure $structured, handwriting only $inkOnly, empty $empty';
+  }
+
+  @override
+  String selectionInkKept(int strokes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      strokes,
+      locale: localeName,
+      other: '$strokes handwritten strokes',
+      one: '$strokes handwritten stroke',
+    );
+    return '$_temp0 — stays where it was drawn, handwriting is not transposed';
+  }
+
+  @override
+  String get selectionActionExtend => 'Until here';
+
+  @override
+  String get selectionActionCopy => 'Copy';
+
+  @override
+  String get selectionActionPaste => 'Paste';
+
+  @override
+  String get selectionActionTransposeUp => 'Up a semitone';
+
+  @override
+  String get selectionExtendPrompt => 'Tap the last bar of the range.';
+
+  @override
+  String get selectionCopyNothing =>
+      'Nothing was copied: those bars are not there.';
+
+  @override
+  String selectionCopied(int count, int bar) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'copied $count bars',
+      one: 'copied $count bar',
+    );
+    return '$_temp0 from bar $bar';
+  }
+
+  @override
+  String selectionPastedAfter(int count, int bar) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bars pasted',
+      one: '$count bar pasted',
+    );
+    return '$_temp0 after bar $bar';
+  }
+
+  @override
+  String selectionPastedInto(int bar, int beat) {
+    return 'beats pasted into bar $bar, from beat $beat';
+  }
+
+  @override
+  String get selectionPasteNeedsCell =>
+      'Nothing was pasted: a window of beats needs a cell to land on.';
+
+  @override
+  String get selectionPasteDoesNotFit =>
+      'Nothing was pasted: those beats do not fit in that bar.';
+
+  @override
+  String get selectionPasteNoBar =>
+      'Nothing was pasted: there is no bar there.';
+
+  @override
+  String selectionTransposed(int changed, int bars) {
+    return 'moved up a semitone: $changed of $bars bars changed';
+  }
+
+  @override
+  String get selectionTransposeNothing =>
+      'Nothing was transposed: those bars hold no chord and no note.';
+
+  @override
+  String get selectionTransposeBeats =>
+      'Nothing was transposed: select whole bars to transpose.';
+
+  @override
+  String get selectionTransposeNoBar =>
+      'Nothing was transposed: those bars are not there.';
 
   @override
   String get noBars => 'This song has no bars.';

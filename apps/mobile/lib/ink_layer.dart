@@ -126,6 +126,8 @@
 // document changed and the ink painter was told to repaint, and drawing it anywhere else would put
 // the same information in two places. It does not own selection: it answers whether a contact would
 // draw, and the widget decides what a contact that does not draw means.
+import 'dart:math' as math;
+
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:flutter/foundation.dart';
@@ -303,6 +305,33 @@ class InkCaptureLayer {
   /// a stroke placed by address against the page on screen moves with the music when the chart is
   /// transposed.
   List<InkStroke> get documentStrokes => _session.document.strokes;
+
+  /// The bar divisions the document holds, recognised from that ink or drawn by the musician.
+  List<BarDivision> get documentDivisions => _session.document.divisions;
+
+  /// Whether the application looks for bar divisions in what the pen writes.
+  ///
+  /// OFF UNTIL THE MUSICIAN TURNS IT ON, which is owner decision D37 rule 1 and the reason this
+  /// feature cannot damage a chart nobody asked it to read: with the flag false the whole of it is
+  /// a skipped branch at the end of [endStroke], [endErase] and the tap path, and every other line
+  /// of this class behaves exactly as it did before the feature existed.
+  ///
+  /// It is a plain field rather than a mode beside [InkMode] because it is not a tool: the pen still
+  /// writes and the eraser still erases, and this decides only whether a stroke that was written is
+  /// ALSO read.
+  bool recognitionEnabled = false;
+
+  /// The divisions found in the ink of the page that has just been written on, newest last.
+  ///
+  /// Set by [recogniseBarDivisions] so that a screen can report what was found without asking the
+  /// detector a second time, and so that a probe can read the same numbers the application acts on.
+  List<BarDivision> get lastRecognisedDivisions => _lastRecognised;
+  List<BarDivision> _lastRecognised = const <BarDivision>[];
+
+  /// Whether the last contact that ended with the eraser removed a RECOGNISED DIVISION instead of a
+  /// stroke, which is the one-action repair for a barline the detector should not have found.
+  bool get lastEraseRejectedRecognition => _lastEraseRejectedRecognition;
+  bool _lastEraseRejectedRecognition = false;
 
   /// Milliseconds of the last event of any kind that proved a stylus is near the glass.
   ///
@@ -1139,7 +1168,255 @@ class InkCaptureLayer {
       '${stroke.points.last.y.toStringAsFixed(1)})'
       '${stroke.points.first.w == 0.5 && stroke.points.every((InkPoint p) => p.w == 0.5) ? ' pressure=neutral-fallback' : ''}',
     );
+    // RECOGNITION RUNS LAST, AFTER THE STROKE IS IN THE LOG, and only when the musician turned it on.
+    // Last, because the detector weighs this stroke against the page's other ink and the stroke it
+    // just wrote has to be one of the neighbours; after the append, because the append is the fact
+    // that has to exist whatever recognition decides, and a detector that throws must not be able to
+    // lose the ink. With the switch off this is one boolean read and nothing else.
+    if (recognitionEnabled) {
+      recogniseBarDivisions(page);
+    }
     return stroke;
+  }
+
+  // PURPOSE: Look for bar divisions in the ink on [page] and record what it finds as STRUCTURE, so
+  //          that a line the musician drew comes back as an ideal line the document holds.
+  //
+  //          A RECOGNISED DIVISION IS A STRUCTURAL UNIT, NOT A REDRAWING OF HIS STROKE. The event it
+  //          appends is `division.set`; the stroke stays exactly where it was, which is D37 rule 5
+  //          and the reason a misrecognition can be undone at all. The division carries the id of
+  //          the stroke it came from, which is what lets the painter hide that one piece of ink
+  //          while recognition is on and show it again the moment the switch goes off or the
+  //          division is rejected.
+  //
+  //          ONLY THE STROKE NAMED BY [onlyStrokeId] IS CONSIDERED, and that is a decision about
+  //          repair rather than about cost. A whole-page pass would re-recognise a division the
+  //          musician had already deleted, every time he wrote anything else, which would make the
+  //          one-action repair a joke. A stroke he writes again is a stroke he means again.
+  // INPUTS: page — the layout on screen, which is what resolves each anchor to a page position and
+  //         what every row's height is read from. onlyStrokeId — the stroke whose commit triggered
+  //         this pass; null means the whole page, which is what a probe wants and the app does not.
+  // OUTPUTS: The divisions the page now holds, newest last, also kept in [lastRecognisedDivisions]
+  //          for a caller that reports them. The document is changed ONLY when a candidate was found
+  //          and was not already known: no rejection is recorded anywhere, so a stroke the detector
+  //          refuses leaves the document byte-identical to what it was before the pass.
+  // KEYWORDS: recognition, bar-division, structure-from-ink, op-log-write, dedupe, repair-aware,
+  //           off-by-default, d37
+  /// Looks for divisions in the ink of [page] and records them through the log.
+  List<BarDivision> recogniseBarDivisions(
+    PageLayout page, {
+    String? onlyStrokeId,
+  }) {
+    final List<InkStroke> strokes = _session.document.strokes;
+    if (strokes.isEmpty) {
+      _lastRecognised = _session.document.divisions;
+      return _lastRecognised;
+    }
+    final List<PlacedInkStroke> placed = placeInkStrokes(page, strokes);
+    final Map<String, LayoutRect> rows = barRowsOfPage(page);
+    List<PlacedBarlineCandidate> found = const <PlacedBarlineCandidate>[];
+    for (final PlacedInkStroke one in placed) {
+      if (onlyStrokeId != null && one.stroke.id != onlyStrokeId) {
+        continue;
+      }
+      final BarlineVerdict verdict = measureBarlineStroke(
+        stroke: one,
+        strokes: placed,
+        barRows: rows,
+      );
+      final BarlineCandidate? candidate = verdict.candidate;
+      if (candidate == null) {
+        debugPrint(
+          'barline.refused id=${one.stroke.id} '
+          'gate=${verdict.rejection?.token} ${verdict.measurement}',
+        );
+        continue;
+      }
+      debugPrint(
+        'barline.found id=${one.stroke.id} '
+        'x=${candidate.centreX.toStringAsFixed(1)} '
+        'h=${candidate.height.toStringAsFixed(1)} ${verdict.measurement}',
+      );
+      found = <PlacedBarlineCandidate>[
+        ...found,
+        PlacedBarlineCandidate(
+          candidate: candidate,
+          row:
+              rows['${one.stroke.anchor.sectionId}\u0000${one.stroke.anchor.bar}']!,
+        ),
+      ];
+    }
+    if (found.isEmpty) {
+      _lastRecognised = _session.document.divisions;
+      return _lastRecognised;
+    }
+    final List<BarDivision> next = List<BarDivision>.of(
+      _session.document.divisions,
+    );
+    for (final PlacedBarlineCandidate placedCandidate in found) {
+      final BarlineCandidate candidate = placedCandidate.candidate;
+      final bool known = next.any(
+        (BarDivision division) => division.cameFrom(candidate.strokeId),
+      );
+      if (known) {
+        continue;
+      }
+      next.add(
+        BarDivision(
+          // The stroke's own id, so that the division and the ink it came from can never be
+          // confused for two different marks, and so that a reader of the file can follow one to
+          // the other without a second table.
+          id: 'division-${candidate.strokeId}',
+          place: AnchoredPlace(
+            anchor: candidate.anchor,
+            offsetX: candidate.centreX,
+            offsetY: candidate.top,
+          ),
+          height: candidate.height,
+          sourceStrokeId: candidate.strokeId,
+        ),
+      );
+    }
+    if (next.length == _session.document.divisions.length) {
+      _lastRecognised = _session.document.divisions;
+      return _lastRecognised;
+    }
+    _session.apply(
+      DivisionSetEvent(
+        docId: _session.docId,
+        seq: _session.seq,
+        from: _session.document.divisions,
+        to: next,
+      ),
+    );
+    _documentEdits++;
+    _lastRecognised = next;
+    debugPrint(
+      'barline.divisions count=${next.length} seq=${_session.seq} '
+      'ids=${next.map((BarDivision division) => division.sourceStrokeId).join(',')}',
+    );
+    return next;
+  }
+
+  // PURPOSE: Promote or reject a bar division with ONE tap, which is the repair path the owner's
+  //          rule requires for both of the ways recognition can be wrong.
+  //
+  //          BOTH ERRORS GET THE SAME GESTURE, AND THAT IS THE POINT. A missed division leaves a bar
+  //          too long and a spurious one splits a bar that was whole; each is repaired by pointing
+  //          at the mark and having the application change its mind about THAT mark. A tap on ink
+  //          that is already a division rejects it (and the handwriting comes back into view); a tap
+  //          on ink that is not one makes it a division. One action each way, no menu, no mode.
+  // INPUTS: page — the layout on screen. surfacePoint — where the musician tapped, in the surface
+  //         logical pixels the hit test speaks (the caller converts; see [_select]).
+  // OUTPUTS: What the tap did, as a token for the log and for the screen's own report, or null when
+  //          it hit no ink at all and the tap should go on to mean a selection. The document is
+  //          changed at most once per call, so undo takes the whole repair back in one step.
+  // KEYWORDS: repair, one-action, promote, reject, division, ink-hit-test, both-errors
+  /// Promotes or rejects the division on the ink at [surfacePoint], and reports which.
+  String? toggleDivisionAt({
+    required PageLayout page,
+    required LayoutOffset surfacePoint,
+  }) {
+    final List<InkStroke> strokes = _session.document.strokes;
+    if (strokes.isEmpty) {
+      return null;
+    }
+    final InkEraseHit? hit = hitTestInkErase(
+      strokes: strokes,
+      page: page,
+      surfacePoint: surfacePoint,
+    );
+    if (hit == null) {
+      return null;
+    }
+    final List<BarDivision> divisions = _session.document.divisions;
+    final int existing = divisions.indexWhere(
+      (BarDivision division) => division.cameFrom(hit.stroke.id),
+    );
+    if (existing >= 0) {
+      final List<BarDivision> next = <BarDivision>[
+        for (int index = 0; index < divisions.length; index++)
+          if (index != existing) divisions[index],
+      ];
+      _session.apply(
+        DivisionSetEvent(
+          docId: _session.docId,
+          seq: _session.seq,
+          from: divisions,
+          to: next,
+        ),
+      );
+      _documentEdits++;
+      debugPrint(
+        'barline.rejected id=${hit.stroke.id} from=${divisions.length} '
+        'to=${next.length} seq=${_session.seq}',
+      );
+      return 'rejected';
+    }
+    final List<BarDivision> next = <BarDivision>[
+      ...divisions,
+      BarDivision(
+        id: 'division-${hit.stroke.id}',
+        // DRAWN, not RECOGNISED: the musician said so, and D37 rule 4 requires the application to
+        // be able to tell the two levels apart. Its geometry is still the ink's own, because a
+        // division he points at is the line he drew.
+        source: DivisionSource.drawn,
+        place: AnchoredPlace(
+          anchor: hit.stroke.anchor,
+          offsetX: _centreXOf(hit.stroke),
+          offsetY: _topOf(hit.stroke),
+        ),
+        height: _heightOf(hit.stroke),
+        sourceStrokeId: hit.stroke.id,
+      ),
+    ];
+    _session.apply(
+      DivisionSetEvent(
+        docId: _session.docId,
+        seq: _session.seq,
+        from: divisions,
+        to: next,
+      ),
+    );
+    _documentEdits++;
+    debugPrint(
+      'barline.promoted id=${hit.stroke.id} from=${divisions.length} '
+      'to=${next.length} seq=${_session.seq}',
+    );
+    return 'promoted';
+  }
+
+  /// The horizontal centre of [stroke]'s bounding box, in its anchor-local pixels.
+  static double _centreXOf(InkStroke stroke) {
+    double minX = double.infinity;
+    double maxX = -double.infinity;
+    for (final InkPoint point in stroke.points) {
+      minX = math.min(minX, point.x);
+      maxX = math.max(maxX, point.x);
+    }
+    return (minX + maxX) / 2;
+  }
+
+  /// The top of [stroke]'s bounding box, in its anchor-local pixels.
+  static double _topOf(InkStroke stroke) {
+    double top = double.infinity;
+    for (final InkPoint point in stroke.points) {
+      top = math.min(top, point.y);
+    }
+    return top;
+  }
+
+  /// The height of [stroke]'s bounding box, in its anchor-local pixels.
+  static double _heightOf(InkStroke stroke) {
+    double top = double.infinity;
+    double bottom = -double.infinity;
+    for (final InkPoint point in stroke.points) {
+      top = math.min(top, point.y);
+      bottom = math.max(bottom, point.y);
+    }
+    // A one-point mark cannot divide anything, and a division of no height is a state the model
+    // refuses; the smallest honest line is one nib tall.
+    return math.max(bottom - top, stroke.size > 0 ? stroke.size : 3);
   }
 
   // PURPOSE: Abandon a drawing contact without committing anything, which is what the platform
@@ -1304,8 +1581,42 @@ class InkCaptureLayer {
       return const <InkEraseHit>[];
     }
     final List<InkEraseHit> removed = <InkEraseHit>[];
+    // THE ONE-ACTION REPAIR FOR A DIVISION THE DETECTOR SHOULD NOT HAVE FOUND, and it lives here
+    // because the eraser is the tool a musician already has in his hand when he wants a mark gone.
+    // With recognition ON, a stroke that a division was recognised from is not deleted: the DIVISION
+    // is rejected and the handwriting comes back into view, which is the ink D37 rule 5 requires the
+    // file to keep. It costs one action, it cannot destroy what he wrote as a side effect of
+    // correcting the application, and a second rub removes the ink if that is what he meant.
+    //
+    // With recognition OFF this branch is dead, so the eraser is exactly the tool it was.
+    final Set<String> rejected = <String>{};
     for (int index = 0; index < crossed.length; index++) {
       final InkEraseHit hit = crossed[index];
+      if (recognitionEnabled) {
+        final List<BarDivision> divisions = _session.document.divisions;
+        final int existing = divisions.indexWhere(
+          (BarDivision division) => division.cameFrom(hit.stroke.id),
+        );
+        if (existing >= 0) {
+          _session.apply(
+            DivisionSetEvent(
+              docId: _session.docId,
+              seq: _session.seq,
+              from: divisions,
+              to: <BarDivision>[
+                for (int at = 0; at < divisions.length; at++)
+                  if (at != existing) divisions[at],
+              ],
+            ),
+          );
+          rejected.add(hit.stroke.id);
+          debugPrint(
+            'barline.rejected-by-eraser pointer=$pointer id=${hit.stroke.id} '
+            'divisions=${_session.document.divisions.length} seq=${_session.seq}',
+          );
+          continue;
+        }
+      }
       final bool erased = _session.eraseStroke(hit.stroke.id);
       if (erased) {
         removed.add(hit);
@@ -1317,6 +1628,7 @@ class InkCaptureLayer {
         'strokes=${_session.document.strokes.length} seq=${_session.seq}',
       );
     }
+    _lastEraseRejectedRecognition = rejected.isNotEmpty;
     _lastErase = <String, Object?>{
       'ids': removed.map((InkEraseHit hit) => hit.stroke.id).toList(),
       'count': removed.length,

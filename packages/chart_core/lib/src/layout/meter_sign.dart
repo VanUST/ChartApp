@@ -22,7 +22,12 @@
 //      never changes meter renders BYTE-IDENTICALLY to the page the painter produced before a sign
 //      existed: every bar of such a chart is 4/4, neither rule matches, and nothing is drawn.
 //   3. The chart's FIRST bar is treated as opening a system, so a chart that opens in 3/4 or 15/8
-//      is signed from its first bar; one that opens in 4/4 is not.
+//      is signed from its first bar; one that opens in 4/4 is not. Since the chart's own header line
+//      states the opening meter on the page where the music begins, the first bar of a chart that
+//      HAS a header is not signed at all — the statement has been made one line above it, and
+//      printing it twice would be one fact in two places. Header and no header therefore differ in
+//      exactly one bar of a chart that does not open in 4/4, and the painter and this file read that
+//      fact from the page rather than from a second rule.
 //
 // WHAT THE RULE DELIBERATELY DOES NOT DO. It does not sign every bar of a chart that is 3/4
 // throughout, except at the start of each system — which is the convention a jazz chart follows,
@@ -45,21 +50,42 @@ const TimeSignature assumedMeter = TimeSignature.fourFour;
 // PURPOSE: Answer whether one bar's meter must be DRAWN, from the three things that decide it.
 // INPUTS: meter — the bar's own meter. preceding — the meter of the bar before it in reading order,
 //         or null when this is the chart's first bar. opensSystem — whether this bar begins a line.
+//         headerStatesOpeningMeter — whether the chart's own header line has already printed this
+//         bar's meter as the meter the music opens in.
 // OUTPUTS: True when the sign is drawn; false otherwise, and false for EVERY bar of a 4/4 chart,
 //          which is what keeps such a page byte-identical to the one drawn before signs existed.
 //          Never throws: a bar is signed or it is not, and there is no third answer.
-// KEYWORDS: meter-sign, decision, change, system-start, 4/4-default, total-function
+//
+//          WHY THE HEADER SUPPRESSES THE FIRST BAR'S SIGN, AND WHY THAT IS A RULE RATHER THAN A
+//          DUPLICATE TOLERANCE. The chart's first bar is the one place where the meter has already
+//          been stated — the header says `C major · 3/4` one line above it — and printing `3/4`
+//          again in the bar's own corner would state the same fact twice within a centimetre. A
+//          printed chart signs the opening meter once, where the music begins; the header IS that
+//          statement now, so the bar does not repeat it. Every LATER system keeps its sign, because
+//          the header is on the first page only and a reader returning to the music needs the meter
+//          where the line begins — which is the other half of the convention the rule already
+//          followed.
+//
+//          THE PARAMETER DEFAULTS TO FALSE, and both call sites in this tree pass it from the page
+//          they are drawing: the rule belongs here, but whether a header has already spoken is a
+//          fact about the PAGE, and a function given only a bar cannot know it. A caller that
+//          forgets it draws the duplicate in the one case it can occur — a chart that does not open
+//          in 4/4 — and draws nothing wrongly anywhere else.
+// KEYWORDS: meter-sign, decision, change, system-start, 4/4-default, header-suppression,
+//           total-function
 /// Returns whether the meter of a bar is engraved on the page.
 bool showsMeterSign({
   required TimeSignature meter,
   required TimeSignature? preceding,
   required bool opensSystem,
+  bool headerStatesOpeningMeter = false,
 }) {
   // The chart's first bar has nothing before it to change from, so it is answered by the
   // system-start rule: signed unless the meter is the assumed one, exactly like every other system
-  // start. A 4/4 opening therefore draws nothing.
+  // start. A 4/4 opening therefore draws nothing — and a 3/4 opening draws nothing either when the
+  // header has just said 3/4, because the statement has been made.
   if (preceding == null) {
-    return meter != assumedMeter;
+    return !headerStatesOpeningMeter && meter != assumedMeter;
   }
   // A change is signed whichever way it goes: into 3/4 and back out of it are both things the
   // musician has to read at the bar they happen on.
@@ -103,8 +129,15 @@ TimeSignature? precedingMeter(Song song, String sectionId, int barIndex) {
 // OUTPUTS: One entry per signed bar, keyed `sectionId#barIndex`, whose value is the meter's text
 //          (`3/4`, `15/8`) exactly as the page draws it. A bar the song does not contain — a page
 //          and a song from different states — is skipped rather than guessed at. An empty map means
-//          the page shows no meter at all, which is every 4/4 chart.
-// KEYWORDS: page-signs, probe-support, painter-contract, reading-order
+//          the page shows no meter at all, which is every 4/4 chart and every chart whose opening
+//          meter the page's own header states.
+//
+//          THE HEADER'S PRESENCE IS READ FROM THE PAGE, not passed in, because it is the page that
+//          publishes it: `page.header != null` means this page has already printed the opening meter
+//          one line above the first bar, and the first bar therefore does not repeat it. That keeps
+//          this function and `ChartPainter` answering the same question from the same fact instead
+//          of each deciding when a header exists.
+// KEYWORDS: page-signs, probe-support, painter-contract, reading-order, header-suppression
 /// Returns the meter signs a page shows, keyed by bar address.
 Map<String, String> meterSignsOnPage(Song song, PageLayout page) {
   final Map<String, String> signs = <String, String>{};
@@ -120,6 +153,7 @@ Map<String, String> meterSignsOnPage(Song song, PageLayout page) {
         meter: meter,
         preceding: precedingMeter(song, placed.sectionId, placed.barIndex),
         opensSystem: index == 0,
+        headerStatesOpeningMeter: page.header != null,
       )) {
         signs['${placed.sectionId}#${placed.barIndex}'] = meter.toString();
       }

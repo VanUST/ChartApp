@@ -95,6 +95,14 @@
 
   "menuSettings": "Настройки",
 
+  "menuRecognitionOn": "Распознавать тактовые черты: ВКЛ",
+
+  "menuRecognitionOff": "Распознавать тактовые черты: ВЫКЛ",
+
+  "tooltipRecognitionOn": "Распознавание включено: проведённая вами черта рисуется идеальной линией",
+
+  "tooltipRecognitionOff": "Распознавание выключено: рукопись рисуется ровно так, как вы её написали",
+
   "selectionPrompt": "Коснитесь такта, чтобы выбрать его.",
 
   "selectionBar": "выбран: такт {bar} (весь такт)",
@@ -104,6 +112,46 @@
   "selectionHintChord": "— коснитесь, чтобы сменить аккорд",
 
   "selectionHintForm": "— коснитесь для тактов и разделов",
+
+  "selectionRunRange": "выбрано: такты {from}–{to}",
+
+  "selectionRunWindow": "выбран: такт {bar}, доли {from}–{to}",
+
+  "selectionQuality": "{bars, plural, one{{bars} такт} few{{bars} такта} many{{bars} тактов} other{{bars} такта}}: структура {structured}, только рукопись {inkOnly}, пусто {empty}",
+
+  "selectionInkKept": "{strokes, plural, one{{strokes} штрих от руки} few{{strokes} штриха от руки} many{{strokes} штрихов от руки} other{{strokes} штриха от руки}} — остаётся там, где написан: рукопись не транспонируется",
+
+  "selectionActionExtend": "До сюда",
+
+  "selectionActionCopy": "Копия",
+
+  "selectionActionPaste": "Вставить",
+
+  "selectionActionTransposeUp": "На полтона вверх",
+
+  "selectionExtendPrompt": "Коснитесь последнего такта диапазона.",
+
+  "selectionCopyNothing": "Ничего не скопировано: этих тактов нет.",
+
+  "selectionCopied": "{count, plural, one{скопирован {count} такт} few{скопировано {count} такта} many{скопировано {count} тактов} other{скопировано {count} такта}} с такта {bar}",
+
+  "selectionPastedAfter": "{count, plural, one{вставлен {count} такт} few{вставлено {count} такта} many{вставлено {count} тактов} other{вставлено {count} такта}} после такта {bar}",
+
+  "selectionPastedInto": "доли вставлены в такт {bar}, начиная с доли {beat}",
+
+  "selectionPasteNeedsCell": "Ничего не вставлено: долям нужна доля-приёмник.",
+
+  "selectionPasteDoesNotFit": "Ничего не вставлено: эти доли не помещаются в такт.",
+
+  "selectionPasteNoBar": "Ничего не вставлено: там нет такта.",
+
+  "selectionTransposed": "поднято на полтона: из {bars} тактов изменилось {changed}",
+
+  "selectionTransposeNothing": "Ничего не транспонировано: в этих тактах нет ни аккорда, ни ноты.",
+
+  "selectionTransposeBeats": "Ничего не транспонировано: для транспонирования нужны целые такты.",
+
+  "selectionTransposeNoBar": "Ничего не транспонировано: этих тактов нет.",
 
   "noBars": "В этой песне нет тактов.",
 

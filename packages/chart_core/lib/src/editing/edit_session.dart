@@ -551,8 +551,476 @@ class EditSession {
     return true;
   }
 
-  // PURPOSE: Insert a new section before the one the musician is working in, which is how an intro
-  //          is put in front of a form that was written without one.
+  // --- A SELECTION: copy, paste and transpose a fragment ----------------------------------------
+  //
+  // The owner named this workflow as the purpose of the product (D35): "скопировать секцию из 16
+  // тактов, вставить их в конец и транспонировать выбранное на полтона вверх", and added that it
+  // must work "вместе с поддержкой письма". D36 fixed two of its properties: the selection is an
+  // ADDRESS in the interface and never an entity of the document, and a paste must cost ONE undo.
+  //
+  // WHAT IS IN THE LOG AND WHAT IS NOT. Copy writes nothing: it reads the document into a [ChartClip]
+  // and changes no state, so there is no event to undo and nothing in the file. Paste writes one
+  // `bars.insert` (a run of bars and its ink) or one `bars.replace` (a window of cells inside one
+  // bar). Transpose writes one `bars.replace` covering the whole selected run. Each of those is a
+  // single event, so each is a single press of undo — the price A69 had to name for the eraser is not
+  // paid again here.
+  //
+  // WHY THE TRANSPOSITION OF A SELECTION IS NOT A MODULATION, AND WHY THAT IS A DECISION AND NOT AN
+  // OVERSIGHT. The chart's key is what the band calls the tune and what the chart is filed under; the
+  // key grid exists to show the whole tune in another key (D14), and a selection transposition is a
+  // local edit of some bars — a chord that came out too low, a section the singer wants a semitone
+  // up. Relabelling the whole chart for that would tell the musician the tune is in a key it is not,
+  // would move the twelve keys the grid offers, and would leave the bars OUTSIDE the selection
+  // disagreeing with the label. So the key stays, the chords and the melody of the selected bars
+  // move, and everything else in the chart is untouched.
+  //
+  // AND WHAT HAPPENS TO THE HANDWRITING, SAID PLAINLY BECAUSE IT IS THE ONE THING THAT CANNOT MOVE.
+  // A stroke is a picture: its points are pixels measured from a bar, and a semitone is not a
+  // distance in pixels. `transposition.dart` never sees a stroke and this file does not invent a
+  // scale for one. D37 requires that the file keep BOTH layers and that no layer be silently
+  // discarded, so the ink is neither transposed (impossible) nor hidden (worse than leaving it: a
+  // musician who cannot see his own handwriting will conclude it was lost). It STAYS exactly where it
+  // was drawn, the structured layer under it moves, and the numbers are reported to the surface —
+  // `SelectionTransposition.strokesKept` — so the application can say so in words. That leaves a bar
+  // whose chord line and handwriting disagree, which is the honest state of two layers that were
+  // always two: the ink is the source (D37 point 2) and it is still there to be erased by the
+  // musician if he wants it gone.
+
+  // PURPOSE: Take a copy of a fragment — its bars and the ink that hangs on them — into a value the
+  //          musician can paste somewhere else, without touching the document.
+  // INPUTS: selection — the fragment, from a hit test or from the interface's own address.
+  // OUTPUTS: The [ChartClip], or null when the selection names no bar of the song. Nothing is
+  //          appended to the log and no undo step is created, because copying changes nothing: the
+  //          clip is interface state, exactly as the selection is (D36), and only the RESULT of an
+  //          operation reaches the op-log.
+  //
+  //          THE CLIP CARRIES WHOLE BARS. Its chords, melody, percussion, metre, size, signs, marks
+  //          and staff text are inside the [Bar] value and therefore cannot be forgotten one by one;
+  //          and its ink, whose anchors are rebased onto the fragment so a paste is arithmetic. See
+  //          `selection_clip.dart` for what is deliberately NOT carried (a text cue) and why.
+  // KEYWORDS: copy, selection-copy, clipboard, ink-carried, whole-bars, reads-only, no-event
+  /// Returns the clip a copy of [selection] takes, or null when it names no bar.
+  ChartClip? copySelection(ChartSelection selection) => chartClipOf(
+    song: _document.song,
+    strokes: _document.strokes,
+    selection: selection,
+  );
+
+  // PURPOSE: Put a copied fragment into the chart at the place the musician chose, as ONE edit.
+  // INPUTS: at — where it should go, in the interface's own address. clip — what copy produced.
+  // OUTPUTS: A [ClipPasteOutcome]. [ClipPasteOutcome.pasted] means exactly one event was appended,
+  //          carrying the whole run (bars AND ink) and — when the insertion lands in the middle of a
+  //          section — the re-addressing of every anchored object the insertion pushes along, so the
+  //          ink of the bars that move stays on the music that moved and the ink of the pasted bars
+  //          lands on the pasted bars. Every other outcome is a refusal that appended nothing and
+  //          left the document as it was, so a musician cannot lose a bar to a paste that failed.
+  //
+  //          WHERE IT LANDS, AND WHY THAT IS THE DECIDED BEHAVIOUR. A run of bars is INSERTED after
+  //          the last bar of the target selection: existing bars are pushed later, nothing is
+  //          destroyed, and "paste at the end of the section" is the same gesture on the section's
+  //          last bar as paste anywhere else. Insert is chosen over replace because replace would
+  //          silently destroy a bar the musician wanted — the one outcome the requirement forbids —
+  //          and over refuse because refusing a legal address would make the gesture unusable in the
+  //          middle of a chart, which is where a musician most often wants it.
+  //
+  //          A WINDOW OF BEATS IS DIFFERENT, and its decided behaviour is REPLACE, not insert: a bar's
+  //          grid has no room to insert a beat without moving everything after it, which would be a
+  //          change of the bar's rhythm the musician did not ask for. So the target cells are
+  //          overwritten, and the whole previous bar travels in the event — one undo puts it back
+  //          exactly. A window that does not fit inside the target bar's METRE is refused rather than
+  //          reshaped: spilling it past the barline or widening the bar's grid would be the
+  //          application composing.
+  // KEYWORDS: paste, insert-not-replace, one-undo, ink-reanchored, moves-carried, typed-refusal,
+  //           no-partial-effect, d35, d36
+  /// Pastes [clip] at [at], reporting what happened.
+  ClipPasteOutcome pasteClip({
+    required ChartSelection at,
+    required ChartClip clip,
+  }) {
+    final Section? section = _document.song.sectionById(at.sectionId);
+    if (section == null) {
+      return ClipPasteOutcome.noSuchSection;
+    }
+    if (at.firstBar < 0 || at.firstBar >= section.bars.length) {
+      return ClipPasteOutcome.noSuchBar;
+    }
+    return switch (clip.depth) {
+      SelectionDepth.bars => _pasteBars(at: at, clip: clip, section: section),
+      SelectionDepth.beats => _pasteBeats(at: at, clip: clip, section: section),
+    };
+  }
+
+  // PURPOSE: Insert a run of whole bars — and its ink — after the target bar, as one event.
+  // INPUTS: at — the target, whose LAST bar the run goes after. clip — a bar-deep clip. section —
+  //         the target section, already resolved by [pasteClip].
+  // OUTPUTS: [ClipPasteOutcome.pasted] when the event was appended. The pasted bars are the clip's
+  //          bars unchanged — a copy of a bar IS that bar, and giving the copy a different metre or
+  //          size would be inventing a bar the musician did not copy — and they land at
+  //          `at.lastBar + 1`, which is the section's bar count when the target is the last bar.
+  //
+  //          THE STROKES ARE RE-ANCHORED AND GIVEN FRESH IDENTITIES, which is the point the owner
+  //          asked for twice. A stroke's anchor names `(section, bar, beat?)`, so the copy's anchor
+  //          is the destination section, the destination bar offset by the stroke's own offset
+  //          inside the fragment, and the same beat. The identity has to be NEW because a document's
+  //          stroke ids are unique and the eraser removes by id: two strokes sharing one id would be
+  //          one row in the store and one target for the eraser, and erasing one copy would take the
+  //          other with it. The minted ids travel in the event, so replay builds the same document.
+  // KEYWORDS: paste-bars, insert-after, ink-reanchor, fresh-stroke-id, moves, one-event
+  ClipPasteOutcome _pasteBars({
+    required ChartSelection at,
+    required ChartClip clip,
+    required Section section,
+  }) {
+    final int index = at.lastBar + 1;
+    if (index > section.bars.length) {
+      return ClipPasteOutcome.noSuchRun;
+    }
+    final Set<String> taken = <String>{
+      for (final InkStroke stroke in _document.strokes) stroke.id,
+    };
+    final List<InkStroke> pastedStrokes = <InkStroke>[
+      for (final InkStroke stroke in clip.strokes)
+        InkStroke(
+          id: _freshStrokeId(stroke.id, taken),
+          tool: stroke.tool,
+          color: stroke.color,
+          size: stroke.size,
+          anchor: EventAnchor(
+            sectionId: at.sectionId,
+            bar: index + stroke.anchor.bar,
+            beat: stroke.anchor.beat,
+            step: stroke.anchor.step,
+          ),
+          points: stroke.points,
+        ),
+    ];
+    apply(
+      BarsInsertEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: at.sectionId,
+        index: index,
+        bars: clip.bars,
+        strokes: pastedStrokes,
+        moves: _movesForInsertion(at.sectionId, index, clip.bars.length),
+      ),
+    );
+    return ClipPasteOutcome.pasted;
+  }
+
+  // PURPOSE: Write a window of beats into the target bar, replacing those cells, as one event.
+  // INPUTS: at — the target, which must name a cell. clip — a beat-deep clip. section — the target
+  //         section, already resolved.
+  // OUTPUTS: [ClipPasteOutcome.pasted] when the event was appended; [ClipPasteOutcome.needsCell]
+  //          when the target names no cell; [ClipPasteOutcome.windowDoesNotFit] when the window
+  //          would leave the bar's metre.
+  //
+  //          WHAT TRAVELS AND WHAT IS REPLACED. The window's chords and notes are taken from the
+  //          clip's single bar, moved to the target beat, and written into a copy of the target bar
+  //          whose own cells in that window are REMOVED first — replace, stated rather than silent.
+  //          Everything of the target bar outside the window is untouched. The window's cell-anchored
+  //          ink is re-anchored the same way the bars-only paste does it, with fresh ids.
+  //
+  //          WHY THE METRE AND NOT THE WIDENED GRID DECIDES WHETHER IT FITS. A bar's cells are its
+  //          metre widened by any chord written past it, and only the metre is the bar's own promise
+  //          about how many beats it holds. Letting a window fit into the widened part would put a
+  //          note in a column the bar does not have; refusing is one sentence a musician can act on
+  //          ("эта доля не помещается в такт"), and the widened grid is reachable by copying whole
+  //          bars instead.
+  // KEYWORDS: paste-window, replace-cells, whole-bar-inverse, metre-fit, ink-reanchor, one-event
+  ClipPasteOutcome _pasteBeats({
+    required ChartSelection at,
+    required ChartClip clip,
+    required Section section,
+  }) {
+    final int? targetBeat = at.firstBeat;
+    if (targetBeat == null) {
+      return ClipPasteOutcome.needsCell;
+    }
+    if (clip.bars.length != 1) {
+      // A beat-deep clip is always taken from one bar (`ChartSelection.beats` cannot span bars), so
+      // this is a clip that was not built by `chartClipOf` and cannot be applied to a grid.
+      return ClipPasteOutcome.noSuchRun;
+    }
+    final Bar target = section.bars[at.firstBar];
+    final int cells = target.timeSignature.cellsPerBar;
+    if (targetBeat < 0 || targetBeat + clip.beatCount > cells) {
+      return ClipPasteOutcome.windowDoesNotFit;
+    }
+    final Bar source = clip.bars.single;
+    final int sourceFrom = clip.source.firstBeat!;
+    final int sourceTo = clip.source.lastBeat!;
+    final List<BeatChord> chords = <BeatChord>[
+      for (final BeatChord placed in target.chords)
+        if (placed.beat < targetBeat ||
+            placed.beat >= targetBeat + clip.beatCount)
+          placed,
+      for (final BeatChord placed in source.chords)
+        if (placed.beat >= sourceFrom && placed.beat <= sourceTo)
+          BeatChord(
+            chord: placed.chord,
+            beat: targetBeat + (placed.beat - sourceFrom),
+            step: placed.step,
+            size: placed.size,
+          ),
+    ]..sort(_compareChordAddresses);
+    final List<BeatNote> melody = <BeatNote>[
+      for (final BeatNote note in target.melody)
+        if (note.beat < targetBeat || note.beat >= targetBeat + clip.beatCount)
+          note,
+      for (final BeatNote note in source.melody)
+        if (note.beat >= sourceFrom && note.beat <= sourceTo)
+          BeatNote(
+            pitch: note.pitch,
+            value: note.value,
+            beat: targetBeat + (note.beat - sourceFrom),
+            step: note.step,
+            tiedToNext: note.tiedToNext,
+          ),
+    ]..sort(_compareNoteAddresses);
+    final Bar replaced = target.copyWith(chords: chords, melody: melody);
+    final Set<String> taken = <String>{
+      for (final InkStroke stroke in _document.strokes) stroke.id,
+    };
+    final List<InkStroke> pastedStrokes = <InkStroke>[
+      for (final InkStroke stroke in clip.strokes)
+        InkStroke(
+          id: _freshStrokeId(stroke.id, taken),
+          tool: stroke.tool,
+          color: stroke.color,
+          size: stroke.size,
+          anchor: EventAnchor(
+            sectionId: at.sectionId,
+            bar: at.firstBar,
+            beat: targetBeat + (stroke.anchor.beat ?? 0),
+            step: stroke.anchor.step,
+          ),
+          points: stroke.points,
+        ),
+    ];
+    apply(
+      BarsReplaceEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: at.sectionId,
+        index: at.firstBar,
+        from: <Bar>[target],
+        to: <Bar>[replaced],
+        addedStrokes: pastedStrokes,
+      ),
+    );
+    return ClipPasteOutcome.pasted;
+  }
+
+  // PURPOSE: Move the chords and the melody of a SELECTED RUN of bars by an interval, leaving the
+  //          rest of the chart — and the chart's key — exactly as they were, as one edit.
+  // INPUTS: selection — the run, which must be bar-deep. semitones — the signed interval, normally
+  //         +1 for "a semitone up".
+  // OUTPUTS: A [SelectionTransposition] reporting what happened. [SelectionTransposeOutcome.applied]
+  //          means ONE event was appended covering every bar of the run, so a sixteen-bar
+  //          transposition is one press of undo. The key is untouched, for the reason stated in the
+  //          section header above, and the ink is untouched for the reason stated there too — the
+  //          count of strokes left in place is reported so the surface can say it.
+  //
+  //          A BAR WITH NO CHORD AND NO NOTE IS COPIED INTO THE EVENT UNCHANGED rather than dropped
+  //          from it, because the event describes a RUN: dropping a bar would make the run
+  //          non-contiguous and its inverse could not put the bars back where they were. Such a bar
+  //          contributes nothing to [barsChanged], and a run in which NOTHING changes appends no
+  //          event at all.
+  // KEYWORDS: transpose-selection, bar-run, key-unchanged, melody-moves, ink-left-alone, one-undo,
+  //           no-op-refusal, d35, d37
+  /// Transposes the selected bars' chords and melody, reporting what happened.
+  SelectionTransposition transposeSelection({
+    required ChartSelection selection,
+    required int semitones,
+  }) {
+    final Section? section = _document.song.sectionById(selection.sectionId);
+    final List<InkStroke> ink = strokesOf(selection, _document.strokes);
+    if (section == null) {
+      return SelectionTransposition(
+        selection: selection,
+        semitones: semitones,
+        barsTotal: 0,
+        barsChanged: 0,
+        strokesKept: ink.length,
+        outcome: SelectionTransposeOutcome.noSuchSection,
+      );
+    }
+    if (selection.isBeatWindow) {
+      return SelectionTransposition(
+        selection: selection,
+        semitones: semitones,
+        barsTotal: selection.barCount,
+        barsChanged: 0,
+        strokesKept: ink.length,
+        outcome: SelectionTransposeOutcome.beatsOnly,
+      );
+    }
+    final List<Bar> bars = selection.barsIn(_document.song);
+    if (bars.isEmpty) {
+      return SelectionTransposition(
+        selection: selection,
+        semitones: semitones,
+        barsTotal: 0,
+        barsChanged: 0,
+        strokesKept: ink.length,
+        outcome: SelectionTransposeOutcome.noSuchSection,
+      );
+    }
+    final Key key = _document.song.key;
+    final List<Bar> moved = <Bar>[
+      for (final Bar bar in bars)
+        transposedBar(bar, semitones, writtenKey: key, targetKey: key),
+    ];
+    int changed = 0;
+    for (int index = 0; index < bars.length; index++) {
+      if (moved[index] != bars[index]) {
+        changed++;
+      }
+    }
+    if (changed == 0) {
+      return SelectionTransposition(
+        selection: selection,
+        semitones: semitones,
+        barsTotal: bars.length,
+        barsChanged: 0,
+        strokesKept: ink.length,
+        outcome: SelectionTransposeOutcome.nothingToTranspose,
+      );
+    }
+    apply(
+      BarsReplaceEvent(
+        docId: _docId,
+        seq: _seq,
+        sectionId: selection.sectionId,
+        index: selection.firstBar,
+        from: bars,
+        to: moved,
+      ),
+    );
+    return SelectionTransposition(
+      selection: selection,
+      semitones: semitones,
+      barsTotal: bars.length,
+      barsChanged: changed,
+      strokesKept: ink.length,
+      outcome: SelectionTransposeOutcome.applied,
+    );
+  }
+
+  // PURPOSE: Work out which anchored objects an insertion at [index] pushes along with their bars,
+  //          so the event can carry the re-addressing and its inverse can undo it exactly.
+  // INPUTS: sectionId — the section being inserted into. index — where the run lands. count — how
+  //         many bars are inserted, which is how far everything at or after [index] moves.
+  // OUTPUTS: One [AnchorMove] per anchored object — stroke, annotation or text cue — whose bar is at
+  //          or after [index]. The list is in document order, so two identical edits produce
+  //          identical events.
+  //
+  //          WHY EVERY COLLECTION IS INCLUDED AND NOT ONLY THE INK. The address scheme is one
+  //          mechanism (see `anchor.dart`), and an object left behind by an insertion is on the wrong
+  //          bar whatever kind it is. The ink is the one the owner asked about, but a cue that
+  //          ended up over the pasted bars would be just as wrong and just as silent.
+  // KEYWORDS: anchor-readdress, moves, strokes, annotations, text-cues, deterministic-order
+  List<AnchorMove> _movesForInsertion(String sectionId, int index, int count) {
+    final List<AnchorMove> moves = <AnchorMove>[];
+    for (final InkStroke stroke in _document.strokes) {
+      if (stroke.anchor.sectionId != sectionId || stroke.anchor.bar < index) {
+        continue;
+      }
+      moves.add(
+        AnchorMove(
+          kind: AnchorMoveKind.stroke,
+          id: stroke.id,
+          from: stroke.anchor,
+          to: EventAnchor(
+            sectionId: stroke.anchor.sectionId,
+            bar: stroke.anchor.bar + count,
+            beat: stroke.anchor.beat,
+            step: stroke.anchor.step,
+          ),
+        ),
+      );
+    }
+    for (final Annotation mark in _document.annotations) {
+      if (mark.place.anchor.sectionId != sectionId ||
+          mark.place.anchor.bar < index) {
+        continue;
+      }
+      moves.add(
+        AnchorMove(
+          kind: AnchorMoveKind.annotation,
+          id: mark.id,
+          from: mark.place.anchor,
+          to: EventAnchor(
+            sectionId: mark.place.anchor.sectionId,
+            bar: mark.place.anchor.bar + count,
+            beat: mark.place.anchor.beat,
+            step: mark.place.anchor.step,
+          ),
+        ),
+      );
+    }
+    for (final TextCue cue in _document.textCues) {
+      if (cue.place.anchor.sectionId != sectionId ||
+          cue.place.anchor.bar < index) {
+        continue;
+      }
+      moves.add(
+        AnchorMove(
+          kind: AnchorMoveKind.textCue,
+          id: cue.id,
+          from: cue.place.anchor,
+          to: EventAnchor(
+            sectionId: cue.place.anchor.sectionId,
+            bar: cue.place.anchor.bar + count,
+            beat: cue.place.anchor.beat,
+            step: cue.place.anchor.step,
+          ),
+        ),
+      );
+    }
+    return moves;
+  }
+
+  // PURPOSE: Mint an identity for a pasted stroke that no stroke in the document already carries,
+  //          so the eraser and the store can tell the copy from the original.
+  // INPUTS: base — the source stroke's id, which already names its anchor and start time and is
+  //         therefore readable. taken — the ids the document holds, which this function adds to so
+  //         two strokes pasted in one gesture cannot collide with each other.
+  // OUTPUTS: A fresh id of the form `<base>~copy-<n>`. Deterministic given the document and the clip,
+  //          which is what lets the id travel inside the event and replay to the same document.
+  // KEYWORDS: stroke-id, fresh-identity, deterministic, readable, collision-free
+  String _freshStrokeId(String base, Set<String> taken) {
+    int ordinal = 1;
+    while (taken.contains('$base~copy-$ordinal')) {
+      ordinal++;
+    }
+    final String id = '$base~copy-$ordinal';
+    taken.add(id);
+    return id;
+  }
+
+  // PURPOSE: Order two chord placements by their address, so a bar rebuilt by a window paste holds
+  //          its chords in the same order any other edit would leave them in.
+  // INPUTS: left and right — the two placements.
+  // OUTPUTS: A negative, zero or positive integer, as a comparator must return.
+  // KEYWORDS: chord-address, ordering, deterministic-rebuild
+  int _compareChordAddresses(BeatChord left, BeatChord right) {
+    final int byBeat = left.beat.compareTo(right.beat);
+    return byBeat != 0 ? byBeat : left.step.compareTo(right.step);
+  }
+
+  // PURPOSE: Order two melody notes by their address, for the same reason as
+  //          [_compareChordAddresses].
+  // INPUTS: left and right — the two placements.
+  // OUTPUTS: A negative, zero or positive integer.
+  // KEYWORDS: note-address, ordering, deterministic-rebuild
+  int _compareNoteAddresses(BeatNote left, BeatNote right) {
+    final int byBeat = left.beat.compareTo(right.beat);
+    return byBeat != 0 ? byBeat : left.step.compareTo(right.step);
+  }
+
+  // --- Sections: the form a chart is made of -----------------------------------------------
   // INPUTS: sectionId — a section of the song, whose own meter and position decide the new one's.
   // OUTPUTS: The new section's id, or null when [sectionId] names no section. The new section
   //          carries one blank bar in the meter of the reference section's last bar, and a fresh

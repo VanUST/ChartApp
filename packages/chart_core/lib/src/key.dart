@@ -158,11 +158,33 @@ class Key {
   @override
   int get hashCode => Object.hash(tonic, mode);
 
+  // PURPOSE: Name the key the way a chart prints it, which is the form the engraving needs: a page
+  //          states the key it is written in at the point where the music begins, and what it
+  //          states there is this string.
+  // INPUTS: None.
+  // OUTPUTS: The spelled tonic followed by " major" or " minor", e.g. "Eb major" or "A minor". The
+  //          trailing word is spelled out rather than abbreviated (no "m", no triangle) because
+  //          this is also read where there is no room for a legend, and because a bold `A minor`
+  //          set beside the chords is unambiguous while `Am` beside a chord `Am` is not.
+  //
+  //          It is NOT translated, and that is a decision rather than an omission (owner decision
+  //          D27): a key is notation, `A minor` is how it is written in every country, and a chart
+  //          printed as `A минор` is not recognised as notation by anyone but a Russian speaker.
+  //          The application's catalogue therefore carries the same words in both of its languages
+  //          for the places an interface needs them (`keyNameMajor`, `keyNameMinor`), and the two
+  //          cannot disagree in any language the application ships. They are two implementations
+  //          because this package must not depend on a translation catalogue, and the domain must
+  //          be able to print a key with nothing but the model.
+  // KEYWORDS: key-name, notation, d27, not-translated, engraving, single-definition
+  /// Returns the key's own letter name and mode word, for example `Eb major`.
+  String get name => '$tonic ${mode == Mode.major ? 'major' : 'minor'}';
+
   // PURPOSE: Render the key for spike logs and test failure messages.
   // INPUTS: None.
-  // OUTPUTS: The tonic followed by " major" or " minor", e.g. "Eb major". The trailing text is
-  //          spelled out rather than abbreviated so the output needs no legend.
-  // KEYWORDS: rendering, diagnostics, formatting
+  // OUTPUTS: Exactly [name]. It is not a separate formatting rule: a log line and a page state the
+  //          same fact, and two formats would be two answers to "what is this key called". The
+  //          override exists only so that interpolating a key into a string needs no call.
+  // KEYWORDS: rendering, diagnostics, formatting, single-definition
   @override
-  String toString() => '$tonic ${mode == Mode.major ? 'major' : 'minor'}';
+  String toString() => name;
 }

@@ -169,6 +169,37 @@ abstract final class EventCodec {
           index: EventJson.integer(payload, 'index'),
           duplicate: ModelJson.decodeBar(EventJson.object(payload, 'bar')),
         );
+      case 'bars.insert':
+        return BarsInsertEvent(
+          docId: docId,
+          seq: seq,
+          sectionId: EventJson.string(payload, 'sectionId'),
+          index: EventJson.integer(payload, 'index'),
+          bars: _bars(payload, 'bars'),
+          strokes: _strokes(payload, 'strokes'),
+          moves: _moves(payload, 'moves'),
+        );
+      case 'bars.remove':
+        return BarsRemoveEvent(
+          docId: docId,
+          seq: seq,
+          sectionId: EventJson.string(payload, 'sectionId'),
+          index: EventJson.integer(payload, 'index'),
+          bars: _bars(payload, 'bars'),
+          strokes: _strokes(payload, 'strokes'),
+          moves: _moves(payload, 'moves'),
+        );
+      case 'bars.replace':
+        return BarsReplaceEvent(
+          docId: docId,
+          seq: seq,
+          sectionId: EventJson.string(payload, 'sectionId'),
+          index: EventJson.integer(payload, 'index'),
+          from: _bars(payload, 'from'),
+          to: _bars(payload, 'to'),
+          addedStrokes: _strokes(payload, 'addedStrokes'),
+          removedStrokes: _strokes(payload, 'removedStrokes'),
+        );
       case 'section.insert':
         return SectionInsertEvent(
           docId: docId,
@@ -300,6 +331,15 @@ abstract final class EventCodec {
           index: EventJson.integer(payload, 'index'),
           stroke: InkStroke.fromJson(EventJson.object(payload, 'stroke')),
         );
+      case 'division.set':
+        // Both sides name the divisions WHOLE, so the event needs no reference to the document to
+        // be read back and its inverse is the same object with the two lists swapped.
+        return DivisionSetEvent(
+          docId: docId,
+          seq: seq,
+          from: _divisionsIn(payload, 'from'),
+          to: _divisionsIn(payload, 'to'),
+        );
       case 'annotation.insert':
         return AnnotationInsertEvent(
           docId: docId,
@@ -411,6 +451,95 @@ abstract final class EventCodec {
 
   /// Wraps a decoded bracket number back into a [Volta], or null when the bar has none.
   static Volta? _volta(int? number) => number == null ? null : Volta(number);
+
+  // PURPOSE: Read one side of a `bars.*` event as a list of whole bars, so the three events that
+  //          carry a run of bars cannot decode it differently.
+  // INPUTS: json — the event payload. key — which list it is (`bars`, `from` or `to`), so a failure
+  //         names the field.
+  // OUTPUTS: The decoded bars, in order. An entry that is not an object is refused with the key and
+  //          the position, because a run whose third bar could not be read is not a run this build
+  //          can apply, and skipping it would paste fewer bars than were copied.
+  // KEYWORDS: bars-decode, array-of-objects, named-field, strict, no-partial-run
+  static List<Bar> _bars(Map<String, Object?> json, String key) {
+    final List<Bar> bars = <Bar>[];
+    final List<Object?> entries = EventJson.array(json, key);
+    for (int index = 0; index < entries.length; index++) {
+      final Object? entry = entries[index];
+      if (entry is! Map<String, Object?>) {
+        throw EventFormatException(
+          'entry $index of "$key" is not a bar object',
+        );
+      }
+      bars.add(ModelJson.decodeBar(entry));
+    }
+    return bars;
+  }
+
+  // PURPOSE: Read the strokes a `bars.*` event carries, as whole canonical strokes.
+  // INPUTS: json — the event payload. key — which list it is, so a failure names the field.
+  // OUTPUTS: The decoded strokes, in order. [InkStroke.fromJson] is the one reader of a stroke's
+  //          shape, so a stroke that arrived through a `bars.insert` is read by exactly the code that
+  //          reads one that arrived through `ink.stroke.add`.
+  // KEYWORDS: stroke-decode, whole-value, one-reader, named-field, strict
+  static List<InkStroke> _strokes(Map<String, Object?> json, String key) {
+    final List<InkStroke> strokes = <InkStroke>[];
+    final List<Object?> entries = EventJson.array(json, key);
+    for (int index = 0; index < entries.length; index++) {
+      final Object? entry = entries[index];
+      if (entry is! Map<String, Object?>) {
+        throw EventFormatException(
+          'entry $index of "$key" is not a stroke object',
+        );
+      }
+      strokes.add(InkStroke.fromJson(entry));
+    }
+    return strokes;
+  }
+
+  // PURPOSE: Read the re-addressing a `bars.insert` causes, so a log replayed on another device
+  //          produces the same document as the device that made it.
+  // INPUTS: json — the event payload. key — the field name.
+  // OUTPUTS: The decoded moves, in order. An entry that is not an object is refused with the key and
+  //          the position: a move that could not be read is a mark that would stay on the wrong bar.
+  // KEYWORDS: anchor-move-decode, deterministic-replay, named-field, strict
+  static List<AnchorMove> _moves(Map<String, Object?> json, String key) {
+    final List<AnchorMove> moves = <AnchorMove>[];
+    final List<Object?> entries = EventJson.array(json, key);
+    for (int index = 0; index < entries.length; index++) {
+      final Object? entry = entries[index];
+      if (entry is! Map<String, Object?>) {
+        throw EventFormatException(
+          'entry $index of "$key" is not an anchor move',
+        );
+      }
+      moves.add(AnchorMove.fromJson(entry));
+    }
+    return moves;
+  }
+
+  // PURPOSE: Read one side of a `division.set`, so that a division survives the file exactly as the
+  //          document held it.
+  // INPUTS: json — the event payload. key — the field name, `from` or `to`.
+  // OUTPUTS: The decoded [BarDivision] values, in order. [BarDivision.fromJson] is the one reader
+  //          of a division's shape and refuses a non-positive height, which is the state the
+  //          display rule could not draw; an entry that is not an object is refused here with the
+  //          key and the position rather than skipped, because a skipped division is a line the
+  //          musician sees missing from a chart that saved without complaint.
+  // KEYWORDS: division-decode, whole-value, one-reader, named-field, strict
+  static List<BarDivision> _divisionsIn(Map<String, Object?> json, String key) {
+    final List<BarDivision> divisions = <BarDivision>[];
+    final List<Object?> entries = EventJson.array(json, key);
+    for (int index = 0; index < entries.length; index++) {
+      final Object? entry = entries[index];
+      if (entry is! Map<String, Object?>) {
+        throw EventFormatException(
+          'entry $index of "$key" is not a division object',
+        );
+      }
+      divisions.add(BarDivision.fromJson(entry));
+    }
+    return divisions;
+  }
 
   // PURPOSE: Read one side of a `meter.set`, refusing a meter the model cannot hold.
   // INPUTS: json — the `from` or `to` object. side — which side it is, so a failure names it.

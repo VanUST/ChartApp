@@ -29,6 +29,8 @@
 //     meter                     the model's own `M/N` — `3/4`, `15/8` — at the bar where it changes
 //                               and at the start of a system that is not in 4/4 (see
 //                               `chart_core`'s `showsMeterSign`, which decides it)
+//     key and opening meter     the header line above the first system, `C major · 4/4`, drawn in
+//                               the chord's own ink because it is notation rather than a heading
 //     segno `S` · coda `C` · fermata `^` · player ending `End`
 //
 // Barlines ARE drawn as lines, because the model names them exactly (single, double, repeat start,
@@ -53,6 +55,7 @@ class ChartPainter extends CustomPainter {
     required this.metrics,
     this.spellingTable = const SpellingTable(),
     this.selection,
+    this.selectionRange,
     this.lineColor = const Color(0xFF102A43),
     this.melodyLineColor = const Color(0xFF243B53),
     this.backgroundColor = const Color(0xFFFFFFFF),
@@ -88,6 +91,14 @@ class ChartPainter extends CustomPainter {
   /// a transposition or a page mode change without being re-derived.
   final ChartHit? selection;
 
+  /// The run of bars, or the window of beats, the musician has selected, or null.
+  ///
+  /// This is the owner's SELECTION (D35/D36): an address in the interface, not a value of the
+  /// document, which is why it is a parameter of the painter rather than a field of the song. It is
+  /// separate from [selection] because the two say different things: [selection] is where the last
+  /// touch landed, and this is everything the next operation would act on.
+  final ChartSelection? selectionRange;
+
   /// Colour of barlines, repeat dots and text.
   final Color lineColor;
 
@@ -108,7 +119,8 @@ class ChartPainter extends CustomPainter {
   /// Colour of the outline drawn around the selected region.
   final Color selectionStrokeColor;
 
-  // PURPOSE: Draw the page: section labels, then each bar's barlines, signs and chords.
+  // PURPOSE: Draw the page: the chart's opening statement, then section labels, then each bar's
+  //          barlines, signs and chords.
   // INPUTS: canvas — the target. size — the extent the painter was given, which is the page's own
   //         size when the viewer sizes the widget to the layout.
   // OUTPUTS: Nothing. Everything is drawn clipped to `size`, so a system the engine deliberately
@@ -116,7 +128,7 @@ class ChartPainter extends CustomPainter {
   //          canvas is scaled by [PageLayout.drawnScale] before the geometry is drawn and panned by
   //          [PageLayout.pan], which is what lets the same painter draw an ordinary page, a page the
   //          FIT mode shrank, and either of those under the musician's own zoom and pan.
-  // KEYWORDS: paint, clipping, section-label, reading-order, view-zoom, view-pan
+  // KEYWORDS: paint, clipping, section-label, reading-order, view-zoom, view-pan, chart-header
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = backgroundColor);
@@ -138,6 +150,10 @@ class ChartPainter extends CustomPainter {
     if (scale != 1) {
       canvas.scale(scale, scale);
     }
+    // The chart's own opening statement goes down first and outside the systems loop, because it
+    // belongs to the page rather than to a line of music: it is what the reader sees before the
+    // first chord, and it must not be moved by anything that moves a system.
+    _paintChartHeader(canvas);
     for (final PlacedSystem system in page.systems) {
       _paintSectionLabel(canvas, system);
       for (int index = 0; index < system.bars.length; index++) {
@@ -145,6 +161,34 @@ class ChartPainter extends CustomPainter {
       }
     }
     canvas.restore();
+  }
+
+  // PURPOSE: State on the page, before any music, what key and meter the chart is written in — the
+  //          one thing a musician holding the chart at a stand could not see, because the key lived
+  //          in the scene bar and the meter appeared only on a bar that changed it.
+  // INPUTS: canvas — the target.
+  // OUTPUTS: Nothing. Draws the published words in the band the layout reserved for them, or nothing
+  //          at all on a page that carries no header, which is every page after the first.
+  //
+  //          IT IS DRAWN IN THE CHORD'S OWN STYLE AND INK, not in the section letter's. The key and
+  //          the meter are NOTATION — they mean exactly what a chord symbol means, in the same
+  //          language — while a section letter is a heading this application puts on a page. Two
+  //          left-aligned lines one above the other must not read as one heading in two rows, and
+  //          the ink does the distinguishing: the darkest ink for the notation, the blue of a
+  //          heading for the heading. The band's height was measured in this same role, so the line
+  //          the page gave up and the line drawn are the same number.
+  // KEYWORDS: chart-header, key, meter, notation, draw-order, one-band, d27
+  void _paintChartHeader(Canvas canvas) {
+    final PlacedChartHeader? header = page.header;
+    if (header == null) {
+      return;
+    }
+    _paintText(
+      canvas,
+      header.text,
+      Offset(header.bounds.left, header.bounds.top),
+      metrics.chordStyle,
+    );
   }
 
   // PURPOSE: Report whether a new painter changes anything on screen.
@@ -159,6 +203,10 @@ class ChartPainter extends CustomPainter {
       oldDelegate.song != song ||
       oldDelegate.metrics != metrics ||
       oldDelegate.selection != selection ||
+      // A RANGE MUST BE COMPARED HERE OR THE HIGHLIGHT WOULD NOT FOLLOW THE GESTURE. The range is
+      // not part of the song and not part of the page, so without this line a musician who extended
+      // a selection from one bar to sixteen would see the label change and the page stay as it was.
+      oldDelegate.selectionRange != selectionRange ||
       oldDelegate.lineColor != lineColor ||
       oldDelegate.melodyLineColor != melodyLineColor ||
       oldDelegate.backgroundColor != backgroundColor ||
@@ -236,6 +284,62 @@ class ChartPainter extends CustomPainter {
     );
   }
 
+  // PURPOSE: Mark every bar (and, for a window, the cells) a musician has SELECTED, so a range of
+  //          sixteen bars is visibly sixteen bars and not one highlighted bar with a number beside
+  //          it. The owner's workflow begins with selecting a run (D35), and a highlight that marks
+  //          only the bar last touched would be a picture of the wrong thing.
+  // INPUTS: canvas — the target. placed — the bar being drawn, with its cells.
+  // OUTPUTS: Nothing. Draws when [selectionRange] names a section and bar this placed bar belongs
+  //          to: the whole bar for a bar-deep selection, and the window's cells for a selection of
+  //          beats, each cell looked up by `.beat` so a cell the bar does not have is skipped rather
+  //          than drawn at a guessed offset. The single-hit highlight ([selection]) is drawn by
+  //          [_paintSelection] as before; when both are set the range wins for the bars it covers,
+  //          because the range is the more recent gesture.
+  // KEYWORDS: selection-range, highlight, many-bars, beat-window, visual-feedback, d35
+  void _paintSelectionRange(Canvas canvas, PlacedBar placed) {
+    final ChartSelection? range = selectionRange;
+    if (range == null ||
+        range.sectionId != placed.sectionId ||
+        placed.barIndex < range.firstBar ||
+        placed.barIndex > range.lastBar) {
+      return;
+    }
+    if (!range.isBeatWindow || range.firstBar != placed.barIndex) {
+      _paintSelectionRegion(canvas, placed.bounds);
+      return;
+    }
+    for (final PlacedCell cell in placed.cells) {
+      if (cell.beat < range.firstBeat! || cell.beat > range.lastBeat!) {
+        continue;
+      }
+      _paintSelectionRegion(canvas, cell.bounds);
+    }
+  }
+
+  // PURPOSE: Fill and outline one region as selected, so every place the selection covers is marked
+  //          by the same rule and the fill and the outline cannot drift apart.
+  // INPUTS: canvas — the target. region — a rectangle in page coordinates.
+  // OUTPUTS: Nothing. Draws the fill, then the outline inset by half its own width so it sits inside
+  //          the region rather than straddling its edge and tinting the neighbour.
+  // KEYWORDS: selection-paint, fill, outline, inset, shared-rule
+  void _paintSelectionRegion(Canvas canvas, LayoutRect region) {
+    final Rect rect = Rect.fromLTWH(
+      region.left,
+      region.top,
+      region.size.width,
+      region.size.height,
+    );
+    canvas.drawRect(rect, Paint()..color = selectionFillColor);
+    const double strokeWidth = 2;
+    canvas.drawRect(
+      rect.deflate(strokeWidth / 2),
+      Paint()
+        ..color = selectionStrokeColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth,
+    );
+  }
+
   // PURPOSE: Find the cell a selection names, so the highlight can be drawn on a cell that may have
   //          been produced by a different layout instance than the one the hit came from.
   // INPUTS: bar — the bar being drawn. beat — the cell index the selection carries.
@@ -268,6 +372,7 @@ class ChartPainter extends CustomPainter {
     // The selection wash goes down before the barlines and the chords, so the symbol the musician
     // selected stays fully readable — a highlight that dims the chord it marks is worse than none,
     // because the musician is trying to check that the selection landed on the chord they meant.
+    _paintSelectionRange(canvas, placed);
     _paintSelection(canvas, placed);
 
     // The melody staff is underneath the chord line with its own extent, so it is drawn before the
@@ -531,6 +636,24 @@ class ChartPainter extends CustomPainter {
         if (glyph.flagLength > 0) {
           _paintMelodyFlag(canvas, box, glyph, stroke);
         }
+      case MelodyGlyphKind.beam:
+        // A BEAM IS ONE HEAVY, STRAIGHT STROKE BETWEEN TWO STEMS, so it is drawn from its own two
+        // published ends and at its own published weight. Nothing is derived here: the slope, the
+        // length and the thickness were all decided by the engraving, where they can be asserted
+        // without a canvas — and the slope is the one thing a musician reads as the shape of the
+        // phrase, so a painter that recomputed it would be the second author of it.
+        //
+        // It is NOT raised to the ink floor the way a hairline is (see [_paintMelodyGlyph]'s
+        // `stroke`): a beam is half a staff space thick by convention and is the heaviest thing on
+        // the staff after the barlines, so the floor exists for the strokes beside it, not for this
+        // one. `stroke` still supplies the colour, and its width is the glyph's own unless the view
+        // is shrunk so far that the floor exceeds it, which is the same legibility rule every other
+        // stroke follows.
+        canvas.drawLine(
+          Offset(glyph.from.x, glyph.from.y),
+          Offset(glyph.to.x, glyph.to.y),
+          stroke,
+        );
       case MelodyGlyphKind.ledgerLine:
         canvas.drawLine(
           Offset(box.left, box.top + box.size.height / 2),
@@ -742,6 +865,10 @@ class ChartPainter extends CustomPainter {
       meter: meter,
       preceding: precedingMeter(song, placed.sectionId, placed.barIndex),
       opensSystem: firstInSystem,
+      // The metre is stated once where the music begins, and on this tree that statement is the
+      // page's own header line. A page without one — a page the engine engraved with no header,
+      // which every page after the first is — keeps the bar's own sign.
+      headerStatesOpeningMeter: page.header != null,
     )) {
       return;
     }

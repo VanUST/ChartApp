@@ -34,6 +34,7 @@ import '../song/bar.dart';
 import '../song/section.dart';
 import '../song/song.dart';
 import '../spelling_table.dart';
+import 'chart_header.dart';
 import 'geometry.dart';
 import 'layout_style.dart';
 import 'melody_staff.dart';
@@ -128,6 +129,63 @@ class LayoutEngine {
       pageHeight,
       drawScale,
       melodyBand,
+      _placeChartHeader(song, measured, contentWidth),
+    );
+  }
+
+  // PURPOSE: Publish the line that states the chart's key and meter where its music begins, which
+  //          is the thing a musician reads first and the one thing the page could not tell him
+  //          before: the key lived in the scene bar and the meter appeared only on a bar that
+  //          changed it.
+  // INPUTS: song — the chart. measured — the bars in reading order, whose FIRST entry supplies the
+  //         meter the chart opens in. contentWidth — the width between the page's margins, which the
+  //         published band spans.
+  // OUTPUTS: A [PlacedChartHeader] on the page where the music begins, or NULL when the song carries
+  //          no bar at all: a chart with no music has nothing to state about what key it is in, and
+  //          a page is never produced for it anyway.
+  //
+  //          WHERE IT SITS. In the page's own top margin band, above the first system and above the
+  //          section letter that system carries, so it collides with neither: a section letter marks
+  //          where a SECTION begins, the header marks what the whole chart is written in, and a
+  //          page whose first bar is not the first bar of a section — a continuation of a section
+  //          that began on the previous page — still carries the header on the only page it is
+  //          printed on, because it is the PAGE's statement and not the first bar's. Nothing about
+  //          the bar's own rectangle, cells or chords is touched by it.
+  //
+  //          THE METER IT STATES IS THE FIRST BAR'S, and that is the definition rather than a
+  //          simplification: a chart's meter is whatever its first bar is counted in, and a bar that
+  //          changes it is signed at the bar where it changes by `meter_sign.dart`. What the header
+  //          says is therefore the state the music opens in, which is what a printed chart's opening
+  //          time signature says too.
+  // KEYWORDS: chart-header, opening-statement, key-and-meter, first-page-only, no-collision,
+  //           section-letter, first-bar-independent
+  PlacedChartHeader? _placeChartHeader(
+    Song song,
+    List<_MeasuredBar> measured,
+    double contentWidth,
+  ) {
+    if (measured.isEmpty) {
+      return null;
+    }
+    final String text = chartOpeningText(
+      song.key,
+      measured.first.bar.timeSignature,
+    );
+    // Measured in the CHORD role, because the line is set in the chord's own style and is read at
+    // the same size as the symbols it governs. The role is also what makes the height a measurement
+    // rather than a constant: the band the page gives up is exactly the line box that fills it.
+    final LayoutSize size = style.textMetrics.measure(
+      text,
+      ChartTextRole.chord,
+    );
+    return PlacedChartHeader(
+      text: text,
+      bounds: LayoutRect.fromLTWH(
+        style.pageMargin,
+        style.pageMargin,
+        contentWidth,
+        size.height,
+      ),
     );
   }
 
@@ -687,10 +745,19 @@ class LayoutEngine {
     double pageHeight,
     double drawScale,
     double melodyBand,
+    PlacedChartHeader? header,
   ) {
     final List<PageLayout> pages = <PageLayout>[];
     List<PlacedSystem> currentSystems = <PlacedSystem>[];
-    double y = style.pageMargin;
+    // THE HEADER COSTS THE FIRST PAGE ITS LINE AND ITS GAP, AND NO OTHER PAGE ANYTHING. The band is
+    // taken out of the content height before the first system is packed, so a chart that only just
+    // fitted one page before may now need two — the cost is paid in paper and it is stated here
+    // rather than discovered by a page count going up. A fitted page pays it in scale instead,
+    // because `fitToPage` re-engraves at each scale it tests and the band is inside that arithmetic.
+    final double headerBand = header == null
+        ? 0
+        : header.bounds.size.height + style.chartHeaderGap;
+    double y = style.pageMargin + headerBand;
     int pageIndex = 0;
     bool firstOnPage = true;
 
@@ -703,6 +770,9 @@ class LayoutEngine {
           index: pageIndex,
           size: LayoutSize(pageWidth, pageHeight),
           systems: currentSystems,
+          // The header belongs to the page the music BEGINS on and to no other: it states what the
+          // chart is written in, which a reader needs once.
+          header: pageIndex == 0 ? header : null,
           scale: drawScale,
         ),
       );
@@ -728,6 +798,13 @@ class LayoutEngine {
       // round, and a performance instruction gives way to the music it is written about. A page too
       // short for even one chord line is the one case this cannot help, and there the system keeps
       // its ordinary place and overflows the bottom, as it did before cues existed.
+      //
+      // THE HEADER IS ON THE SAME LADDER AND AT THE SAME RUNG as the label and the cue rows, which is
+      // stated rather than hidden: on a page too short to hold one system, the system's top is put
+      // where the music's bottom forces it and the header — which sits in the top margin — is what
+      // the system then reaches over. Nothing is more honest available: a page that cannot hold one
+      // line of music has no room to state anything about the music, and drawing the header over the
+      // chord line would hide the very thing the page exists to show.
       final double musicHeight = _musicHeight(drawScale, melodyBand);
       final bool overflowsPage =
           height > contentHeight && musicHeight <= contentHeight;

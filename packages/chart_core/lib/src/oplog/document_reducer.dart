@@ -82,6 +82,9 @@ abstract final class DocumentReducer {
         e.duplicate,
       ),
     ),
+    final BarsInsertEvent e => _withBarsInserted(state, e),
+    final BarsRemoveEvent e => _withBarsRemoved(state, e),
+    final BarsReplaceEvent e => _withBarsReplaced(state, e),
     final SectionInsertEvent e => state.copyWith(
       song: _withSectionInserted(state.song, e.index, e.section),
     ),
@@ -157,6 +160,10 @@ abstract final class DocumentReducer {
     final TextCueDeleteEvent e => _withCueRemoved(state, e.removed),
     final TextCueEditEvent e => _withCueEdited(state, e.id, e.to),
     final TextCueMoveEvent e => _withCueMoved(state, e.id, e.to),
+    // The divisions are set whole, so applying the event is the assignment its two sides describe
+    // and the inverse is exact by construction rather than by arithmetic. See `barline_events.dart`
+    // for why this family carries lists instead of a delta.
+    final DivisionSetEvent e => state.copyWith(divisions: e.to),
   };
 
   /// Applies [event] to [setlist] and returns the new setlist.
@@ -408,6 +415,276 @@ abstract final class DocumentReducer {
     }
     final List<Bar> bars = List<Bar>.of(section.bars)..removeAt(index);
     return _replaceSection(song, sectionIndex, section.copyWith(bars: bars));
+  }
+
+  // --- Runs of bars: paste, its undo, and a replacement in place ---------------------------------
+  //
+  // These three helpers are what make a SELECTION edit cost one undo. `measure.insert` repeated
+  // would be one event per bar, and D36 names that price as unacceptable for a paste; the price the
+  // eraser already pays (A69) is not paid twice. The run is carried whole in both directions, so undo
+  // restores values rather than reconstructing them, and an insertion additionally carries the ink
+  // and the re-addressing it causes (`AnchorMove`), because an insertion that moved the music and
+  // left the handwriting on its old indices would silently draw the ink over the copies.
+
+  /// Returns [state] with [event]'s run of bars inserted, its ink added and its moves applied.
+  ///
+  /// THE MOVES ARE APPLIED BEFORE THE STROKES ARE APPENDED, and the order matters for a reason worth
+  /// stating: a move names an object by id and the pasted strokes are new ids, so the two sets cannot
+  /// collide — but applying the moves first means the document the strokes land in already has every
+  /// older object where its bar now is, which is the state a reader would see.
+  static DocumentState _withBarsInserted(
+    DocumentState state,
+    BarsInsertEvent event,
+  ) {
+    final Song song = _withBarRunInserted(
+      state.song,
+      event.sectionId,
+      event.index,
+      event.bars,
+    );
+    final DocumentState moved = _withAnchorMoves(
+      state.copyWith(song: song),
+      event.moves,
+    );
+    return _withStrokesAppended(moved, event.strokes);
+  }
+
+  /// Returns [state] with [event]'s run of bars removed, its ink removed and its moves reversed.
+  ///
+  /// THE MOVES ARE STORED IN THE DIRECTION THE INSERTION APPLIED THEM and reversed here, so one list
+  /// describes both directions and the two cannot drift apart.
+  static DocumentState _withBarsRemoved(
+    DocumentState state,
+    BarsRemoveEvent event,
+  ) {
+    final Song song = _withBarRunRemoved(
+      state.song,
+      event.sectionId,
+      event.index,
+      event.bars.length,
+    );
+    final DocumentState uninked = _withStrokesRemoved(
+      state.copyWith(song: song),
+      event.strokes,
+    );
+    return _withAnchorMoves(uninked, event.moves, reversed: true);
+  }
+
+  /// Returns [state] with [event]'s run of bars replaced, its old ink removed and its new ink added.
+  ///
+  /// The two runs must be the same length. `from` is NOT compared against what the section actually
+  /// holds, for the same reason `chord.update` does not compare its own `from`: the event states the
+  /// change, and an event whose `from` had to match would turn an undo after an unrelated edit into a
+  /// crash. What the event does guarantee — and what undo relies on — is that `to` is a complete
+  /// description of the bars the edit leaves behind.
+  static DocumentState _withBarsReplaced(
+    DocumentState state,
+    BarsReplaceEvent event,
+  ) {
+    if (event.from.length != event.to.length) {
+      throw DocumentReducerException(
+        'bars.replace must replace the same number of bars it removes '
+        '(${event.from.length} -> ${event.to.length})',
+      );
+    }
+    final Song song = _withBarRunReplaced(
+      state.song,
+      event.sectionId,
+      event.index,
+      event.to,
+    );
+    final DocumentState uninked = _withStrokesRemoved(
+      state.copyWith(song: song),
+      event.removedStrokes,
+    );
+    return _withStrokesAppended(uninked, event.addedStrokes);
+  }
+
+  /// Returns [song] with [bars] inserted at [index] of section [sectionId].
+  static Song _withBarRunInserted(
+    Song song,
+    String sectionId,
+    int index,
+    List<Bar> bars,
+  ) {
+    final (Section section, int sectionIndex) = _sectionOf(song, sectionId);
+    if (index < 0 || index > section.bars.length) {
+      throw DocumentReducerException(
+        'cannot insert ${bars.length} bar(s) at $index of section "$sectionId" '
+        '(${section.bars.length} bar(s))',
+      );
+    }
+    if (bars.isEmpty) {
+      throw DocumentReducerException(
+        'a run of bars cannot be empty: an insertion of nothing is not an edit',
+      );
+    }
+    final List<Bar> next = List<Bar>.of(section.bars)..insertAll(index, bars);
+    return _replaceSection(song, sectionIndex, section.copyWith(bars: next));
+  }
+
+  /// Returns [song] without [count] bars starting at [index] of section [sectionId].
+  static Song _withBarRunRemoved(
+    Song song,
+    String sectionId,
+    int index,
+    int count,
+  ) {
+    final (Section section, int sectionIndex) = _sectionOf(song, sectionId);
+    if (index < 0 || count <= 0 || index + count > section.bars.length) {
+      throw DocumentReducerException(
+        'section "$sectionId" has no run of $count bar(s) at $index '
+        '(${section.bars.length} bar(s))',
+      );
+    }
+    final List<Bar> next = List<Bar>.of(section.bars)
+      ..removeRange(index, index + count);
+    if (next.isEmpty) {
+      throw DocumentReducerException(
+        'removing bars $index..${index + count - 1} of section "$sectionId" '
+        'would leave it with no bars, which the page cannot draw or touch',
+      );
+    }
+    return _replaceSection(song, sectionIndex, section.copyWith(bars: next));
+  }
+
+  /// Returns [song] with [count] bars starting at [index] of section [sectionId] replaced by [to].
+  static Song _withBarRunReplaced(
+    Song song,
+    String sectionId,
+    int index,
+    List<Bar> to,
+  ) {
+    final (Section section, int sectionIndex) = _sectionOf(song, sectionId);
+    if (index < 0 || index + to.length > section.bars.length) {
+      throw DocumentReducerException(
+        'section "$sectionId" has no run of ${to.length} bar(s) at $index '
+        '(${section.bars.length} bar(s))',
+      );
+    }
+    final List<Bar> next = List<Bar>.of(section.bars)
+      ..replaceRange(index, index + to.length, to);
+    return _replaceSection(song, sectionIndex, section.copyWith(bars: next));
+  }
+
+  /// Returns [state] with every object an [AnchorMove] names re-addressed.
+  ///
+  /// Throws when a move names an object the document does not hold: an event that moved a mark which
+  /// is not there means the log and the document disagree, and silently skipping it would leave the
+  /// mark on the wrong bar — which is the failure this whole mechanism exists to prevent.
+  static DocumentState _withAnchorMoves(
+    DocumentState state,
+    List<AnchorMove> moves, {
+    bool reversed = false,
+  }) {
+    DocumentState next = state;
+    for (final AnchorMove move in moves) {
+      final EventAnchor destination = reversed ? move.from : move.to;
+      switch (move.kind) {
+        case AnchorMoveKind.stroke:
+          final int index = next.strokes.indexWhere(
+            (InkStroke stroke) => stroke.id == move.id,
+          );
+          if (index < 0) {
+            throw DocumentReducerException(
+              'no stroke "${move.id}" to re-address',
+            );
+          }
+          final List<InkStroke> strokes = List<InkStroke>.of(next.strokes);
+          final InkStroke stroke = strokes[index];
+          strokes[index] = InkStroke(
+            id: stroke.id,
+            tool: stroke.tool,
+            color: stroke.color,
+            size: stroke.size,
+            anchor: destination,
+            points: stroke.points,
+          );
+          next = next.copyWith(strokes: strokes);
+        case AnchorMoveKind.annotation:
+          final int index = next.annotations.indexWhere(
+            (Annotation mark) => mark.id == move.id,
+          );
+          if (index < 0) {
+            throw DocumentReducerException(
+              'no annotation "${move.id}" to re-address',
+            );
+          }
+          final List<Annotation> marks = List<Annotation>.of(next.annotations);
+          marks[index] = marks[index].copyWith(
+            place: AnchoredPlace(
+              anchor: destination,
+              offsetX: marks[index].place.offsetX,
+              offsetY: marks[index].place.offsetY,
+            ),
+          );
+          next = next.copyWith(annotations: marks);
+        case AnchorMoveKind.textCue:
+          final int index = next.textCues.indexWhere(
+            (TextCue cue) => cue.id == move.id,
+          );
+          if (index < 0) {
+            throw DocumentReducerException(
+              'no text cue "${move.id}" to re-address',
+            );
+          }
+          final List<TextCue> cues = List<TextCue>.of(next.textCues);
+          cues[index] = cues[index].copyWith(
+            place: AnchoredPlace(
+              anchor: destination,
+              offsetX: cues[index].place.offsetX,
+              offsetY: cues[index].place.offsetY,
+            ),
+          );
+          next = next.copyWith(textCues: cues);
+      }
+    }
+    return next;
+  }
+
+  /// Returns [state] with [strokes] appended to the document's stroke list, in order.
+  ///
+  /// Appending rather than inserting: a pasted run lands on top of everything the document already
+  /// holds, which is what a paste looks like and what makes its inverse — a removal by id — restore
+  /// the list exactly.
+  static DocumentState _withStrokesAppended(
+    DocumentState state,
+    List<InkStroke> strokes,
+  ) {
+    if (strokes.isEmpty) {
+      return state;
+    }
+    final List<InkStroke> next = List<InkStroke>.of(state.strokes);
+    for (final InkStroke stroke in strokes) {
+      if (next.any((InkStroke other) => other.id == stroke.id)) {
+        throw DocumentReducerException(
+          'stroke "${stroke.id}" is already present',
+        );
+      }
+      next.add(stroke);
+    }
+    return state.copyWith(strokes: next);
+  }
+
+  /// Returns [state] without the strokes in [strokes], matched by identity.
+  static DocumentState _withStrokesRemoved(
+    DocumentState state,
+    List<InkStroke> strokes,
+  ) {
+    if (strokes.isEmpty) {
+      return state;
+    }
+    final List<InkStroke> next = List<InkStroke>.of(state.strokes);
+    for (final InkStroke stroke in strokes) {
+      final int index = next.indexWhere(
+        (InkStroke other) => other.id == stroke.id,
+      );
+      if (index < 0) {
+        throw DocumentReducerException('no stroke "${stroke.id}" to remove');
+      }
+      next.removeAt(index);
+    }
+    return state.copyWith(strokes: next);
   }
 
   // --- Sections -------------------------------------------------------------------------

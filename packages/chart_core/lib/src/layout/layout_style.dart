@@ -57,6 +57,7 @@ class LayoutStyle {
     this.beatMarkGap = 3,
     this.beatMarkMinCellWidth = 18,
     this.showBeatCaptions = false,
+    this.chartHeaderGap = 6,
   });
 
   /// How text is measured.
@@ -259,4 +260,24 @@ class LayoutStyle {
   /// widest one — and it is set at the same value as the application's `minCellWidth`, so a four-beat
   /// bar always has room to name its beats.
   final double beatMarkMinCellWidth;
+
+  /// The air between the chart's own opening line — its key and its meter — and the first system.
+  ///
+  /// IT IS ONLY PART OF WHAT THE HEADER COSTS. The header's height is the measured line box of its
+  /// words in the chart's chord style, which the engine reads from [textMetrics] rather than from a
+  /// constant here: a reserved band that was a fixed number would be a second answer to "how tall is
+  /// a line of chart text", and the two would part company the first time the chord size changed.
+  /// This value is the only part of the cost that is a judgement rather than a measurement.
+  ///
+  /// WHY 6, AND WHAT IT IS FOR. The line must not read as part of the section letter below it, which
+  /// sits at the top of the first system's own band in the same left column. Six pixels in a 22-pixel
+  /// label band is a quarter of that band — enough that the two lines are two statements rather than
+  /// one heading in two rows, and small enough that the header does not become the tallest thing on
+  /// the page. Measured on the rendered page in the record for this change; the cost of the whole
+  /// header on the first syllable of the music is that line box plus this gap.
+  ///
+  /// THE COST IS PAID ONCE, BY THE FIRST PAGE ONLY. The header says what the chart is written in,
+  /// which a reader needs once, so every later page gives up nothing for it and paginates exactly as
+  /// it did before the header existed.
+  final double chartHeaderGap;
 }
