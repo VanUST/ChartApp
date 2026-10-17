@@ -340,6 +340,16 @@ const int melodyLowestStep = -melodyLedgerLimit;
 //          8. The result is CLAMPED to `[melodyLowestStep, melodyHighestStep]`, and the clamp is
 //          documented on [melodyLedgerLimit].
 //
+//          THIS FUNCTION WAS OFF BY ONE STAFF LINE FOR EVERY PITCH, AND THE OWNER'S REPORT OF THE
+//          RESULT IS WHY IT IS FIXED. It counted from `7 * (octave - 4)`, which puts C4 — not E4 — on
+//          the treble staff's bottom line and then never subtracted E's own place in the letter
+//          order, so every note was engraved ONE LINE HIGHER than it is written: a written C4 was
+//          drawn on the bottom line, which a musician reads as E4, and the accidental of a Db was
+//          drawn on a space that names F. Notation whose height does not mean its pitch is not
+//          unclear notation, it is wrong notation, and no amount of line weight or staff size
+//          repairs it. The bass clef was off by a different amount for the same reason — G2 is
+//          twelve steps below E4, not seven — so the two clefs disagreed with each other as well.
+//
 //          The count is by LETTER and octave, not by sounding pitch: a C is always three steps above
 //          the A below it, whatever its octave, which is what keeps a note on its line across the
 //          whole range of the staff.
@@ -351,12 +361,14 @@ int melodyStepOf(
   String clef = 'treble',
 }) {
   final int letterSteps = _letterOrder(pitch.letter);
-  int step = 7 * (octave - 4) + letterSteps;
-  if (clef == 'bass') {
-    // The bass staff's bottom line is G2, an octave below E4 — the same letter sequence, seven
-    // steps lower, so the whole staff is shifted by an octave.
-    step += 7;
-  }
+  // THE ORIGIN IS THE STAFF'S OWN BOTTOM LINE, AND THE LINE IS NAMED BY THE CLEF. A staff step is
+  // half a space, so a letter is two steps from its neighbour and an octave is fourteen: the count
+  // is `7 * octave + letter` in absolute 35ths of a staff, and the subtraction puts the clef's bottom
+  // line at zero. Treble's bottom line is E4 and bass's is G2.
+  final int bottomLine = clef == 'bass'
+      ? 7 * 2 + _letterOrder(NoteLetter.g)
+      : 7 * 4 + _letterOrder(NoteLetter.e);
+  final int step = 7 * octave + letterSteps - bottomLine;
   if (step > melodyHighestStep) {
     return melodyHighestStep;
   }
@@ -419,19 +431,29 @@ int? melodyFirstLedgerStep(int step) {
   if (step >= bottomLine && step <= topLine) {
     return null;
   }
-  return step > topLine ? topLine + 1 : bottomLine - 1;
+  return step > topLine ? topLine + 2 : bottomLine - 2;
 }
 
 // PURPOSE: Report where the ledger lines of a note at [step] are drawn, so that the notehead, its
 //          ledger lines and the room the band reserved cannot be three different answers to "how
 //          far outside the staff is this note".
 // INPUTS: step — a staff step from [melodyStepOf].
-// OUTPUTS: The y offsets of the ledger lines, measured UPWARD from the staff's TOP LINE and
-//          positive above it, in staff spaces; a caller multiplies them by the staff space and adds
-//          them to the top line's y. Empty when the note lies inside the five lines. Every other
-//          step is skipped, because the lines are every other step; see [melodyFirstLedgerStep] for
-//          which step the run starts on and why.
-// KEYWORDS: ledger-line, offsets, outside-the-staff, every-other-step
+// OUTPUTS: The offsets of the ledger lines, in staff spaces ABOVE the staff's TOP LINE and positive
+//          above it, inclusive of the line the note itself sits on when it sits on one; a caller
+//          turns one into a y with `topLineY - offset * staffSpace`. Empty when the note lies
+//          inside the five lines, and also empty for the single step just outside them, because a
+//          note in the space above or below the staff needs no ledger line at all.
+//
+//          THE ARITHMETIC WAS WRONG IN THIS PROJECT AND THE ERROR IS NAMED HERE SO IT CANNOT COME
+//          BACK. A staff step is HALF a space, so the five lines are the EVEN steps 0, 2, 4, 6 and
+//          8 and the ledger lines continue the SAME parity: the first line above the staff is step
+//          10 — one whole space above the top line — and the first below is step −2. The earlier
+//          version started the run at ±1, which is the SPACE next to the staff, and it counted
+//          half a space per line as well; the two mistakes cancelled into a line drawn one space
+//          beyond the staff, detached from its note and — for a note below the staff — running into
+//          the beat captions. A ledger line that is not under its notehead is worse than no ledger
+//          line: the reader uses the line to decide where the note is.
+// KEYWORDS: ledger-line, offsets, outside-the-staff, every-other-step, parity, bug-named
 /// Returns the ledger-line offsets of a note at [step], in staff spaces above the top line.
 List<double> melodyLedgerLineOffsets(int step) {
   const int topLine = 8;
@@ -439,18 +461,17 @@ List<double> melodyLedgerLineOffsets(int step) {
   if (first == null) {
     return const <double>[];
   }
+  final int direction = step > topLine ? 1 : -1;
   // The run ends AT the note when the note sits on a line, and one step short of it when the note
   // sits in a space: a ledger line is drawn under a notehead, never through it.
-  final int last = step.isEven ? step : step - (step > topLine ? 1 : -1);
+  final int last = step.isEven ? step : step - direction;
   final List<double> offsets = <double>[];
-  if (first > step) {
-    for (int line = first; line >= last; line -= 2) {
-      offsets.add((line - topLine) * 0.5);
-    }
-  } else {
-    for (int line = first; line <= last; line += 2) {
-      offsets.add((line - topLine) * 0.5);
-    }
+  for (
+    int line = first;
+    direction > 0 ? line <= last : line >= last;
+    line += 2 * direction
+  ) {
+    offsets.add((line - topLine) * 0.5);
   }
   return offsets;
 }
@@ -525,6 +546,9 @@ PlacedMelodyStaff placeMelodyStaff({
     cellX: cellX,
     stepOffset: metrics.stepOffset * staffSpace,
     left: left,
+    headHalf: metrics.noteheadWidth * staffSpace / 2,
+    accidentalCharWidth: metrics.accidentalWidth * staffSpace,
+    accidentalGap: metrics.accidentalGap * staffSpace,
   );
   for (final _MelodyNote note in notes) {
     _addNoteGlyphs(
@@ -551,13 +575,15 @@ PlacedMelodyStaff placeMelodyStaff({
   );
 }
 
-/// The letter printed for a clef name, which is the conventional `G` for a treble staff and `F` for
-/// a bass one.
+/// The letter the staff is marked with, from the clef NAME the model stores.
 ///
-/// The LETTER and not the sign: this renderer ships no music font, and a spaced-out `𝄞` in a text
-/// font falls back to a box on most machines — the same reason the bar signs are drawn as ASCII.
-/// `G` and `F` name the line the clef circles, which is the mnemonics a musician was taught.
-/// Anything else is read as treble, matching [melodyStepOf].
+/// The LETTER and not the sign, because this renderer ships no music font and a spaced-out `𝄞` in a
+/// text font falls back to a box on most machines. It is kept because the PLACED staff publishes the
+/// clef it was engraved in — a fact another renderer or a test may read — and it is deliberately NOT
+/// DRAWN: see `ChartPainter._paintMelody` for the owner's verdict on the letter that stood in the
+/// clef's place.
+/// `G` and `F` name the line the clef circles, which is the mnemonic a musician was taught. Anything
+/// else is read as treble, matching [melodyStepOf].
 String _clefLetter(String clef) => clef == 'bass' ? 'F' : 'G';
 
 /// One melody note already placed on the staff, in page coordinates.
@@ -597,7 +623,10 @@ class _MelodyNote {
 // PURPOSE: Turn a bar's model notes into placed notes, in the order they are drawn, so that a later
 //          function can reason about one note rather than re-reading the model.
 // INPUTS: As [placeMelodyStaff], minus the glyph list. [left] is the bar's own left edge, which is
-//         the origin [cellX] is measured from; [cellX] holds offsets RELATIVE to it.
+//         the origin [cellX] is measured from; [cellX] holds offsets RELATIVE to it. accidentalRoom
+//         — the horizontal room an accidental needs to the left of its notehead, which is added to
+//         the first note of the bar's first beat when that note carries one, so the sign cannot be
+//         drawn across the barline.
 // OUTPUTS: The notes the staff can draw, in the bar's own storage order. A note is dropped when its
 //          beat has no cell: the bar's left padding is not a position in time, and a note drawn
 //          there would be one the musician can neither point at nor play where they wrote it.
@@ -610,6 +639,9 @@ List<_MelodyNote> _notesOf({
   required String clef,
   required List<double> cellX,
   required double stepOffset,
+  required double headHalf,
+  required double accidentalCharWidth,
+  required double accidentalGap,
 }) {
   final List<_MelodyNote> notes = <_MelodyNote>[];
   final Set<int> claimedBeats = <int>{};
@@ -622,19 +654,49 @@ List<_MelodyNote> _notesOf({
       octave: note.pitch.octave,
       clef: clef,
     );
+    // WHICH NOTE OF A BEAT CARRIES THE ACCIDENTAL, decided before the position because the position
+    // depends on it — see below.
+    final bool firstOfBeat = claimedBeats.add(note.beat);
+    final String? accidental = melodyAccidentalOf(note.pitch.note);
+    // THE FIRST NOTE OF A BAR IS PUSHED CLEAR OF THE BARLINE BY HALF A NOTEHEAD, so that what lines
+    // up with the cell's column is the note's LEFT EDGE — which is what a chord symbol's box also
+    // does — instead of its centre. Drawn centred on the cell's own x, the notehead of a bar's first
+    // beat straddles the barline (measured: 0.2 page pixels on the staff's side of it at 13 staff
+    // units), and a note that touches the barline reads as a note in the previous bar.
+    final double headroom = headHalf;
+    // AND AN ACCIDENTAL ON THAT FIRST BEAT GETS WHATEVER ROOM THE BAR HAS LEFT, because the bar's own
+    // padding is smaller than the sign: measured at 13 staff units an accidental needs 13 page pixels
+    // and the padding is 8, so the sign would be drawn ACROSS the barline. Only the overflow is
+    // added, so an ordinary single sign moves nothing and the note keeps its column.
+    double accidentalShift = 0;
+    if (firstOfBeat && accidental != null && note.beat == 0) {
+      // The room between the barline and the sign's own right edge is the bar's padding: the head's
+      // left edge lies ON the cell's column (the headroom above put it there), and the sign is drawn
+      // one gap further left again. Only the overflow moves the note.
+      final double needed =
+          accidental.length * accidentalCharWidth + accidentalGap;
+      if (needed > cellX[0]) {
+        accidentalShift = needed - cellX[0];
+      }
+    }
     notes.add(
       _MelodyNote(
         pitch: note.pitch.note,
         octave: note.pitch.octave,
         note: note,
         step: step,
-        centerX: left + cellX[note.beat] + note.step * stepOffset,
+        centerX:
+            left +
+            cellX[note.beat] +
+            headroom +
+            accidentalShift +
+            note.step * stepOffset,
         centerY: melodyStepCenterY(
           staffMiddleLineY: staffMiddleLineY,
           staffSpace: staffSpace,
           step: step,
         ),
-        atBeatStart: claimedBeats.add(note.beat),
+        atBeatStart: firstOfBeat,
       ),
     );
   }
@@ -658,6 +720,12 @@ void _addNoteGlyphs({
 }) {
   final double stroke = metrics.strokeWidth * staffSpace;
   final double ledgerWidth = metrics.ledgerWidth * staffSpace;
+  // THE LEDGER LINE'S Y IS MEASURED FROM THE STAFF'S TOP LINE, which is what
+  // [melodyLedgerLineOffsets] publishes its offsets against: a step is half a space, so the distance
+  // from a note's own centre up to the top line is `(step - 8)` half-spaces and the line sits
+  // `offset` spaces above that line. Measuring from the notehead's own centre instead — which is
+  // what this did — puts every ledger line half its own distance away from the note it belongs to.
+  final double topLineY = note.centerY + (note.step - 8) * staffSpace / 2;
   for (final double offset in melodyLedgerLineOffsets(note.step)) {
     glyphs.add(
       MelodyGlyph(
@@ -665,7 +733,7 @@ void _addNoteGlyphs({
         strokeWidth: stroke,
         bounds: LayoutRect.fromLTWH(
           note.centerX - ledgerWidth / 2,
-          note.centerY - offset * staffSpace,
+          topLineY - offset * staffSpace,
           ledgerWidth,
           stroke,
         ),

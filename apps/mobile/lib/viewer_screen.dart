@@ -327,6 +327,45 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// gone and no obvious way to get it back would be a state the musician did not set on this run.
   bool _chromeHidden = false;
 
+  /// Whether the musician has FIXED the view — the owner's «кнопка фиксирования масштаба».
+  ///
+  /// WHAT IT LOCKS, AND WHY THAT SET. The owner's own description of what he wants is
+  /// «чтобы масштаб не уплывал» — the chart must stop changing size under his hand, at a music
+  /// stand, while he is playing from it. Four things can change how big a chord is on this glass,
+  /// measured on the tree rather than guessed: the two-finger pinch, the three `МАСШТАБ` controls,
+  /// a change of page mode, and a change of the pane — a window resize, a rotation, or hiding the
+  /// chrome. The lock covers ALL FOUR, and it does it by holding the NUMBER rather than by
+  /// disabling the controls one at a time:
+  ///
+  ///   * the pinch and the drag are REFUSED — both of them, because the gesture that pinches also
+  ///     pans, and a page that stops changing size but slides under the hand is half a lock;
+  ///   * the three `МАСШТАБ` controls are DISABLED and say so, so a press cannot be mistaken for a
+  ///     refused one;
+  ///   * a page-mode change and a pane change are ALLOWED — refusing them would be refusing the
+  ///     window — but they cannot change the size, because the DRAWN scale is held and the zoom is
+  ///     re-derived from whatever the new engraving produced: `zoom = locked / scale`, clamped.
+  ///
+  /// The one thing the lock cannot do is make the chart SMALLER than the page mode's own smallest
+  /// page: `PageLayout.withView` refuses a zoom below 1, because at 1 the page already fills the pane
+  /// exactly, so a pane that grows while the lock is on can only grow the music. That is named where
+  /// it happens — `viewer.view.lock.clamped` — rather than left to be discovered.
+  bool _viewLocked = false;
+
+  /// The drawn scale the lock is holding, in SURFACE pixels per page pixel, or null when unlocked.
+  ///
+  /// The DRAWN scale and not the zoom, because the zoom is relative to a page whose own scale changes
+  /// with the pane and the page mode: locking a relative number would let every re-engrave move the
+  /// music, which is the thing being locked. Null and [_viewLocked] are two facts rather than one
+  /// because the lock can be on before a page has ever been drawn (a chart that is still loading).
+  double? _lockedDrawnScale;
+
+  /// The pan the lock is holding, in surface logical pixels, or zero when unlocked.
+  LayoutOffset _lockedPan = LayoutOffset.zero;
+
+  /// Whether the contact currently down on the page belonged to a two-finger gesture that the lock
+  /// refused, so the refusal is logged once per gesture rather than once per move event.
+  bool _viewGestureRefused = false;
+
   /// The pane size the last `viewer.page.pane` line reported, so it is logged on a CHANGE and not on
   /// every layout pass.
   ///
@@ -501,6 +540,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// Whether the previous move sample was one the ink layer was drawing, so the cost counters are
   /// reset at the first sample of a stroke and not in the middle of one.
   bool _penWasDrawing = false;
+
+  /// How many times the ink layer had written to the operation log the last time this screen showed
+  /// the result, so a lift can tell whether the page it drew is out of date.
+  ///
+  /// IT IS NEEDED BECAUSE A GESTURE THAT MOVED IS NOT A TAP. The tap handler is where this screen
+  /// used to learn that the document had changed, and it is not called for a stroke that travelled
+  /// or for an eraser drag — which are exactly the gestures the ink layer produces now. The layer
+  /// counts what it wrote and this compares the count at the lift, once per contact, so the undo
+  /// control and the selection line follow an erasure that no double-tap recogniser saw.
+  int _shownDocumentEdits = 0;
 
   /// Whether the contact that started the current tap was one the ink rule admitted.
   ///
@@ -947,15 +996,116 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // PURPOSE: Put the musician's view on the page being drawn, so the whole screen — the chart, the
   //          words, the ink and the two-finger gesture — agrees about one transform.
   // INPUTS: raw — the page as the layout engine produced it, with an identity view.
-  // OUTPUTS: The same page with `_viewZoom` and `_viewPan` applied and both CLAMPED, so the drawn
-  //          page always covers the pane. The clamp is not repeated here: it is `PageLayout`'s, and
-  //          the gesture arithmetic reads its result back from [_lastDrawnPage].
-  // KEYWORDS: view-application, single-transform, clamps, d34
+  // OUTPUTS: The same page with the view applied and both clamped, so the drawn page always covers
+  //          the pane. The clamp is not repeated here: it is `PageLayout`'s, and the gesture
+  //          arithmetic reads its result back from [_lastDrawnPage].
+  //
+  //          WHILE THE VIEW IS LOCKED THE ZOOM IS NOT READ FROM THE STATE AT ALL — it is DERIVED, as
+  //          the ratio between the scale the lock captured and the scale this engraving produced.
+  //          That is what makes the lock survive the two changes it cannot refuse: a different page
+  //          mode and a different pane both re-engrave the chart at a new `raw.scale`, and a stored
+  //          zoom would then draw the music at a new size. Deriving it means there is no second place
+  //          a size could come from, and the clamp is still the page's — so a pane that grows while
+  //          the lock is on cannot shrink the music below the mode's own page, and the fact is logged
+  //          rather than left to surprise a musician at the stand.
+  // KEYWORDS: view-application, single-transform, clamps, d34, view-lock, derived-zoom
   /// Returns [raw] with the current view applied.
   PageLayout _viewed(PageLayout raw) {
-    final PageLayout viewed = raw.withView(zoom: _viewZoom, pan: _viewPan);
+    final double? locked = _lockedDrawnScale;
+    final PageLayout viewed;
+    if (locked == null) {
+      viewed = raw.withView(zoom: _viewZoom, pan: _viewPan);
+    } else {
+      final double wanted = raw.scale > 0 ? locked / raw.scale : 1;
+      final double zoom = _clampZoom(wanted);
+      if ((zoom - wanted).abs() > 0.0005) {
+        _lockedClampedReason = 'zoom below 1: the page would not fill the pane';
+      } else {
+        _lockedClampedReason = null;
+      }
+      viewed = raw.withView(zoom: zoom, pan: _lockedPan);
+    }
     _lastDrawnPage = viewed;
     return viewed;
+  }
+
+  /// Why the lock could not hold the scale on the frame that was just drawn, or null when it did.
+  ///
+  /// It is a field rather than a log line printed from [_viewed] because that method runs inside a
+  /// build and this project has already paid once for putting an instrument on a path that runs every
+  /// frame; the reason is reported by `_buildPages`'s own size-change line, which runs once per change.
+  String? _lockedClampedReason;
+
+  // PURPOSE: Fix the scale the chart is drawn at, or release it, and leave the chart where it is
+  //          either way.
+  // INPUTS: None.
+  // OUTPUTS: Nothing. Locking captures the drawn scale and the pan of the page currently on screen;
+  //          releasing hands those back to the view state, so the chart does not move when the lock is
+  //          turned off — a lock whose release jumps the page would be a control a musician learns not
+  //          to touch, and this one is meant to be turned on and off at the stand.
+  //
+  //          THE LOCK IS NOT PERSISTED, for the reason the hidden chrome is not: it is a decision made
+  //          about the page in front of him, and an application that opened with the scale fixed would
+  //          be one whose zoom controls do not answer on the first press.
+  // KEYWORDS: view-lock, capture, release-without-jump, not-persisted, owner-request, scale-fixed
+  void _toggleViewLock() {
+    final PageLayout? drawn = _lastDrawnPage;
+    // A CHART WITH NO PAGE YET IS STILL LOCKABLE: the scale it will be drawn at is the page mode's own
+    // (`_lastPageScale`), and a musician who pressed the lock on the frame a chart appeared meant it.
+    // The fallback is the identity, which is what the page will be drawn at first.
+    final double scaleNow =
+        drawn?.drawnScale ?? (_lastPageScale > 0 ? _lastPageScale : 1);
+    final LayoutOffset panNow = drawn?.pan ?? _viewPan;
+    setState(() {
+      if (_viewLocked) {
+        if (drawn != null) {
+          // The stored view becomes the view that is on the glass, so releasing the lock is not a
+          // change of magnification in either direction.
+          _viewZoom = drawn.zoom;
+          _viewPan = drawn.pan;
+        }
+        _viewLocked = false;
+        _lockedDrawnScale = null;
+        _lockedPan = LayoutOffset.zero;
+      } else {
+        _viewLocked = true;
+        _lockedDrawnScale = scaleNow;
+        _lockedPan = panNow;
+      }
+    });
+    debugPrint(
+      'viewer.view.lock locked=$_viewLocked '
+      'scale=${_lockedDrawnScale?.toStringAsFixed(4) ?? 'released'} '
+      'zoom=${(_lastDrawnPage?.zoom ?? _viewZoom).toStringAsFixed(4)} '
+      'pan=(${(_lastDrawnPage?.pan ?? _viewPan).x.toStringAsFixed(1)},'
+      '${(_lastDrawnPage?.pan ?? _viewPan).y.toStringAsFixed(1)}) '
+      'mode=${_lastPageMode?.name ?? 'none'}',
+    );
+  }
+
+  /// The magnification the chart is actually drawn at, which is what the scene bar reports.
+  ///
+  /// The locked view derives its zoom from the engraving, so the stored `_viewZoom` can differ from
+  /// what is on the glass; a reading that showed the stored number would tell a musician the chart is
+  /// at 1.0 while it is drawn at 1.4.
+  double get _effectiveZoom => _lastDrawnPage?.zoom ?? _viewZoom;
+
+  // PURPOSE: The one control that fixes the scale, drawn in every shell form and in both chrome
+  //          states — so a lock can never be ON in a state where nothing says so.
+  // INPUTS: context — the build context.
+  // OUTPUTS: An [IconButton] showing a closed lock while the view is fixed and an open one while it is
+  //          free. It is disabled while no chart is on screen: there is no page to fix, and a control
+  //          that can be pressed into a state with no meaning is a control that teaches nothing.
+  // KEYWORDS: view-lock, always-visible, two-states, disabled-without-chart, one-definition
+  Widget _viewLockToggle(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return IconButton(
+      key: const ValueKey<String>('viewer-view-lock'),
+      icon: Icon(_viewLocked ? Icons.lock : Icons.lock_open),
+      isSelected: _viewLocked,
+      tooltip: _viewLocked ? l10n.tooltipViewLockOn : l10n.tooltipViewLockOff,
+      onPressed: _currentSession == null ? null : _toggleViewLock,
+    );
   }
 
   // PURPOSE: Hold a requested magnification inside the range the view allows, so that arithmetic
@@ -1016,6 +1166,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          page is exactly the pane again, which is the state the mode chose for it.
   // KEYWORDS: view-reset, fit-the-view, known-view, get-back, d33, d34
   void _resetView() {
+    if (_viewLocked) {
+      debugPrint('viewer.view.lock.refuse source=reset_button');
+      return;
+    }
     if (_viewZoom == 1 && _viewPan == LayoutOffset.zero) {
       // Said out loud rather than silently ignored: a press that does nothing must be
       // distinguishable in the log from a press that was never delivered.
@@ -1042,6 +1196,17 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   void _zoomBy(double factor, {Offset? about}) {
     final Size pane = _lastPageSurface;
     if (pane.isEmpty) {
+      return;
+    }
+    // THE LOCK IS CHECKED HERE AS WELL AS IN THE DISABLED BUTTON, because a control's enabled state
+    // is a property of the frame it was built in: a press that arrives in the frame after the lock
+    // was set would otherwise change the scale through a button that was drawn enabled. The buttons
+    // are the interface; this is the rule.
+    if (_viewLocked) {
+      debugPrint(
+        'viewer.view.lock.refuse source=zoom_button factor=$factor '
+        'locked_scale=${_lockedDrawnScale?.toStringAsFixed(4) ?? 'none'}',
+      );
       return;
     }
     final Offset centre = about ?? Offset(pane.width / 2, pane.height / 2);
@@ -1077,6 +1242,23 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          update is a function of the gesture rather than of the frames in between.
   // KEYWORDS: view-gesture-start, gesture-anchor, ink-suppression, d34
   void _onViewGestureStart(TwoFingerViewSample sample) {
+    // A GESTURE THAT CANNOT MOVE ANYTHING DOES NOT START. Refusing it at the START rather than at
+    // every sample is what keeps the refusal off the contact path: a pinch is ~60 move events, and a
+    // log line per event on the gesture that fires while a musician writes is the flood A64's palm
+    // rule was written to avoid. The contacts are still marked as the gesture's, so the first of the
+    // two fingers cannot become a stroke either.
+    if (_viewLocked) {
+      if (!_viewGestureRefused) {
+        _viewGestureRefused = true;
+        debugPrint(
+          'viewer.view.lock.refuse source=two_finger pointers=${sample.pointerCount} '
+          'locked_scale=${_lockedDrawnScale?.toStringAsFixed(4) ?? 'none'}',
+        );
+      }
+      _viewGestureActive = true;
+      _activeInkLayer?.setViewGestureActive(true);
+      return;
+    }
     _viewGesture = _ViewGestureAnchor(
       zoom: _viewZoom,
       pan: _viewPan,
@@ -1143,11 +1325,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     if (!_viewGestureActive) {
       return;
     }
+    final bool wasRefused = _viewGestureRefused;
+    _viewGestureRefused = false;
     _viewGestureActive = false;
     _activeInkLayer?.setViewGestureActive(false);
     debugPrint(
       'viewer.view.gesture end zoom=${_viewZoom.toStringAsFixed(3)} '
-      'pan=(${_viewPan.x.toStringAsFixed(1)},${_viewPan.y.toStringAsFixed(1)})',
+      'pan=(${_viewPan.x.toStringAsFixed(1)},${_viewPan.y.toStringAsFixed(1)})'
+      '${wasRefused ? ' refused=view_locked' : ''}',
     );
   }
 
@@ -1768,6 +1953,17 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final IRealLibrary? library = _library;
     final bool phone = _isPhoneWidth(MediaQuery.sizeOf(context).width);
     final bool chrome = !_chromeHidden;
+    // THE CHART'S OWN NAME IS THE BAR'S TITLE, WHICH IS WHY THERE IS NO SECOND TITLE ROW. The bar
+    // used to carry the application's name — a fact the musician already knows, since he opened it —
+    // and the chart's name sat in a row of its own below, so the top of the screen began with two
+    // titles, one of which said nothing, and 36 logical pixels of chart height went with it.
+    final int songIndex = library == null || library.songs.isEmpty
+        ? -1
+        : (_selectedSong >= 0 && _selectedSong < library.songs.length
+              ? _selectedSong
+              : 0);
+    final IRealSong? entry = songIndex < 0 ? null : library!.songs[songIndex];
+    final Widget? issue = _buildIssueAction(context, entry);
     return Scaffold(
       // THE APP BAR IS THE TOP BLOCK'S FIRST HALF, and hiding the chrome replaces it rather than
       // removing it: the document tools live here on a tablet, and a hidden state that took the pen
@@ -1775,20 +1971,33 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       // the page. What goes is everything that does not change what is already on the page.
       appBar: chrome
           ? AppBar(
-              // The title names the application, not the file, and on a phone it names it in one
-              // word: eight actions beside a two-word title is what left the bar reading `Cha…`, and
-              // a title that cannot be read is worse than a shorter one that can. The phone form is
-              // the brand name alone, which is the same string in every language and so is not in
-              // the catalogue.
-              title: Text(phone ? 'ChartApp' : l10n.appTitle),
+              title: entry == null
+                  ? Text(l10n.appTitle)
+                  : Row(
+                      mainAxisSize: MainAxisSize.max,
+                      children: <Widget>[_buildSongTitle(context, entry)],
+                    ),
+              // ONE 48-PIXEL TARGET INSTEAD OF A 64-PIXEL ROW. Opening a chart file is the first
+              // thing a musician does and the last thing he does again: on a platform where the
+              // source is a chooser rather than a path field, that row was 64 logical pixels of the
+              // chart's own height spent on a button pressed once per session. It is an action now,
+              // carrying the SAME `viewer-open-file` key the row's button carried, so anything that
+              // drove the old control still finds it. A DESKTOP KEEPS THE ROW: there the row is a
+              // path FIELD plus a chooser plus a load button, which is a form and cannot become a
+              // button without losing the field.
               actions: phone
                   ? <Widget>[
+                      ?issue,
+                      _viewLockToggle(context),
                       _chromeToggle(context),
                       _buildOverflowMenu(context, session),
                     ]
                   : <Widget>[
                       ..._documentTools(context, session),
                       ..._sheetActions(context, session),
+                      ?issue,
+                      if (!sourceIsFilePath) _buildOpenFileAction(context),
+                      _viewLockToggle(context),
                       _chromeToggle(context),
                     ],
             )
@@ -1802,9 +2011,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       bottomNavigationBar: phone ? _buildPhoneDock(context, session) : null,
       body: Column(
         children: <Widget>[
-          // The path bar is the entry point to a chart and the first thing that stops earning its
-          // height once one is open, so it belongs to the chrome and goes with it.
-          if (chrome) _buildPathBar(context),
+          // The path bar is a FORM where a platform lets a path be typed, and nothing else: see the
+          // app bar's action above for where the chooser went and why.
+          if (chrome && sourceIsFilePath) _buildPathBar(context),
           if (error != null) _buildError(context, error),
           Expanded(child: _buildBody(context)),
           if (chrome) _buildStatusBar(context),
@@ -1828,7 +2037,111 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       toolbarHeight: UiKit.toolBarHeight,
       titleSpacing: UiKit.spaceM,
       title: phone ? null : Row(children: _documentTools(context, session)),
-      actions: <Widget>[_chromeToggle(context)],
+      actions: <Widget>[
+        // The view lock travels with the toggle rather than with the scene bar, because the scene
+        // bar is what the chrome hides: a lock whose state is only visible while everything else is
+        // visible is exactly the lock this change exists to make trustworthy.
+        _viewLockToggle(context),
+        _chromeToggle(context),
+      ],
+    );
+  }
+
+  // PURPOSE: Say which chart is on the screen, where the screen begins, and be the handle that opens
+  //          the sheet where its own facts are edited.
+  // INPUTS: context — where the song-info sheet is opened from. entry — the song on screen.
+  // OUTPUTS: The chart's title with a pencil beside it, then its bar count and, when the importer
+  //          reported any, its issue count as a control. The count is the EDITED one, read from the
+  //          chart the page is drawn from, so a bar inserted on the page changes the number beside
+  //          the title.
+  //
+  //          WHY THIS MOVED OUT OF THE PANE AND INTO THE BAR. It is the same widget tree it was; what
+  //          changed is the row it stands on. The pane's header row cost 36 logical pixels of chart
+  //          height on every surface to say the chart's name directly under a bar that was already
+  //          saying the application's name, and the owner's report of the result is that the top has
+  //          too much empty space and does not read as one composition. Two title rows are exactly
+  //          that: a composition reads as one when the first thing the eye meets is the thing the
+  //          screen is about.
+  // KEYWORDS: song-title, app-bar-title, bar-count, issues, song-info-entry, one-title-row,
+  //           composition
+  Widget _buildSongTitle(BuildContext context, IRealSong entry) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final EditSession session = _sessionFor(entry);
+    final Song displayed = _shownSong(entry);
+    // ONE STRING AND ONE CONTROL, SO THERE IS NOTHING LEFT TO OVERFLOW. The first version of this row
+    // put the title, the bar count and the issue button side by side, with the count as a plain
+    // `Text` beside a `Flexible` title: in a narrow app bar the flexible half shrank to nothing and
+    // the count, which cannot shrink, then overflowed the bar by its own width. `ink_mode_test` found
+    // it on its own 140-pixel title box — the test failed with `RenderFlex OVERFLOWING` before it
+    // ever reached its assertion. A title that ellipsizes is a title; a bar that overflows is a
+    // defect. So the count is part of the title's own string (both are facts about the same chart and
+    // are read as one line), and the issue count is a control in the bar's actions.
+    final String label =
+        '${_titleFor(entry, l10n)} · '
+        '${l10n.barCount(displayed.writtenBarCount)}';
+    return Flexible(
+      child: Tooltip(
+        message: l10n.songInfoTooltip,
+        child: InkWell(
+          key: const ValueKey<String>('viewer-song-info'),
+          onTap: () => _openSongInfo(context, session, SongMetadataField.title),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Flexible(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.titleMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: UiKit.spaceXs),
+              const Icon(
+                Icons.edit_outlined,
+                size: 14,
+                color: Color(0xFF486581),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // PURPOSE: Say that the importer reported problems with this chart, and open the list.
+  // INPUTS: context — where the list is opened from. entry — the song on screen, or null.
+  // OUTPUTS: A warning icon carrying the count in its tooltip, or null when there is nothing to say.
+  //          An ACTION rather than part of the title: an app bar can afford a target whose width it
+  //          controls, and cannot afford a label in the box the title has to share.
+  // KEYWORDS: issues, warning, app-bar-action, no-title-overflow
+  Widget? _buildIssueAction(BuildContext context, IRealSong? entry) {
+    if (entry == null || entry.issues.isEmpty) {
+      return null;
+    }
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return IconButton(
+      key: const ValueKey<String>('viewer-issues'),
+      icon: const Icon(Icons.report_problem_outlined),
+      tooltip: l10n.issueCount(entry.issues.length),
+      onPressed: () => unawaited(_showIssues(context, entry)),
+    );
+  }
+
+  // PURPOSE: The one action that opens a chart file on a platform whose source is a chooser, so the
+  //          entry point a musician uses first is in the bar with every other action instead of on a
+  //          row of its own.
+  // INPUTS: context — the build context.
+  // OUTPUTS: An [IconButton] carrying the `viewer-open-file` key the row's button carried, disabled
+  //          while a load is in flight so a second press cannot start a second one.
+  // KEYWORDS: open-file, chooser, app-bar-action, one-entry-point, disabled-while-loading
+  Widget _buildOpenFileAction(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    return IconButton(
+      key: const ValueKey<String>('viewer-open-file'),
+      icon: const Icon(Icons.folder_open),
+      tooltip: l10n.openHtmlFile,
+      onPressed: _loading ? null : () => unawaited(_load()),
     );
   }
 
@@ -2729,7 +3042,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     IRealLibrary library,
     int songIndex,
   ) {
-    final AppLocalizations l10n = AppLocalizations.of(context);
     final IRealSong entry = library.songs[songIndex];
     final SetlistItem? playing = _playingItemFor(entry);
     final int semitones = _shownSemitones(entry);
@@ -2765,66 +3077,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         // one `if`: the owner chose that the rail and the top block hide TOGETHER, and a half-hidden
         // state — a title over a hidden scene bar — is exactly the "does not look like one whole"
         // complaint this arrangement exists to answer.
+        //
+        // THE CHART'S TITLE IS NOT HERE ANY MORE. It is the app bar's title; see `_buildSongTitle`
+        // for why the top of the screen says one name and not two, and for the 36 logical pixels of
+        // chart height that row was costing on every surface.
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             if (!_chromeHidden) ...<Widget>[
-              Padding(
-                padding: UiKit.paneHeaderPadding,
-                child: Row(
-                  children: <Widget>[
-                    // The title is where the song's own facts are read, so it is where they are
-                    // edited: tapping it opens the sheet that holds the title, the composer, the style
-                    // and the tempo. The pencil is what says so — a title that silently turns out to
-                    // be a button is not discoverable on its own.
-                    Expanded(
-                      child: Tooltip(
-                        message: l10n.songInfoTooltip,
-                        child: InkWell(
-                          key: const ValueKey<String>('viewer-song-info'),
-                          onTap: () => _openSongInfo(
-                            context,
-                            session,
-                            SongMetadataField.title,
-                          ),
-                          child: Row(
-                            children: <Widget>[
-                              Flexible(
-                                child: Text(
-                                  _titleFor(entry, l10n),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: UiKit.spaceXs),
-                              const Icon(
-                                Icons.edit_outlined,
-                                size: 14,
-                                color: Color(0xFF486581),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    // The EDITED count, which is what the page under it is drawn from. Transposition
-                    // does not change how many bars a chart has, so `displayed` and the written
-                    // session document agree on this number and either would do; the displayed one is
-                    // already here.
-                    Text(l10n.barCount(displayed.writtenBarCount)),
-                    if (entry.issues.isNotEmpty) ...<Widget>[
-                      const SizedBox(width: UiKit.spaceS),
-                      TextButton(
-                        onPressed: () => unawaited(_showIssues(context, entry)),
-                        child: Text(l10n.issueCount(entry.issues.length)),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
               SceneBar(
                 position: position,
                 songCount: songCount,
@@ -2853,7 +3113,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                 // for a zoom reachable from the interface beside the touch gesture, and D34 gives the
                 // GESTURE to two fingers; these three controls are the interface half, and the middle
                 // one is how he gets back to a known view after a pan he cannot see the edges of.
-                zoom: _viewZoom,
+                //
+                // The number reported is the magnification that is ON THE GLASS, not the stored one:
+                // while the view is locked the zoom is derived from the engraving (see [_viewed]),
+                // and a reading that showed the stored value would say ×1.0 over a chart drawn at
+                // ×1.4. The fourth control fixes that number, and it stands HERE — with the scale it
+                // fixes — as well as in the always-visible bars, because this is where a musician
+                // reads the scale and therefore where he looks for the control that pins it.
+                zoom: _effectiveZoom,
+                zoomLocked: _viewLocked,
+                onToggleZoomLock: _toggleViewLock,
                 onZoomIn: () => _zoomBy(1.25),
                 onZoomOut: () => _zoomBy(0.8),
                 onZoomReset: _resetView,
@@ -2940,6 +3209,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          The tap path is OPAQUE through the outer listener, so a contact on the white space
   //          between two systems — exactly where a musician may miss — is still reported and clears
   //          the selection.
+  //
+  //          AND THE SAME DISPATCH ORDER IS WHY THERE IS A THIRD, OUTERMOST LISTENER FOR THE LIFT.
+  //          A gesture that MOVED is never a tap, so for a pen stroke that travelled and for an
+  //          eraser drag the tap handler above is not called at all; the lift listener is placed
+  //          ABOVE the ink capture precisely so that it runs after the layer has written to the log,
+  //          which is what lets "the document changed" reach the screen at all. See
+  //          [_onPagePointerUp].
   // KEYWORDS: page-widget, pointer-listener, dispatch-order, ink-overlay, tap-vs-stroke,
   //           selection-entry, commit-before-select
   Widget _tappablePage(
@@ -2947,21 +3223,35 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     Song song,
     InkCaptureLayer layer,
     List<TextCue> textCues,
-  ) => RawPointerCapture(
-    layer: layer,
-    page: page,
-    child: Listener(
-      // This listener does NOT repaint. The ink layer repaints itself through its own tick, and the
-      // only jobs left here are the pen path's cost accounting and marking the verification state as
-      // owed — see [_onPagePointerMove]. A move the layer did not take — a finger, or a pen with the
-      // mode off — therefore costs one comparison and nothing else.
-      onPointerMove: (PointerMoveEvent event) => _onPagePointerMove(),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (TapDownDetails details) => _onPageTapDown(layer, details),
-        onTapUp: (TapUpDetails details) => _onPageTapUp(page, layer, details),
-        onTapCancel: _onPageTapCancel,
-        child: _layeredPage(page, song, layer, textCues),
+  ) => Listener(
+    // THE LIFT IS TAKEN HERE, ABOVE THE INK CAPTURE, AND THE ORDER IS THE WHOLE POINT. Hit testing
+    // runs from the deepest target outwards, so a listener ABOVE `RawPointerCapture` is called after
+    // the layer's own lift handler — that is, after `endStroke` or `endErase` has written to the
+    // operation log. A listener BELOW it asks "did the document change during this contact" one
+    // event too early and gets the previous contact's answer, which was measured on the tablet
+    // before this was moved: the erase's own four deletions were reported with the edit count from
+    // before them.
+    //
+    // `deferToChild` because the page below is opaque and this listener adds nothing to the hit test
+    // of its own: it is here to observe the lift, not to make the page touchable.
+    behavior: HitTestBehavior.deferToChild,
+    onPointerUp: (PointerUpEvent event) => _onPagePointerUp(),
+    child: RawPointerCapture(
+      layer: layer,
+      page: page,
+      child: Listener(
+        // This listener does NOT repaint. The ink layer repaints itself through its own tick, and
+        // the only jobs left here are the pen path's cost accounting and marking the verification
+        // state as owed — see [_onPagePointerMove]. A move the layer did not take — a finger, or a
+        // pen with the mode off — therefore costs one comparison and nothing else.
+        onPointerMove: (PointerMoveEvent event) => _onPagePointerMove(),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (TapDownDetails details) => _onPageTapDown(layer, details),
+          onTapUp: (TapUpDetails details) => _onPageTapUp(page, layer, details),
+          onTapCancel: _onPageTapCancel,
+          child: _layeredPage(page, song, layer, textCues),
+        ),
       ),
     ),
   );
@@ -3023,6 +3313,36 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     if (report != null) {
       debugPrint(report);
     }
+  }
+
+  // PURPOSE: Show what a contact that has just lifted did to the document, when it wrote something
+  //          the tap handler will never be told about. It is the lift half of a gesture that moved:
+  //          a pen stroke that travelled and an eraser drag both finish here and neither is a tap.
+  //
+  //          WHY IT IS ONE COMPARISON AND NOT A LISTENER. A rebuild per sample is the cost this
+  //          screen already paid to remove (see [_onPagePointerMove]); what is needed is "did the
+  //          document change during this contact", asked once, and a counter on the layer answers it
+  //          for both the stroke that was committed and the strokes that were erased — including the
+  //          case of an eraser drag that crossed twelve of them. With nothing written the method
+  //          costs a field read, which is why it is safe on the pen's own lift.
+  // INPUTS: None. The active song's ink layer is asked how many edits it has appended.
+  // OUTPUTS: Nothing. Rebuilds when the count moved since the last lift, so the undo control becomes
+  //          live and the chart stops showing ink the document no longer holds, and offers the
+  //          verification state for publication by the frame that follows.
+  // KEYWORDS: pointer-up, commit-then-show, drag-not-a-tap, edit-counter, undo-liveness, d34
+  void _onPagePointerUp() {
+    final InkCaptureLayer? layer = _activeInkLayer;
+    if (layer == null || layer.documentEdits == _shownDocumentEdits) {
+      return;
+    }
+    _shownDocumentEdits = layer.documentEdits;
+    setState(() {});
+    _inkPublishOwed = true;
+    publishInkStateWhenIdle();
+    debugPrint(
+      'viewer.page.edit.shown edits=${layer.documentEdits} '
+      'strokes=${layer.strokeCount} undo_depth=${_currentSession?.undoDepth ?? 0}',
+    );
   }
 
   // PURPOSE: Run one chart engraving and record what it cost, so that "the page was re-laid-out on
@@ -3113,6 +3433,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // PURPOSE: Collect every stroke the ink layer draws on [page]: the document's committed strokes
   //          plus the ones still under the pen, both resolved against the page on screen.
   //
+  //          WHAT THE ERASER HAS ALREADY TAKEN COMES OUT HERE, WHICH IS WHY A DRAG LOOKS LIKE A
+  //          RUBBER RATHER THAN LIKE A GESTURE THAT DOES NOTHING UNTIL THE HAND LIFTS. The layer
+  //          collects what a dragged erase contact crosses and writes the deletions only at the
+  //          lift (so a gesture the two-finger pan takes over deletes nothing); the strokes it has
+  //          collected are hidden by this filter, on the layer's own repaint tick, so the musician
+  //          sees the ink go away under the eraser while he is still moving it. A stroke in that
+  //          set is still IN the document — that is what makes the preview revocable — and it
+  //          reappears if the gesture is cancelled.
+  //
   //          THE ANCHOR IS RESOLVED HERE, ONCE PER REPAINT, AGAINST THE PAGE ON SCREEN, and that is
   //          the whole reason a stroke stays where the musician put it. The stored coordinates are
   //          measured from the anchor's own corner, so adding the corner's position on THIS page
@@ -3125,16 +3454,22 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //         live source of both halves.
   // OUTPUTS: The strokes that resolved, in render order: the document's order first, so a later
   //          stroke lies over an earlier one, and the live preview last, because it is the newest
-  //          mark and the one the musician is watching.
+  //          mark and the one the musician is watching. Strokes the armed eraser has crossed are
+  //          left out, and no other stroke is affected: with nothing armed the filter is empty.
   // KEYWORDS: anchor-resolution, page-filter, render-order, transposition-survival, fit-survival,
-  //           live-source, no-cached-document
-  List<ResolvedInkStroke> _inkStrokes(PageLayout page, InkCaptureLayer layer) =>
-      <ResolvedInkStroke>[
-        ..._resolveStrokes(page, layer.documentStrokes),
-        ...layer.liveStrokes.where(
-          (ResolvedInkStroke resolved) => _isOnPage(page, resolved),
-        ),
-      ];
+  //           live-source, no-cached-document, erase-preview
+  List<ResolvedInkStroke> _inkStrokes(PageLayout page, InkCaptureLayer layer) {
+    final Set<String> erasedPreview = layer.pendingEraseIds;
+    return <ResolvedInkStroke>[
+      ..._resolveStrokes(page, layer.documentStrokes).where(
+        (ResolvedInkStroke resolved) =>
+            !erasedPreview.contains(resolved.stroke.id),
+      ),
+      ...layer.liveStrokes.where(
+        (ResolvedInkStroke resolved) => _isOnPage(page, resolved),
+      ),
+    ];
+  }
 
   // PURPOSE: Turn every committed stroke into the pair a painter needs, skipping the ones this page
   //          cannot place.
@@ -3616,8 +3951,17 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // tooltip needs a long press on a tablet, so the one place the mode can say what it does in
     // words is this line: with nothing selected the line has nothing else to say, and a musician
     // who has just switched tools is exactly the person who needs to be told what a touch will do.
+    // AND THE LOCK'S OWN WORDS, WHILE THE SCALE IS FIXED. Its button is a padlock and its state is a
+    // colour, and A64 established that a glyph plus a colour is how a mode goes unnoticed: the eraser
+    // had both and the owner reported it missing. So when the scale is fixed and there is nothing
+    // selected to name, this line says so in a sentence. The order of the three is deliberate: a
+    // selection is what the musician just touched and outranks everything; a fixed scale comes next,
+    // because it changes what the whole screen will do; the eraser's hint is last, because it only
+    // changes what one touch will do.
     final String text = hit == null
-        ? (_eraserOn ? l10n.eraserActiveHint : l10n.selectionPrompt)
+        ? (_viewLocked
+              ? l10n.viewLockActiveHint
+              : (_eraserOn ? l10n.eraserActiveHint : l10n.selectionPrompt))
         : _selectionLabel(song, hit, l10n);
     final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
@@ -3807,6 +4151,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             'height=${pageHeight.toStringAsFixed(1)} '
             'area=${(pageWidth * pageHeight).toStringAsFixed(0)} '
             'chrome_hidden=$_chromeHidden mode=${mode.name} '
+            'view_locked=$_viewLocked '
+            'locked_clamped=${_lockedClampedReason ?? 'no'} '
             'song="${_rawTitleFor(entry)}"',
           );
         }
@@ -3814,11 +4160,18 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         // The view belongs to the chart and the page mode it is being read in — not to the app. A
         // fresh chart opens at the identity, and switching how the chart is engraved starts the
         // view over, because every rectangle the old pan pointed at is a different one now.
+        //
+        // UNLESS THE VIEW IS LOCKED. A locked view is the musician saying "do not move this"; a reset
+        // he did not ask for is the same class of surprise as a palm moving the page, which is what
+        // the lock exists to remove. The lock re-derives its own zoom from the new engraving, so a
+        // mode change while locked keeps the SIZE and only changes how the chart is laid out.
         final Object viewOwner = (entry.index, mode);
         if (_viewOwner != viewOwner) {
           _viewOwner = viewOwner;
-          _viewZoom = 1;
-          _viewPan = LayoutOffset.zero;
+          if (!_viewLocked) {
+            _viewZoom = 1;
+            _viewPan = LayoutOffset.zero;
+          }
           _lastDrawnPage = null;
         }
         if (!pageWidth.isFinite ||

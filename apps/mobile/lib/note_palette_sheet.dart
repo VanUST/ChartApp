@@ -397,11 +397,11 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     if (selected == null) {
       return l10n.melodyBeatEmpty;
     }
-    return l10n.melodyNoteLine(
-      selected.step + 1,
-      '${selected.pitch}',
-      noteBaseNotation(selected.value.base),
-    );
+    // NOT THE NOTE'S OWN LINE AGAIN. It was `melodyNoteLine(step+1, pitch, base)`, which is byte for
+    // byte the row the note list draws directly under this sentence: the sheet said the same thing
+    // twice and neither copy said what a tap would do. What the musician cannot see is that the
+    // selection decides whether a pitch tap INSERTS or EDITS.
+    return l10n.melodyEditingSelected;
   }
 
   // PURPOSE: Number the edited bar the way a musician counts, across the whole written chart, so the
@@ -464,6 +464,29 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     octave: octave,
   );
 
+  /// The note a tap would write if it were a NEW note: the armed octave and the armed alteration.
+  ///
+  /// WHAT IT IS FOR. The grid names seven pitches (`C4` … `B4`) and a musician choosing between them
+  /// has to know which LINE each is before he can write a melody by name alone. The preview draws
+  /// those seven positions on a real staff, so the choice is made against the picture of the music
+  /// rather than against seven labels.
+  // PURPOSE: Build the pitch of one scale degree as the armed octave and alteration would write it.
+  // INPUTS: degree — the key's own written note for that degree.
+  // OUTPUTS: The pitch a tap on that degree's button writes.
+  // KEYWORDS: degree, armed-octave, armed-alteration, grid-to-pitch
+  PitchedNote _armedPitchFor(WrittenNote degree) => _pitchFor(degree, _octave);
+
+  /// The note value the next insertion will use, so the preview draws that duration and not an older
+  /// one.
+  NoteBase get _armedBase => _base;
+
+  /// The staff's clef NAME, taken from the song's own declared staff.
+  ///
+  /// The NAME and not a letter: it is read by `melodyStepOf`, which places a pitch by the clef the
+  /// staff DECLARED (D29), and nothing on screen shows it — the page draws no clef sign either.
+  String get _previewClef =>
+      widget.session.song.staffSet.pitched?.clef ?? 'treble';
+
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
@@ -479,10 +502,49 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
             children: <Widget>[
               _buildHeader(l10n),
               const SizedBox(height: 6),
-              Text(
-                _statusText(l10n),
-                key: const ValueKey<String>('note-palette-status'),
-                style: const TextStyle(color: sheetMutedColor, fontSize: 13),
+              // THE PREVIEW IS THE FIRST THING UNDER THE HEADER, because it answers the one question
+              // the grid of names cannot: WHERE on the staff the note will land. See [_NotePreview].
+              _NotePreview(
+                clef: _previewClef,
+                notes: notes,
+                selectedStep: _editingStep,
+                armedBase: _armedBase,
+                armedPitches: <PitchedNote>[
+                  for (final WrittenNote degree
+                      in const SpellingTable().scaleOf(widget.writtenKey))
+                    _armedPitchFor(degree),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // WHAT A TAP WILL WRITE, IN FRONT OF THE TAPS. The gold chip names the armed duration
+              // and nothing else states it; and once a note is selected a duration press EDITS that
+              // note, so the same gold chip means two things and a sentence is what tells them apart.
+              // The armed half is in the accent colour, the state half stays muted.
+              Wrap(
+                spacing: 8,
+                runSpacing: 2,
+                children: <Widget>[
+                  Text(
+                    l10n.melodyArmed(
+                      noteBaseChipLabel(_base),
+                      accidentMark(_alter),
+                    ),
+                    key: const ValueKey<String>('note-palette-armed'),
+                    style: const TextStyle(
+                      color: sheetAccentColor,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    _statusText(l10n),
+                    key: const ValueKey<String>('note-palette-status'),
+                    style: const TextStyle(
+                      color: sheetMutedColor,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
               if (overflow)
                 Padding(
@@ -509,8 +571,13 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
               const SizedBox(height: 8),
               _buildActions(l10n),
               const SizedBox(height: 4),
+              // THE ONE THING THE SHEET MUST SAY IN WORDS, and it is not the hint it used to carry:
+              // «коснитесь доли на стане» describes how this sheet is OPENED, and a musician reading
+              // it inside the sheet is looking at a surface that covers the staff. What he cannot
+              // discover by looking is that the duration and the alteration are STICKY — chosen once
+              // for a run of notes (D28) — and that is what this line says instead.
               Text(
-                l10n.melodyTapStaffHint,
+                l10n.melodyStickyHint,
                 style: const TextStyle(color: sheetMutedColor, fontSize: 11),
               ),
             ],
@@ -549,8 +616,16 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
             // `C мажор`, which is owner decision A53 — so the key is rendered by `keyNotation` rather
             // than by the viewer's `localizedKeyName`. A key name inside a translated sentence is
             // still a key name.
+            //
+            // AND THE SENTENCE IS THIS PALETTE'S OWN. It used to be the CHORD palette's —
+            // «Аккорды в C major», "Chords in C major" — in a surface whose every other word is a
+            // note: a musician who reads that heading in the note palette is told he is in the chord
+            // editor, which is exactly the kind of "unclear" the owner reported. The two surfaces
+            // still share the SENTENCE SHAPE (`… в {key}`) rather than the value, because what each
+            // one writes is a different kind of thing and the words have to say which.
             Text(
-              l10n.paletteChordsIn(keyNotation(widget.writtenKey)),
+              l10n.melodySpelledIn(keyNotation(widget.writtenKey)),
+              key: const ValueKey<String>('note-palette-spelling'),
               style: const TextStyle(color: sheetMutedColor, fontSize: 12),
             ),
           ],
@@ -855,6 +930,288 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       letterSpacing: 0.6,
     ),
   );
+}
+
+/// A small staff showing where this beat's notes sit and where the armed seven would land.
+///
+/// WHY A PALETTE OF NAMES NEEDS A STAFF. The owner's report of this surface is that the staff and the
+/// structured entry "look bad and unclear", and the half of that which is about COMPREHENSION is
+/// this: the pitch grid offers seven names (`C4` … `B4`) and a musician choosing a melody by name has
+/// to remember which line each name is before the choice means anything. A palette that does not
+/// look like music is a palette a musician cannot use fluently, so the sheet now carries a picture of
+/// the thing it writes.
+///
+/// WHAT IT DRAWS, AND WHY IT CANNOT LIE ABOUT THE PITCH. The five lines, the clef, this beat's notes,
+/// their ledger lines, and — faintly, behind them — the seven positions the seven grid buttons would
+/// produce at the armed octave and alteration. Every position is computed with `melodyStepOf` and
+/// `melodyStepCenterY`, the two functions the engraved page uses, so the preview and the page cannot
+/// disagree about where a pitch sits.
+///
+/// WHAT IT IS NOT. It is not a rendering of the bar: it has no chords, no barlines and no other
+/// beats, and it is drawn at a fixed staff size rather than at the page's. It answers one question —
+/// which line, which duration — and a larger claim would need the page, which is behind the sheet.
+class _NotePreview extends StatelessWidget {
+  /// Creates the preview for one beat.
+  const _NotePreview({
+    required this.clef,
+    required this.notes,
+    required this.selectedStep,
+    required this.armedBase,
+    required this.armedPitches,
+  });
+
+  /// The staff's clef NAME, `treble` or `bass`, used to place pitches and never drawn.
+  final String clef;
+
+  /// The notes this beat already carries, which are drawn as real notes.
+  final List<BeatNote> notes;
+
+  /// The step of the note an edit acts on, or null when the next tap inserts.
+  final int? selectedStep;
+
+  /// The duration an insertion would be written at, so the preview shows that head as well.
+  final NoteBase armedBase;
+
+  /// The seven pitches the seven grid buttons would write, as the armed octave and alteration.
+  final List<PitchedNote> armedPitches;
+
+  /// The distance between two staff lines in this preview, in logical pixels.
+  ///
+  /// Smaller than the page's thirteen, because this is a picture of ONE COLUMN seen at arm's length
+  /// inside a sheet, and large enough that a notehead is a filled shape rather than a dot: 10 gives a
+  /// notehead 12 logical pixels wide on a 40-pixel staff.
+  static const double _space = 10;
+
+  /// How much room above and below the staff the preview reserves for ledger lines.
+  static const double _ledgerRoom = 22;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey<String>('note-palette-preview'),
+    height: _space * 4 + _ledgerRoom * 2,
+    decoration: BoxDecoration(
+      color: sheetCellColor,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: CustomPaint(
+      painter: _NotePreviewPainter(
+        clef: clef,
+        notes: notes,
+        selectedStep: selectedStep,
+        armedBase: armedBase,
+        armedPitches: armedPitches,
+        space: _space,
+      ),
+    ),
+  );
+}
+
+/// Draws [_NotePreview]: the staff, the clef, the beat's notes and the armed ladder.
+class _NotePreviewPainter extends CustomPainter {
+  /// Creates the painter for one preview.
+  const _NotePreviewPainter({
+    required this.clef,
+    required this.notes,
+    required this.selectedStep,
+    required this.armedBase,
+    required this.armedPitches,
+    required this.space,
+  });
+
+  /// The staff's clef NAME, `treble` or `bass`.
+  ///
+  /// It is NOT DRAWN — see the note in `paint` — and it is needed anyway, because it is what decides
+  /// which line a pitch sits on: the preview and the page place a note with the same function, so a
+  /// preview without the clef would place every note on a staff nobody declared.
+  final String clef;
+
+  /// The beat's notes.
+  final List<BeatNote> notes;
+
+  /// The step of the selected note, for the accent colour.
+  final int? selectedStep;
+
+  /// The armed duration, drawn on the head of a note that does not carry one yet.
+  final NoteBase armedBase;
+
+  /// The seven armed pitches.
+  final List<PitchedNote> armedPitches;
+
+  /// The distance between two staff lines.
+  final double space;
+
+  /// The colour of a note that is not the one an edit acts on.
+  static const Color _ink = Color(0xFFE6EDF3);
+
+  /// The colour of the armed ladder: dim, because it is a map and not the music.
+  static const Color _ladder = Color(0x664E6A88);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double middleLineY = size.height / 2;
+    final double topLineY = middleLineY - space * 2;
+    final Paint line = Paint()
+      ..color = _ink
+      ..strokeWidth = 1.2;
+    for (int index = 0; index < 5; index++) {
+      final double y = topLineY + space * index;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), line);
+    }
+    // NO CLEF HERE EITHER, for the reason the page has none: a letter in the clef's place was read by
+    // the owner as «зачем то буква G в начале», and this preview is the same staff, smaller.
+    // The column the notes stand in: one beat, one x. The left margin is where the clef is.
+    final double columnX = size.width * 0.32;
+
+    // THE ARMED LADDER FIRST, behind the music: the seven positions a grid tap can produce.
+    final Paint ladder = Paint()
+      ..color = _ladder
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    for (final PitchedNote pitch in armedPitches) {
+      final int step = melodyStepOf(
+        pitch.note,
+        octave: pitch.octave,
+        clef: clef,
+      );
+      final double y = melodyStepCenterY(
+        staffMiddleLineY: middleLineY,
+        staffSpace: space,
+        step: step,
+      );
+      if (y < 2 || y > size.height - 2) {
+        continue;
+      }
+      canvas.drawCircle(Offset(columnX, y), space * 0.26, ladder);
+    }
+
+    // THEN THE BEAT'S NOTES, drawn the way the staff draws them: ledger lines under the head, a stem,
+    // and a filled head unless the value is a half or a whole.
+    for (final BeatNote note in notes) {
+      final bool selected = note.step == selectedStep;
+      final Color colour = selected ? sheetAccentColor : _ink;
+      final int step = melodyStepOf(
+        note.pitch.note,
+        octave: note.pitch.octave,
+        clef: clef,
+      );
+      final double y = melodyStepCenterY(
+        staffMiddleLineY: middleLineY,
+        staffSpace: space,
+        step: step,
+      );
+      final Paint stroke = Paint()
+        ..color = colour
+        ..strokeWidth = 1.2;
+      for (final double offset in melodyLedgerLineOffsets(step)) {
+        final double lineY = topLineY - offset * space;
+        canvas.drawLine(
+          Offset(columnX - space * 1.1, lineY),
+          Offset(columnX + space * 1.1, lineY),
+          stroke,
+        );
+      }
+      final double headWidth = space * 1.2;
+      final double headHeight = space * 0.9;
+      final Rect head = Rect.fromCenter(
+        center: Offset(columnX, y),
+        width: headWidth,
+        height: headHeight,
+      );
+      if (note.value.base.denominator <= 2) {
+        canvas.drawOval(
+          head,
+          Paint()
+            ..color = colour
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6,
+        );
+      } else {
+        canvas.drawOval(head, Paint()..color = colour);
+      }
+      // The stem, on the side the note is on: up from the lower half, down from the upper half.
+      final bool stemUp = y > middleLineY;
+      final double stemX = columnX + headWidth / 2 - 1;
+      canvas.drawLine(
+        Offset(stemX, y),
+        Offset(stemX, stemUp ? y - space * 3.2 : y + space * 3.2),
+        stroke,
+      );
+      // A flag on an eighth or shorter, which is the half of "what duration" a filled head cannot
+      // say.
+      if (note.value.base.denominator >= 8) {
+        final double tip = stemUp ? y - space * 3.2 : y + space * 3.2;
+        final double direction = stemUp ? 1 : -1;
+        canvas.drawPath(
+          Path()
+            ..moveTo(stemX, tip)
+            ..quadraticBezierTo(
+              stemX + space * 0.9,
+              tip + space * 0.3 * direction,
+              stemX + space * 1.0,
+              tip + space * 1.1 * direction,
+            ),
+          Paint()
+            ..color = colour
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6,
+        );
+      }
+      final String? sign = melodyAccidentalOf(note.pitch.note);
+      if (sign != null) {
+        _text(
+          canvas,
+          sign,
+          Offset(columnX - headWidth / 2 - space * 1.2, y - space * 0.85),
+          TextStyle(color: colour, fontSize: space * 1.1),
+        );
+      }
+    }
+  }
+
+  /// Draws [text] with its top-left at [at].
+  void _text(Canvas canvas, String text, Offset at, TextStyle style) {
+    final TextPainter painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    painter.paint(canvas, at);
+    painter.dispose();
+  }
+
+  @override
+  bool shouldRepaint(_NotePreviewPainter old) =>
+      old.clef != clef ||
+      old.selectedStep != selectedStep ||
+      old.armedBase != armedBase ||
+      old.space != space ||
+      !_sameNotes(old.notes, notes) ||
+      !_samePitches(old.armedPitches, armedPitches);
+
+  /// Whether two note lists say the same thing, which is what makes a repaint a change of music.
+  static bool _sameNotes(List<BeatNote> a, List<BeatNote> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (int index = 0; index < a.length; index++) {
+      if (a[index] != b[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Whether two pitch lists say the same thing.
+  static bool _samePitches(List<PitchedNote> a, List<PitchedNote> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (int index = 0; index < a.length; index++) {
+      if (a[index] != b[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
 }
 
 /// One chip in a sticky row.

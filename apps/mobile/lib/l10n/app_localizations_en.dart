@@ -159,7 +159,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipEraserOn =>
-      'Erasing: tap a stroke and its whole length goes';
+      'Erasing: touch a stroke or drag across it, and its whole length goes';
 
   @override
   String get tooltipEraserOff => 'Eraser off';
@@ -246,7 +246,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sceneCaptionKeyCompact => 'KEY';
 
   @override
-  String get sceneCaptionKeyFull => 'KEY · tap to transpose';
+  String get sceneCaptionKeyFull => 'KEY';
+
+  @override
+  String get tooltipViewLockOff => 'Fix the scale';
+
+  @override
+  String get tooltipViewLockOn => 'Release the fixed scale';
+
+  @override
+  String get zoomLockedTooltip => 'The scale is fixed';
+
+  @override
+  String get viewLockActiveHint =>
+      'The scale is fixed: nothing can zoom, pan or re-scale the chart. Press the padlock to release it.';
+
+  @override
+  String get keyBadgeTooltip => 'Tap to transpose';
 
   @override
   String get sceneCaptionRepeats => 'REPEATS';
@@ -1273,8 +1289,22 @@ class AppLocalizationsEn extends AppLocalizations {
       'Turn the staff on to write notes. What is already written is kept.';
 
   @override
-  String get melodyTapStaffHint =>
-      'Touch a beat of the staff to write its note.';
+  String get melodyStickyHint =>
+      'The duration and the alteration are kept for the following notes.';
+
+  @override
+  String melodyArmed(Object accidental, Object duration) {
+    return 'Will write $duration · $accidental';
+  }
+
+  @override
+  String get melodyEditingSelected =>
+      'Editing the selected note: a pitch tap changes it.';
+
+  @override
+  String melodySpelledIn(Object key) {
+    return 'Notes are written in $key';
+  }
 
   @override
   String get tooltipChromeHide =>
@@ -1285,5 +1315,5 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get eraserActiveHint =>
-      'Eraser on: touch a stroke and the whole stroke goes';
+      'Eraser on: touch a stroke or drag across it, and the whole stroke goes';
 }

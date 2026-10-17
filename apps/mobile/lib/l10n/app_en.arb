@@ -127,7 +127,7 @@
   "tooltipInkOff": "Selecting: the pen and a finger both select",
   "@tooltipInkOff": { "description": "The pen toggle's tooltip while drawing is off." },
 
-  "tooltipEraserOn": "Erasing: tap a stroke and its whole length goes",
+  "tooltipEraserOn": "Erasing: touch a stroke or drag across it, and its whole length goes",
   "@tooltipEraserOn": { "description": "The eraser toggle's tooltip while erasing is on." },
 
   "tooltipEraserOff": "Eraser off",
@@ -217,7 +217,17 @@
   "sceneCaptionKeyCompact": "KEY",
   "@sceneCaptionKeyCompact": { "description": "The key badge's caption in the scene bar's narrow form." },
 
-  "sceneCaptionKeyFull": "KEY · tap to transpose",
+  "sceneCaptionKeyFull": "KEY",
+  "tooltipViewLockOff": "Fix the scale",
+  "@tooltipViewLockOff": { "description": "Tooltip of the lock button while the scale is free: pressing it fixes the scale so nothing can zoom, pan or re-engrave the chart at a different size." },
+  "tooltipViewLockOn": "Release the fixed scale",
+  "@tooltipViewLockOn": { "description": "Tooltip of the lock button while the scale is fixed: pressing it releases the lock." },
+  "zoomLockedTooltip": "The scale is fixed",
+  "@zoomLockedTooltip": { "description": "Tooltip of the three МАСШТАБ buttons while the scale is locked and they cannot answer." },
+  "viewLockActiveHint": "The scale is fixed: nothing can zoom, pan or re-scale the chart. Press the padlock to release it.",
+  "@viewLockActiveHint": { "description": "One sentence in the selection line while the view lock is on and nothing is selected, saying what the lock covers and how to leave it." },
+  "keyBadgeTooltip": "Tap to transpose",
+  "@keyBadgeTooltip": { "description": "Tooltip of the key badge in the scene bar; the instruction the full form's caption used to carry." },
   "@sceneCaptionKeyFull": { "description": "The key badge's caption in the scene bar's full form, naming the gesture." },
 
   "sceneCaptionRepeats": "REPEATS",
@@ -1191,8 +1201,14 @@
   "formStaffMelodyHidden": "Turn the staff on to write notes. What is already written is kept.",
   "@formStaffMelodyHidden": { "description": "The form sheet's note under the staff button when the staff is off, stating that the notes are not deleted." },
 
-  "melodyTapStaffHint": "Touch a beat of the staff to write its note.",
-  "@melodyTapStaffHint": { "description": "The note palette's hint, telling the musician that a beat of the staff itself opens this surface." },
+  "melodyStickyHint": "The duration and the alteration are kept for the following notes.",
+  "@melodyStickyHint": { "description": "The note palette's hint, stating that the duration and the alteration stay armed for the next notes, which is the thing a musician cannot discover by looking." },
+  "melodyArmed": "Will write {duration} · {accidental}",
+  "melodyEditingSelected": "Editing the selected note: a pitch tap changes it.",
+  "@melodyEditingSelected": { "description": "The note palette's state line while a note is selected. It used to repeat the note's own line, which is already the row above it." },
+  "@melodyArmed": { "description": "The armed value line in the note palette: the duration and the accidental a pitch tap would write. The duration is notation ('1/4 · Quarter') and is not translated." },
+  "melodySpelledIn": "Notes are written in {key}",
+  "@melodySpelledIn": { "description": "The note palette's subtitle naming the WRITTEN key its pitches are spelled in. The key itself is notation and is not translated (D27/A53)." },
 
   "tooltipChromeHide": "Hide the list and the panels: more room for the chart",
   "@tooltipChromeHide": { "description": "The one always-visible button's tooltip while the library rail and the top block are shown." },
@@ -1200,6 +1216,6 @@
   "tooltipChromeShow": "Show the list and the panels",
   "@tooltipChromeShow": { "description": "The same button's tooltip while the rail and the top block are hidden, so the musician can get them back." },
 
-  "eraserActiveHint": "Eraser on: touch a stroke and the whole stroke goes",
+  "eraserActiveHint": "Eraser on: touch a stroke or drag across it, and the whole stroke goes",
   "@eraserActiveHint": { "description": "The selection line's text while the eraser is the active tool, so the mode and what it does are stated in words rather than by a lit icon." }
 }

@@ -60,6 +60,14 @@ class ChartPainter extends CustomPainter {
     this.selectionStrokeColor = const Color(0xFF2F80ED),
   });
 
+  /// The least weight, in SURFACE pixels, that a staff line or a stem may be drawn at.
+  ///
+  /// Slightly above one so that a line survives the antialiasing of the surface instead of fading
+  /// into the paper at 30 per cent of its ink. It is the number behind [_inkFloor], and it is a
+  /// surface measurement rather than a page one: how thick a line is in page units depends on how
+  /// much the page was scaled to fit, and how thick it must be for a musician to see it does not.
+  static const double _minimumInkWeight = 1.4;
+
   /// The model the page was laid out from, read for the signs [PageLayout] does not carry.
   final Song song;
 
@@ -264,13 +272,16 @@ class ChartPainter extends CustomPainter {
 
     // The melody staff is underneath the chord line with its own extent, so it is drawn before the
     // chords: a chord symbol that runs a little low must stay the topmost thing on its own line.
-    _paintMelody(canvas, placed);
-
-    // The beat captions hang below the staff, so they are drawn after it: a ledger line or a tie
-    // that reaches down to the staff's lower edge must not be covered by the number of the beat it
-    // belongs to. This also means a song with no staff draws nothing here — the engine publishes no
-    // marker for one — so a chords-only page is untouched.
+    //
+    // THE BEAT CAPTIONS GO DOWN FIRST AND THE NOTES OVER THEM, which is a hierarchy and not a
+    // drawing order: the caption row hangs directly under the staff, and a melody note written just
+    // below the staff — D4 or C4 under a treble staff, which is where a jazz line lives — occupies
+    // exactly that row. On the rendered page the two overlapped and the DIGIT was drawn on top of
+    // the notehead, so the music was covered by a number naming a column the musician had already
+    // found. The music wins; where a digit is behind a notehead the tick beside it and the same
+    // number on the bar that opens the system still give the grid.
     _paintBeatMarkers(canvas, placed);
+    _paintMelody(canvas, placed);
 
     // An interior barline is shared: the previous bar's closing line already draws it. So the
     // opening barline is drawn when it opens the system, or when it is a SIGN rather than a plain
@@ -309,8 +320,29 @@ class ChartPainter extends CustomPainter {
     }
   }
 
-  // PURPOSE: Draw the melody staff under a bar: its five lines, the barlines that carry them, and
-  //          every glyph the layout placed on them.
+  // PURPOSE: Report the least stroke weight, in PAGE units, that still arrives on the glass as a
+  //          visible line at the current view.
+  // INPUTS: None; reads [page]'s own `drawnScale`, which is the page mode's scale times the
+  //         musician's zoom.
+  // OUTPUTS: A weight in page pixels. A page drawn at scale 1 gets [_minimumInkWeight]; a page the
+  //          FIT mode shrank to 0.7 gets that weight divided by 0.7, so the line lands at the same
+  //          number of SCREEN pixels either way.
+  //
+  //          WHY THIS EXISTS AT ALL, AND IT IS A MEASUREMENT RATHER THAN A TASTE. The engraving's
+  //          own weights are proportional to the staff space (1.56 page pixels for a 13-pixel
+  //          space), which is right for print and wrong for a lit screen: at the owner's fitted
+  //          scale of 0.70 that is 1.09 device pixels, which the rasteriser draws as a grey
+  //          suggestion rather than as a line. The staff's five lines, its barlines, its beat ticks
+  //          and its stems were all specified that way, and the owner's report of the result is
+  //          that the staff "looks bad and unclear". A line that is thinner than a pixel on the
+  //          glass is not a thin line, it is an invisible one.
+  // KEYWORDS: stroke-weight, drawn-scale, legibility, sub-pixel, staff-lines, view-zoom
+  double get _inkFloor => page.drawnScale > 0
+      ? _minimumInkWeight / page.drawnScale
+      : _minimumInkWeight;
+
+  // PURPOSE: Draw the melody staff under a bar: its five lines, the barlines that carry them, the
+  //          clef and every glyph the layout placed on them.
   // INPUTS: canvas — the target. placed — the bar's layout, carrying the staff the engine engraved.
   // OUTPUTS: Nothing. A bar whose system reserved no melody band draws NOTHING AT ALL, which is
   //          what makes a chords-only chart print identically to the way it printed before a melody
@@ -323,17 +355,22 @@ class ChartPainter extends CustomPainter {
   //          distance between two of them, so four equal divisions of the box is the whole of the
   //          staff: there is no second geometry here to drift from the one a notehead's y was
   //          computed against.
+  //
+  //          ITS WEIGHT IS THE VIEW'S, NOT THE PAGE'S — see [_inkFloor]. The five lines, the two
+  //          barlines and every glyph's stem are drawn at whichever is larger, the engraving's own
+  //          proportional weight or one visible pixel of the surface the page is drawn on.
   // KEYWORDS: melody-staff, staff-lines, five-lines, notehead, stem, flag, ledger, accidental,
-  //           tie, draw-order
+  //           tie, draw-order, ink-floor
   void _paintMelody(Canvas canvas, PlacedBar placed) {
     final PlacedMelodyStaff staff = placed.melody;
     if (staff.isEmpty) {
       return;
     }
     final LayoutRect bounds = staff.bounds;
+    final double floor = _inkFloor;
     final Paint stroke = Paint()
       ..color = melodyLineColor
-      ..strokeWidth = 1;
+      ..strokeWidth = floor;
     // The five lines, from the top edge down; four equal divisions of the box the engine published.
     for (int line = 0; line < 5; line++) {
       final double y = bounds.top + bounds.size.height * line / 4;
@@ -341,37 +378,48 @@ class ChartPainter extends CustomPainter {
     }
     // Barlines reach from the staff's top line to its bottom line at both edges of the bar. The
     // chord line already draws its own, which stops at the stave; without these the staff would
-    // read as one unmeasured strip of five lines.
+    // read as one unmeasured strip of five lines — and "where does the bar end" is the one question
+    // a chart must answer without being asked, so this line is the staff's most important one.
+    //
+    // IT IS HEAVIER THAN EVERYTHING ELSE ON THE STAFF, and that is a distinction rather than a
+    // preference: a stem is 3.5 staff spaces long, vertical and the same ink, so drawn at the same
+    // weight a stem in the middle of a bar reads as a barline. Measured on the rendered page: the
+    // note C4 sits a ledger line below the staff and its up-stem runs the whole staff, so the
+    // first thing a musician saw in the bar was two vertical lines and no way to tell which was
+    // which.
+    final Paint barline = Paint()
+      ..color = melodyLineColor
+      ..strokeWidth = floor * 1.6;
     canvas.drawLine(
       Offset(bounds.left, bounds.top),
       Offset(bounds.left, bounds.bottom),
-      stroke,
+      barline,
     );
     canvas.drawLine(
       Offset(bounds.right, bounds.top),
       Offset(bounds.right, bounds.bottom),
-      stroke,
+      barline,
     );
 
-    // The clef, on the bar that opens a system. It is drawn at the staff's own left edge, inside
-    // it, so it reads as belonging to the staff rather than to the margin; the layout places the
-    // notes of that bar far enough right of it for the two not to collide in the ordinary case.
-    final String? clef = staff.clef;
-    if (clef != null) {
-      _paintText(
-        canvas,
-        clef,
-        Offset(bounds.left + 1, bounds.top),
-        metrics.staffTextStyle.copyWith(color: melodyLineColor),
-      );
-    }
+    // THE CLEF IS NOT DRAWN, AND THAT IS THE OWNER'S VERDICT RATHER THAN AN OMISSION. This renderer
+    // ships no music font, so the treble clef was drawn as the LETTER `G` in the margin — and the
+    // owner's report of it is «зачем то буква G в начале. Если это просто убрать - уже будет лучше».
+    // He is right and the reason is not cosmetic: a letter where a musician expects a clef makes the
+    // staff LOOK signed while saying nothing he can read, and a staff with no clef is at least
+    // honest. `PlacedMelodyStaff.clef` still carries which clef the staff was engraved in, because
+    // the pitch placement needs it and because a later renderer with a music font may draw it; what
+    // stopped is the painting.
+    //
+    // The alternative — a vector treble clef — was built and LOOKED at (see `_paintMelodyGlyph`'s
+    // rejected-alternative note in the decision record): two cubic curves read as an ampersand, not
+    // as a clef. A wrong sign in the clef's place is the same lie in a different shape.
 
     // The glyphs are drawn in the order the engine published them, and that order is the contract:
     // a ledger line before the notehead that hides its end, a stem before the notehead that covers
     // it, an accidental and a dot after the head they belong to, and ties last so a tie is never
     // buried under the note it joins.
     for (final MelodyGlyph glyph in staff.glyphs) {
-      _paintMelodyGlyph(canvas, glyph);
+      _paintMelodyGlyph(canvas, glyph, inkFloor: floor);
     }
   }
 
@@ -396,12 +444,20 @@ class ChartPainter extends CustomPainter {
     if (markers.isEmpty) {
       return;
     }
+    final PlacedMelodyStaff staff = placed.melody;
+    final double staffSpace = staff.isEmpty ? 0 : staff.bounds.size.height / 4;
+    // THE CAPTION IS SIZED FROM THE STAFF IT BELONGS TO, at nine tenths of a staff space, and set
+    // bold in the staff's own ink rather than in the caption grey it used to be. It names the beat a
+    // musician is choosing — the defect D28 records as «ориентироваться внутри такта трудно» — and
+    // a number that is two millimetres tall in pale grey is a number nobody reads at a stand.
     final TextStyle style = metrics.staffTextStyle.copyWith(
       color: melodyLineColor,
+      fontSize: staffSpace > 0 ? staffSpace * 0.9 : null,
+      fontWeight: FontWeight.w600,
     );
     final Paint tick = Paint()
       ..color = melodyLineColor
-      ..strokeWidth = 1;
+      ..strokeWidth = _inkFloor;
     for (final PlacedBeatMarker marker in markers) {
       final LayoutRect box = marker.bounds;
       // The tick is a third of the marker's box, centred in its column, and it is what the eye
@@ -427,15 +483,24 @@ class ChartPainter extends CustomPainter {
 
   // PURPOSE: Draw one glyph of a melody staff.
   // INPUTS: canvas — the target. glyph — the element and the box the layout placed it in, with the
-  //         weight, the flag length and the tie's own curve points published alongside it.
+  //         weight, the flag length and the tie's own curve points published alongside it. inkFloor
+  //         — the least weight, in page units, that still arrives on the glass as a drawn line; see
+  //         [_inkFloor] for why a stem is not allowed to be thinner than that.
   // OUTPUTS: Nothing. Every position comes from the box; this method makes no musical decision, so
   //          a notehead cannot be drawn at a height the layout did not reserve.
-  // KEYWORDS: glyph-switch, notehead, stem, flag, ledger, accidental, dot, tie, no-musical-logic
-  void _paintMelodyGlyph(Canvas canvas, MelodyGlyph glyph) {
+  // KEYWORDS: glyph-switch, notehead, stem, flag, ledger, accidental, dot, tie, no-musical-logic,
+  //           ink-floor
+  void _paintMelodyGlyph(
+    Canvas canvas,
+    MelodyGlyph glyph, {
+    required double inkFloor,
+  }) {
     final LayoutRect box = glyph.bounds;
     final Paint stroke = Paint()
       ..color = melodyLineColor
-      ..strokeWidth = glyph.strokeWidth > 0 ? glyph.strokeWidth : 1;
+      ..strokeWidth = glyph.strokeWidth > inkFloor
+          ? glyph.strokeWidth
+          : inkFloor;
     switch (glyph.kind) {
       case MelodyGlyphKind.notehead:
         final Rect ellipse = Rect.fromLTWH(
@@ -448,13 +513,14 @@ class ChartPainter extends CustomPainter {
           canvas.drawOval(ellipse, Paint()..color = melodyLineColor);
         } else {
           // A hollow notehead keeps its own weight rather than the glyph's, because a whole note's
-          // ring drawn at a stem's weight reads as a filled head on a small page.
+          // ring drawn at a stem's weight reads as a filled head on a small page — and the ring is
+          // raised to the ink floor for the same reason every other stroke is.
           canvas.drawOval(
             ellipse,
             Paint()
               ..color = melodyLineColor
               ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.6,
+              ..strokeWidth = inkFloor > 1.6 ? inkFloor : 1.6,
           );
         }
       case MelodyGlyphKind.stem:
@@ -472,11 +538,18 @@ class ChartPainter extends CustomPainter {
           stroke,
         );
       case MelodyGlyphKind.accidental:
+        // The sign is drawn at the same proportional size as the beat caption, from the box the
+        // layout reserved for it: its height is [MelodyMetrics.accidentalHeight] staff spaces, so
+        // the space is recovered from the box rather than guessed from the style.
         _paintText(
           canvas,
           glyph.text ?? '',
           Offset(box.left, box.top),
-          metrics.staffTextStyle.copyWith(color: melodyLineColor),
+          metrics.staffTextStyle.copyWith(
+            color: melodyLineColor,
+            fontSize: box.size.height / 1.7 * 0.85,
+            fontWeight: FontWeight.w600,
+          ),
         );
       case MelodyGlyphKind.dot:
         canvas.drawOval(

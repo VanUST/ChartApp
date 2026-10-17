@@ -75,12 +75,21 @@ class ChartHit {
 //          the same one [hitTestPage] would give for a point on that bar's chord line, and a note and
 //          a chord can share one address without either side converting.
 //
-//          THE TARGET IS THE COLUMN, NOT THE FIVE LINES. A bar's notation band is the five lines
-//          where a note is drawn PLUS the row beneath them where the beats are named, and a musician
-//          who puts a finger on the number of beat 2 means beat 2 rather than the paper beside the
-//          staff. The target is therefore the marker's own column widened to the band's full height,
-//          which is two rectangles the engine already published and no third arithmetic.
-// KEYWORDS: hit-testing, melody-staff, beat-column, second-surface, address-agreement, pure-dart
+//          THE TARGET IS THE COLUMN, NOT THE FIVE LINES — AND THE COLUMN COMES FROM THE BAR'S OWN
+//          CELLS, NOT FROM THE BEAT CAPTIONS. It used to be built out of `bar.beatMarkers`: the band
+//          reached down to the caption row and each beat's column was that beat's marker. When the
+//          owner read the captions as noise and they were switched off, a tap on the staff named
+//          NOTHING and note entry died — found on the tablet, in one tap, after the change that
+//          removed them. A caption is a LABEL and a cell is a COLUMN: the beat's column is what
+//          `bar.cells` already publishes, and it always exists, whether or not anything is printed
+//          under the staff.
+//
+//          THE BAND IS THE FIVE LINES PLUS HALF A STAFF SPACE BELOW THEM, which is the room a
+//          notehead on the ledger line under the staff occupies. It is deliberately NOT the whole
+//          reserved band: below the staff is now blank paper, and a touch on blank paper should not
+//          be told it named a beat.
+// KEYWORDS: hit-testing, melody-staff, beat-column, second-surface, address-agreement, pure-dart,
+//           cells-not-captions
 /// Returns the bar and beat whose staff column is under [pagePoint], or null.
 ChartHit? hitTestMelodyStaff(PageLayout page, LayoutOffset pagePoint) {
   for (final PlacedSystem system in page.systems) {
@@ -88,39 +97,35 @@ ChartHit? hitTestMelodyStaff(PageLayout page, LayoutOffset pagePoint) {
       continue;
     }
     for (final PlacedBar bar in system.bars) {
-      // A bar's notation column is a TALL band, not the five lines alone: the lines are where a note
-      // is drawn and the pages below them are where the beats are named, so a musician who touches
-      // the number of beat 2 is touching beat 2 and not the paper beside the staff. The band is
-      // bounded by the staff's top line and the bottom of the caption row, both published by the
-      // engine — the two rectangles the layout already decided, and no third arithmetic.
-      final PlacedBeatMarker? caption = bar.beatMarkers.isEmpty
-          ? null
-          : bar.beatMarkers.last;
-      if (bar.melody.isEmpty || caption == null) {
+      if (bar.melody.isEmpty) {
         continue;
       }
-      final LayoutRect column = LayoutRect.fromLTWH(
-        bar.melody.bounds.left,
-        bar.melody.bounds.top,
-        bar.melody.bounds.size.width,
-        caption.bounds.bottom - bar.melody.bounds.top,
+      // The band the staff is touchable over: its five lines, and half a space below them where a
+      // note on the ledger line under the staff sits. Nothing below that is staff.
+      final LayoutRect lines = bar.melody.bounds;
+      final double space = lines.size.height / 4;
+      final LayoutRect band = LayoutRect.fromLTWH(
+        lines.left,
+        lines.top,
+        lines.size.width,
+        lines.size.height + space / 2,
       );
-      if (!column.contains(pagePoint)) {
+      if (!band.contains(pagePoint)) {
         continue;
       }
-      for (final PlacedBeatMarker marker in bar.beatMarkers) {
-        // The marker's own column is widened vertically to cover the five lines as well, so a tap on
-        // a notehead and a tap on the number under it name the same beat.
+      for (final PlacedCell cell in bar.cells) {
+        // The cell's own column, widened to the band's height, so a touch on a notehead and a touch
+        // on the paper under it name the same beat.
         final LayoutRect target = LayoutRect.fromLTWH(
-          marker.bounds.left,
-          column.top,
-          marker.bounds.size.width,
-          column.size.height,
+          cell.bounds.left,
+          band.top,
+          cell.bounds.size.width,
+          band.size.height,
         );
         if (target.contains(pagePoint)) {
           return ChartHit(
             bar: bar,
-            cell: PlacedCell(beat: marker.beat, bounds: target),
+            cell: PlacedCell(beat: cell.beat, bounds: target),
           );
         }
       }

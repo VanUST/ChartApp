@@ -25,6 +25,15 @@
 //          rule that preferred the earlier stroke would delete the one hidden underneath — an
 //          outcome the musician could not have predicted from the screen, and the failure this
 //          feature is most likely to have.
+//          AND IT ANSWERS THE SAME QUESTION ALONG A PATH, NOT ONLY AT ONE POINT. An eraser is
+//          dragged the way a rubber is ([InkEraseTrail]), and a drag has to name every stroke the
+//          path passes over, IN THE ORDER THE PATH REACHES THEM AND EACH EXACTLY ONCE. Order because
+//          the deletions are applied one at a time and a musician watching them land expects the
+//          order his hand made; once because a stroke that has been named is gone from the document
+//          and naming it again would be a second deletion of the same stroke — refused by the log,
+//          but still a rule this file should get right rather than rely on a refusal. The trail
+//          lives here, beside the point query and for the same reason: it is geometry that decides
+//          a rule, and both are checkable with `dart test` on a machine with no device and no hand.
 // INPUTS: A [PageLayout], the document's strokes in render order, and a touch in SURFACE logical
 //         pixels — the space a pointer event arrives in, not the page's engraved coordinates. The
 //         page carries the whole bridge between the two, including the musician's own zoom and pan
@@ -70,7 +79,38 @@ class InkEraseAim {
   /// their distance to the touch are treated as the coincidence they are, small enough that a
   /// stroke that is visibly farther away never wins over one the musician is touching.
   static const double tiePx = 0.5;
+
+  /// How far apart the samples of a dragged eraser are taken, in SURFACE logical pixels.
+  ///
+  /// A POINTER'S SAMPLES ARE NOT SPACED EVENLY AND CANNOT BE TRUSTED TO TOUCH WHAT THE HAND
+  /// CROSSED. One `PointerMoveEvent` may carry a sample twenty logical pixels from the last one
+  /// when the platform coalesces, and a stroke narrower than that gap would be stepped over by the
+  /// eraser that visibly passed over it. The path is therefore resampled at this distance between
+  /// consecutive test points, and four is derived rather than tuned: the narrowest band any stroke
+  /// has is [tolerancePx], because the nib's own half-width is multiplied by a page scale that the
+  /// FIT floor keeps at or above 1/3, so the band is at least six logical pixels wide and a step of
+  /// four cannot straddle one. The cost of the smaller step is a test every four pixels instead of
+  /// every event, which on this page is a few hundred tests for a screen-wide drag — measured by
+  /// `tool/probe_ink_erase.dart`, not assumed.
+  static const double pathStepPx = 4.0;
 }
+
+// PURPOSE: Say how far from a stroke's drawn line a touch may land and still be on it, in the
+//          same SURFACE logical pixels the touch arrives in, so the eraser's band is computed in
+//          one place for a tap and for a drag.
+// INPUTS: stroke — the committed stroke, whose own nib is in anchor-local logical pixels. page —
+//         the layout on screen, which carries both the page's scale and the musician's zoom.
+//         aimTolerance — how far outside the drawn band still counts, in surface pixels.
+// OUTPUTS: The band's half-width in surface pixels: the drawn half-nib plus [aimTolerance]. It grows
+//          with the zoom because the nib is drawn through the same multiplier, and it can never be
+//          smaller than the tolerance, because the tolerance is a size on the glass.
+// KEYWORDS: erase-band, half-width, drawn-scale, one-formula, tap-and-drag-agree
+/// Returns the half-width of the band the eraser measures [stroke] against, in surface pixels.
+double inkEraseBandPx(
+  InkStroke stroke,
+  PageLayout page, {
+  double aimTolerance = InkEraseAim.tolerancePx,
+}) => inkStrokeNibWidth(stroke) * page.drawnScale / 2 + aimTolerance;
 
 /// One candidate the eraser found: the stroke, where it sits in the document, and how near it was.
 class InkEraseHit {
@@ -191,61 +231,296 @@ double inkStrokeDistanceToPagePoint({
 //          touch. A stroke on another page, or one whose anchor the page cannot resolve, is skipped
 //          exactly as the painter skips it.
 // KEYWORDS: erase-hit, nearest, topmost-tie-break, render-order, anchor-resolution, null-on-miss
+//
+// THIS IS THE ONE-POINT CASE OF [InkEraseTrail] AND NOTHING ELSE. A tap is a path of one sample, so
+// the rule that answers it is literally the rule that answers a drag, and there is no second copy
+// of the band, the tie-break or the anchor resolution to drift out of step with the drag's.
 /// Returns the stroke a touch at [surfacePoint] would erase, or null when it is on none.
 InkEraseHit? hitTestInkErase({
   required PageLayout page,
   required List<InkStroke> strokes,
   required LayoutOffset surfacePoint,
   double aimTolerance = InkEraseAim.tolerancePx,
-}) {
-  // THE SCALE IS THE DRAWN ONE, NOT THE PAGE MODE'S. `drawnScale` is `page.scale * page.zoom`, so
-  // the band the eraser measures with is the band the renderer actually draws: the nib is stored in
-  // anchor-local pixels and the painter multiplies it by the same factor through `canvas.scale`.
-  // Using the page mode's scale alone would make a zoomed stroke harder to hit than it looks, which
-  // is the silent direction of failure this file's nib rule exists against.
-  final double scale = page.drawnScale;
-  final LayoutOffset pagePoint = page.pagePointOf(surfacePoint);
-  InkEraseHit? best;
-  // The strict minimum is tracked separately from [best] so that the tie branch below can promote a
-  // later stroke without letting the bar for "nearest" creep upwards one near-tie at a time.
-  double nearest = double.infinity;
-  for (int index = 0; index < strokes.length; index++) {
-    final InkStroke stroke = strokes[index];
-    final InkPlacement? placement = resolveEventAnchor(page, stroke.anchor);
-    if (placement == null) {
-      continue;
-    }
-    final double engraved = inkStrokeDistanceToPagePoint(
-      stroke: stroke,
-      origin: placement.origin,
-      pagePoint: pagePoint,
-    );
-    if (!engraved.isFinite) {
-      continue;
-    }
-    final double surface = engraved * scale;
-    final double band = inkStrokeNibWidth(stroke) * scale / 2 + aimTolerance;
-    if (surface > band) {
-      continue;
-    }
-    if (surface < nearest - InkEraseAim.tiePx) {
-      nearest = surface;
-      best = InkEraseHit(
-        index: index,
-        stroke: stroke,
-        origin: placement.origin,
-        surfaceDistance: surface,
+}) => InkEraseTrail(
+  page: page,
+  strokes: strokes,
+  aimTolerance: aimTolerance,
+).hitAt(surfacePoint);
+
+// PURPOSE: Aim the eraser along the path a dragged contact travelled, naming every stroke the path
+//          passed over, in the order it reached them and each exactly once, so the eraser works the
+//          way a rubber does instead of demanding that a touch land on a stroke and not move. The
+//          owner's report of the previous rule is the reason this exists: with it, a contact that
+//          travelled at all erased nothing, so the eraser was usable only by a hand that stopped
+//          dead on a line.
+//
+//          WHY IT IS A STATE OBJECT AND NOT A FUNCTION OVER THE WHOLE PATH. Two reasons, and both
+//          are about the pen. First, the collection has to be visible WHILE the hand is still down:
+//          what the musician needs to see is the rubber taking the ink away, not a result that
+//          appears when he lifts. Second, the work has to be spread over the samples instead of
+//          paid at the end — a full page holds thousands of points, and one call that measured
+//          every stroke against every sample of a screen-wide drag would be a stall on the thread
+//          that reads the pen, which is the failure this project already paid for once (A61's 1 738
+//          ms of probe publication inside a stroke).
+//
+//          HOW THE COST IS KEPT SMALL, AND WHY THE FILTER IS EXACT RATHER THAN A HEURISTIC. Each
+//          stroke's placed polyline is closed into a bounding box ONCE, inflated by that stroke's
+//          own band, and a sample is measured against the polyline only when it falls inside that
+//          box. A point outside the inflated box is farther from the box than the band, and the box
+//          contains the polyline, so it is certainly farther than the band from the stroke: the
+//          filter can only ever skip strokes the exact test would have rejected. What it buys is
+//          that the expensive part — walking a polyline of hundreds of points — runs for the one or
+//          two strokes under the rubber instead of for every stroke on the page.
+// INPUTS: page — the layout on screen, captured when the contact landed and used for the whole
+//         gesture, so a page that is re-engraved mid-drag cannot make the box and the exact test
+//         disagree. strokes — the document's strokes in render order, as the document held them
+//         when the contact landed; a stroke committed after that cannot be crossed by this gesture,
+//         which is the safe direction for a pen that is writing while another hand erases.
+//         aimTolerance and stepPx — the band's tolerance and the resampling distance.
+// OUTPUTS: A trail whose `crossed` list grows by [addSample] and never repeats a stroke. It holds no
+//          document and deletes nothing: the caller applies the deletions through the operation log,
+//          which is the only writer. An empty stroke list gives a trail that can never cross
+//          anything; a stroke whose anchor does not resolve on this page is skipped exactly as the
+//          painter skips it; a stroke with no points is skipped rather than treated as a hit
+//          everywhere.
+// KEYWORDS: erase-trail, drag-erase, order-crossed, no-duplicates, incremental, bounding-box-filter,
+//           exact-pruning, surface-coordinates
+/// The strokes a dragged eraser has passed over, in the order it reached them.
+class InkEraseTrail {
+  /// Prepares the eraser's aim over [strokes] on [page].
+  InkEraseTrail({
+    required PageLayout page,
+    required List<InkStroke> strokes,
+    this.aimTolerance = InkEraseAim.tolerancePx,
+    double stepPx = InkEraseAim.pathStepPx,
+  }) : _page = page,
+       _stepPx = stepPx.isFinite && stepPx > 0
+           ? stepPx
+           : InkEraseAim.pathStepPx {
+    final double drawn = page.drawnScale;
+    for (int index = 0; index < strokes.length; index++) {
+      final InkStroke stroke = strokes[index];
+      final List<InkPoint> points = stroke.points;
+      if (points.isEmpty) {
+        continue;
+      }
+      final InkPlacement? placement = resolveEventAnchor(page, stroke.anchor);
+      if (placement == null) {
+        continue;
+      }
+      double left = double.infinity;
+      double top = double.infinity;
+      double right = double.negativeInfinity;
+      double bottom = double.negativeInfinity;
+      for (final InkPoint point in points) {
+        final double x = (placement.origin.x + point.x) * drawn + page.pan.x;
+        final double y = (placement.origin.y + point.y) * drawn + page.pan.y;
+        if (x < left) {
+          left = x;
+        }
+        if (x > right) {
+          right = x;
+        }
+        if (y < top) {
+          top = y;
+        }
+        if (y > bottom) {
+          bottom = y;
+        }
+      }
+      final double band = inkEraseBandPx(
+        stroke,
+        page,
+        aimTolerance: aimTolerance,
       );
-    } else if (best != null && surface <= nearest + InkEraseAim.tiePx) {
-      best = InkEraseHit(
-        index: index,
-        stroke: stroke,
-        origin: placement.origin,
-        surfaceDistance: surface,
+      _candidates.add(
+        _EraseCandidate(
+          index: index,
+          stroke: stroke,
+          origin: placement.origin,
+          left: left - band,
+          top: top - band,
+          right: right + band,
+          bottom: bottom + band,
+          band: band,
+        ),
       );
     }
   }
-  return best;
+
+  final PageLayout _page;
+
+  /// How far outside a stroke's drawn band a sample still counts, in surface logical pixels.
+  ///
+  /// Public because it is the one number that changes what the eraser can be aimed at, and a
+  /// reader of a trail in a report should be able to say which band produced the crossings it
+  /// holds rather than infer it from the page's scale.
+  final double aimTolerance;
+
+  final double _stepPx;
+
+  /// Every stroke the eraser may cross, with its box and its band already measured.
+  final List<_EraseCandidate> _candidates = <_EraseCandidate>[];
+
+  /// The strokes already crossed, by id, so a stroke the path stays over is named once.
+  final Set<String> _crossedIds = <String>{};
+
+  /// The strokes crossed so far, in the order the path reached them.
+  final List<InkEraseHit> _crossed = <InkEraseHit>[];
+
+  /// Where the path was last sampled, so the next segment can be walked rather than jumped.
+  LayoutOffset? _last;
+
+  /// The strokes crossed so far, in the order the path reached them, oldest first.
+  List<InkEraseHit> get crossed => List<InkEraseHit>.unmodifiable(_crossed);
+
+  /// The ids of the strokes crossed so far, which is what a preview needs to hide them.
+  Set<String> get crossedIds => Set<String>.unmodifiable(_crossedIds);
+
+  // PURPOSE: Add one point of the path and answer which strokes this point newly crossed, which is
+  //          what lets the caller show the ink going away while the hand is still down.
+  // INPUTS: surfacePoint — one sample of the contact, in the page widget's logical pixels.
+  // OUTPUTS: The hits this sample added, in the order they were crossed along the segment from the
+  //          previous sample, which is exactly one per resampled test point and may be empty. The
+  //          area between the previous sample and this one is walked at [InkEraseAim.pathStepPx], so
+  //          a fast drag between two far-apart events still tests the pixels it passed over. A
+  //          repeated identical sample tests the point once more — which is what makes a tap, whose
+  //          down and up are the same point, work — and finds nothing new, because the stroke it
+  //          lands on is already crossed.
+  // KEYWORDS: add-sample, resample, order-crossed, idempotent, tap-is-a-one-point-path
+  /// Adds one sample of the eraser's path, returning the strokes it newly crossed.
+  List<InkEraseHit> addSample(LayoutOffset surfacePoint) {
+    final List<InkEraseHit> found = <InkEraseHit>[];
+    final LayoutOffset? previous = _last;
+    _last = surfacePoint;
+    if (previous == null) {
+      final InkEraseHit? hit = hitAt(surfacePoint);
+      if (hit != null) {
+        found.add(hit);
+      }
+      return found;
+    }
+    final double dx = surfacePoint.x - previous.x;
+    final double dy = surfacePoint.y - previous.y;
+    final double length = math.sqrt(dx * dx + dy * dy);
+    if (length <= 0) {
+      final InkEraseHit? hit = hitAt(surfacePoint);
+      if (hit != null) {
+        found.add(hit);
+      }
+      return found;
+    }
+    final int steps = math.max(1, (length / _stepPx).ceil());
+    for (int step = 1; step <= steps; step++) {
+      final LayoutOffset point = LayoutOffset(
+        previous.x + dx * step / steps,
+        previous.y + dy * step / steps,
+      );
+      final InkEraseHit? hit = hitAt(point);
+      if (hit != null) {
+        found.add(hit);
+      }
+    }
+    return found;
+  }
+
+  // PURPOSE: Answer which stroke a single point of the path is on, by the rule the tap has always
+  //          used, and record it as crossed so no later sample names it again.
+  // INPUTS: surfacePoint — one point, in the page widget's logical pixels.
+  // OUTPUTS: The hit, or null when no uncrossed stroke is within its band of the point. A stroke
+  //          already crossed is not a candidate: the path may stay over it for hundreds of samples
+  //          and must not delete it twice, and a stroke that shares its band with another one is
+  //          reached by a later sample of the path rather than by this one.
+  // KEYWORDS: hit-query, nearest, tie-break, once-only, band-test
+  /// Returns the stroke a single point of the path is on, recording it as crossed.
+  InkEraseHit? hitAt(LayoutOffset surfacePoint) {
+    final double drawn = _page.drawnScale;
+    final LayoutOffset pagePoint = _page.pagePointOf(surfacePoint);
+    InkEraseHit? best;
+    double nearest = double.infinity;
+    for (final _EraseCandidate candidate in _candidates) {
+      if (_crossedIds.contains(candidate.stroke.id)) {
+        continue;
+      }
+      if (!candidate.covers(surfacePoint)) {
+        continue;
+      }
+      final double engraved = inkStrokeDistanceToPagePoint(
+        stroke: candidate.stroke,
+        origin: candidate.origin,
+        pagePoint: pagePoint,
+      );
+      if (!engraved.isFinite) {
+        continue;
+      }
+      final double surface = engraved * drawn;
+      if (surface > candidate.band) {
+        continue;
+      }
+      if (surface < nearest - InkEraseAim.tiePx) {
+        nearest = surface;
+        best = candidate.hitAt(surface);
+      } else if (best != null && surface <= nearest + InkEraseAim.tiePx) {
+        best = candidate.hitAt(surface);
+      }
+    }
+    if (best != null) {
+      _crossedIds.add(best.stroke.id);
+      _crossed.add(best);
+    }
+    return best;
+  }
+}
+
+/// One stroke the eraser may be aimed at, with everything about it that does not depend on the touch.
+///
+/// A value rather than a set of parallel lists because the three facts travel together: the box that
+/// prunes, the band that decides and the origin the exact distance needs are one stroke's, and a
+/// caller that could take one without the others is a caller that can mix two strokes up.
+class _EraseCandidate {
+  const _EraseCandidate({
+    required this.index,
+    required this.stroke,
+    required this.origin,
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+    required this.band,
+  });
+
+  /// Position in the document's stroke list, which is render order and the tie-breaker.
+  final int index;
+
+  /// The stroke itself, which is what a deletion is applied to and what a stroke id names.
+  final InkStroke stroke;
+
+  /// The anchor's top-left corner on the page, in engraved page coordinates.
+  final LayoutOffset origin;
+
+  /// The placed polyline's bounding box in SURFACE pixels, already inflated by [band].
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+
+  /// The half-width of the band this stroke is measured against, in SURFACE pixels.
+  final double band;
+
+  /// Whether [point] is inside the inflated box, i.e. whether the exact test can possibly pass.
+  bool covers(LayoutOffset point) =>
+      point.x >= left &&
+      point.x <= right &&
+      point.y >= top &&
+      point.y <= bottom;
+
+  /// The hit this candidate makes at [surfaceDistance] surface pixels from the touch.
+  InkEraseHit hitAt(double surfaceDistance) => InkEraseHit(
+    index: index,
+    stroke: stroke,
+    origin: origin,
+    surfaceDistance: surfaceDistance,
+  );
 }
 
 /// The distance between two points.

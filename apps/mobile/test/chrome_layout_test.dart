@@ -6,7 +6,7 @@
 //
 //          WHY THE PANE AND NOT THE PAGE. `FIT` engraves from the pane's width AND its verdict
 //          depends on the pane's height (`viewer_screen.dart` says so beside `_buildPages`), so a
-//          chart that fell back to pages before may fit in one page after вЂ” and that is a WIN only
+//          chart that fell back to pages before may fit in one page after — and that is a WIN only
 //          if it is measured, not asserted. The pane is the rectangle the shell gives the document,
 //          which is the `viewer-document-frame` the shell draws.
 //
@@ -15,8 +15,8 @@
 //          would be measuring a surface nobody uses, and the whole question is about HIS screen.
 // INPUTS: None. The chart is synthetic and the layout is deterministic, so this runs on any machine
 //         with no device and no font.
-// OUTPUTS: Pass/fail on the two claims that matter вЂ” the hidden pane is strictly larger on both
-//          axes, and the chart does not lose a system to gain the room вЂ” plus the numbers each claim
+// OUTPUTS: Pass/fail on the two claims that matter — the hidden pane is strictly larger on both
+//          axes, and the chart does not lose a system to gain the room — plus the numbers each claim
 //          rests on, printed so the arithmetic can be read rather than only trusted.
 // KEYWORDS: test, layout, chrome-hidden, pane-measurement, fit-verdict, tablet-landscape,
 //           owner-decision, measurable-claim

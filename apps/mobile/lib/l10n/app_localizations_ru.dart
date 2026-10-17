@@ -170,7 +170,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get tooltipEraserOn =>
-      'Стирание: коснитесь штриха — он исчезнет целиком';
+      'Стирание: коснитесь штриха или проведите по нему — он исчезнет целиком';
 
   @override
   String get tooltipEraserOff => 'Ластик выключен';
@@ -257,7 +257,23 @@ class AppLocalizationsRu extends AppLocalizations {
   String get sceneCaptionKeyCompact => 'ТОН.';
 
   @override
-  String get sceneCaptionKeyFull => 'ТОН. · коснитесь, чтобы транспонировать';
+  String get sceneCaptionKeyFull => 'ТОН.';
+
+  @override
+  String get tooltipViewLockOff => 'Зафиксировать масштаб';
+
+  @override
+  String get tooltipViewLockOn => 'Снять фиксацию масштаба';
+
+  @override
+  String get zoomLockedTooltip => 'Масштаб зафиксирован';
+
+  @override
+  String get viewLockActiveHint =>
+      'Масштаб зафиксирован: ча́рт не приблизить, не сдвинуть и не перегравировать в другом размере. Нажмите замок, чтобы снять.';
+
+  @override
+  String get keyBadgeTooltip => 'Коснитесь, чтобы транспонировать';
 
   @override
   String get sceneCaptionRepeats => 'ПОВТОРЫ';
@@ -1302,8 +1318,22 @@ class AppLocalizationsRu extends AppLocalizations {
       'Включите стан, чтобы записывать ноты. Уже написанное сохранится.';
 
   @override
-  String get melodyTapStaffHint =>
-      'Коснитесь доли на стане, чтобы записать ноту.';
+  String get melodyStickyHint =>
+      'Длительность и альтерация сохраняются для следующих нот.';
+
+  @override
+  String melodyArmed(Object accidental, Object duration) {
+    return 'Будет записано $duration · $accidental';
+  }
+
+  @override
+  String get melodyEditingSelected =>
+      'Правка выбранной ноты: касание высоты изменит её.';
+
+  @override
+  String melodySpelledIn(Object key) {
+    return 'Ноты пишутся в $key';
+  }
 
   @override
   String get tooltipChromeHide =>
@@ -1314,5 +1344,5 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get eraserActiveHint =>
-      'Ластик включён: коснитесь штриха — сотрётся весь штрих целиком';
+      'Ластик включён: коснитесь штриха или проведите по нему — сотрётся весь штрих целиком';
 }

@@ -850,7 +850,10 @@ class LayoutEngine {
           // computes an empty list and its page is untouched. Only the bar that opens a system
           // carries the ordinals: the beats of the bars after it are the same numbers on the same
           // columns, and repeating them would put nine copies of `1234` on one line of music.
-          beatMarkers: melodyBand <= 0
+          // OFF UNLESS THE STYLE ASKS, and the style's own note says why in the owner's words: he read
+          // the digits and ticks as noise and asked for them to go. The engine keeps the arithmetic
+          // because it is what a redesigned aid would use, and publishes nothing while it is off.
+          beatMarkers: melodyBand <= 0 || !style.showBeatCaptions
               ? const <PlacedBeatMarker>[]
               : _placeBeatMarkers(
                   bounds: bounds,

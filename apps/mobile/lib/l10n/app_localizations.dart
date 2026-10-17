@@ -299,7 +299,7 @@ abstract class AppLocalizations {
   /// The eraser toggle's tooltip while erasing is on.
   ///
   /// In en, this message translates to:
-  /// **'Erasing: tap a stroke and its whole length goes'**
+  /// **'Erasing: touch a stroke or drag across it, and its whole length goes'**
   String get tooltipEraserOn;
 
   /// The eraser toggle's tooltip while erasing is off.
@@ -455,8 +455,38 @@ abstract class AppLocalizations {
   /// The key badge's caption in the scene bar's full form, naming the gesture.
   ///
   /// In en, this message translates to:
-  /// **'KEY · tap to transpose'**
+  /// **'KEY'**
   String get sceneCaptionKeyFull;
+
+  /// Tooltip of the lock button while the scale is free: pressing it fixes the scale so nothing can zoom, pan or re-engrave the chart at a different size.
+  ///
+  /// In en, this message translates to:
+  /// **'Fix the scale'**
+  String get tooltipViewLockOff;
+
+  /// Tooltip of the lock button while the scale is fixed: pressing it releases the lock.
+  ///
+  /// In en, this message translates to:
+  /// **'Release the fixed scale'**
+  String get tooltipViewLockOn;
+
+  /// Tooltip of the three МАСШТАБ buttons while the scale is locked and they cannot answer.
+  ///
+  /// In en, this message translates to:
+  /// **'The scale is fixed'**
+  String get zoomLockedTooltip;
+
+  /// One sentence in the selection line while the view lock is on and nothing is selected, saying what the lock covers and how to leave it.
+  ///
+  /// In en, this message translates to:
+  /// **'The scale is fixed: nothing can zoom, pan or re-scale the chart. Press the padlock to release it.'**
+  String get viewLockActiveHint;
+
+  /// Tooltip of the key badge in the scene bar; the instruction the full form's caption used to carry.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to transpose'**
+  String get keyBadgeTooltip;
 
   /// The scene bar's caption over the repeat summary.
   ///
@@ -2100,11 +2130,29 @@ abstract class AppLocalizations {
   /// **'Turn the staff on to write notes. What is already written is kept.'**
   String get formStaffMelodyHidden;
 
-  /// The note palette's hint, telling the musician that a beat of the staff itself opens this surface.
+  /// The note palette's hint, stating that the duration and the alteration stay armed for the next notes, which is the thing a musician cannot discover by looking.
   ///
   /// In en, this message translates to:
-  /// **'Touch a beat of the staff to write its note.'**
-  String get melodyTapStaffHint;
+  /// **'The duration and the alteration are kept for the following notes.'**
+  String get melodyStickyHint;
+
+  /// The armed value line in the note palette: the duration and the accidental a pitch tap would write. The duration is notation ('1/4 · Quarter') and is not translated.
+  ///
+  /// In en, this message translates to:
+  /// **'Will write {duration} · {accidental}'**
+  String melodyArmed(Object accidental, Object duration);
+
+  /// The note palette's state line while a note is selected. It used to repeat the note's own line, which is already the row above it.
+  ///
+  /// In en, this message translates to:
+  /// **'Editing the selected note: a pitch tap changes it.'**
+  String get melodyEditingSelected;
+
+  /// The note palette's subtitle naming the WRITTEN key its pitches are spelled in. The key itself is notation and is not translated (D27/A53).
+  ///
+  /// In en, this message translates to:
+  /// **'Notes are written in {key}'**
+  String melodySpelledIn(Object key);
 
   /// The one always-visible button's tooltip while the library rail and the top block are shown.
   ///
@@ -2121,7 +2169,7 @@ abstract class AppLocalizations {
   /// The selection line's text while the eraser is the active tool, so the mode and what it does are stated in words rather than by a lit icon.
   ///
   /// In en, this message translates to:
-  /// **'Eraser on: touch a stroke and the whole stroke goes'**
+  /// **'Eraser on: touch a stroke or drag across it, and the whole stroke goes'**
   String get eraserActiveHint;
 }
 

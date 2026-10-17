@@ -130,6 +130,8 @@ class SceneBar extends StatelessWidget {
     required this.onEditStyle,
     this.compact = false,
     this.zoom = 1,
+    this.zoomLocked = false,
+    this.onToggleZoomLock,
     this.onZoomIn,
     this.onZoomOut,
     this.onZoomReset,
@@ -175,6 +177,22 @@ class SceneBar extends StatelessWidget {
   /// has pinched the chart that he is looking at it through a zoom rather than at a chart that has
   /// changed. It never falls below 1, because at 1 the page already fills the pane.
   final double zoom;
+
+  /// Whether the scale is FIXED, which greys the two step controls and the reset.
+  ///
+  /// The lock itself is the caller's state; this bar only reports it and stops answering for what it
+  /// covers. A control that is refused without saying so is the defect the whole application avoids —
+  /// the three buttons stay exactly where they are and stop answering, which is what a fixed scale
+  /// means when it is drawn.
+  final bool zoomLocked;
+
+  /// Called to fix the scale or release it, or null on a bar that draws no zoom control.
+  ///
+  /// The lock stands beside the scale it locks, because that is where a musician looks when he wants
+  /// the number to stop moving. It is ALSO drawn in the always-visible bars of the shell: the scene
+  /// bar is what the chrome hides, and a lock whose state is only visible while everything else is
+  /// visible is a lock he cannot tell is on.
+  final VoidCallback? onToggleZoomLock;
 
   /// Called to magnify the chart one step, or null on a bar that draws no zoom control.
   ///
@@ -255,6 +273,8 @@ class SceneBar extends StatelessWidget {
     if (onZoomReset != null)
       _ZoomControl(
         zoom: zoom,
+        locked: zoomLocked,
+        onToggleLock: onToggleZoomLock,
         onZoomIn: onZoomIn,
         onZoomOut: onZoomOut,
         onReset: onZoomReset!,
@@ -303,6 +323,8 @@ class SceneBar extends StatelessWidget {
     if (onZoomReset != null)
       _ZoomControl(
         zoom: zoom,
+        locked: zoomLocked,
+        onToggleLock: onToggleZoomLock,
         onZoomIn: onZoomIn,
         onZoomOut: onZoomOut,
         onReset: onZoomReset!,
@@ -523,39 +545,48 @@ class _KeyBadge extends StatelessWidget {
   );
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(10),
-    child: Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 8 : 12,
-        vertical: compact ? 4 : 6,
-      ),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: sceneBarAccent, width: 2),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            compact ? l10n.sceneCaptionKeyCompact : l10n.sceneCaptionKeyFull,
-            style: TextStyle(
-              color: sceneBarCaptionColor,
-              fontSize: compact ? 9 : 11,
-              letterSpacing: 1.2,
+  Widget build(BuildContext context) => Tooltip(
+    // THE INSTRUCTION THE CAPTION USED TO CARRY, moved into the tooltip. The full form's caption
+    // read «ТОН. · коснитесь, чтобы транспонировать», which is a sentence in the place every other
+    // field has one word — and it was long enough to wrap the whole bar onto a second row at the
+    // owner's tablet width (measured: the scene bar 141 logical pixels tall instead of 56). The
+    // gesture is still named, where a reader who does not know it can find it, and the reading keeps
+    // the one word every other reading has.
+    message: l10n.keyBadgeTooltip,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 8 : 12,
+          vertical: compact ? 4 : 6,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: sceneBarAccent, width: 2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              compact ? l10n.sceneCaptionKeyCompact : l10n.sceneCaptionKeyFull,
+              style: TextStyle(
+                color: sceneBarCaptionColor,
+                fontSize: compact ? 9 : 11,
+                letterSpacing: 1.2,
+              ),
             ),
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              color: sceneBarAccent,
-              fontSize: compact ? 16 : 22,
-              fontWeight: FontWeight.w700,
+            Text(
+              label,
+              style: TextStyle(
+                color: sceneBarAccent,
+                fontSize: compact ? 16 : 22,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );
@@ -621,7 +652,8 @@ class _DeferredFields extends StatelessWidget {
   );
 }
 
-/// The zoom control: one step out, the current magnification (which is also the reset), one step in.
+/// The zoom control: one step out, the current magnification (which is also the reset), one step in,
+/// and the lock that fixes all three.
 ///
 /// WHY IT IS HERE AND NOT IN A MENU. D33 asks for a zoom reachable through the interface beside the
 /// touch gesture, and D34 gives the GESTURE to two fingers — but two fingers are also how the page
@@ -638,11 +670,19 @@ class _ZoomControl extends StatelessWidget {
     required this.onZoomOut,
     required this.onReset,
     required this.l10n,
+    this.locked = false,
+    this.onToggleLock,
     this.compact = false,
   });
 
   /// The magnification in force, at or above 1.
   final double zoom;
+
+  /// Whether the scale is fixed, which greys this control's three buttons.
+  final bool locked;
+
+  /// Called to fix the scale or release it, or null when this bar draws no lock.
+  final VoidCallback? onToggleLock;
 
   /// Called by the `+` half, or null when the bar was built without one.
   final VoidCallback? onZoomIn;
@@ -653,7 +693,7 @@ class _ZoomControl extends StatelessWidget {
   /// Called by the middle, which returns the view to the page mode's own.
   final VoidCallback onReset;
 
-  /// The catalogue, for the caption and the three tooltips.
+  /// The catalogue, for the caption and the tooltips.
   final AppLocalizations l10n;
 
   /// Whether this control is drawn at the narrow form's smaller size.
@@ -687,27 +727,44 @@ class _ZoomControl extends StatelessWidget {
         // after it onto a line of its own.
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
+          // THE THREE BUTTONS STOP ANSWERING, THEY DO NOT DISAPPEAR. A fixed scale is a state in
+          // which these three cannot do anything; a control that vanished would move the lock, which
+          // stands next to them, and a musician's hand would learn a bar whose shape changes with a
+          // mode. Greyed and in place, they say "the scale is fixed" without a word.
           _ZoomButton(
             fieldKey: 'scene-bar-zoom-out',
             glyph: '−',
-            tooltip: l10n.zoomOutTooltip,
-            onTap: onZoomOut,
+            tooltip: locked ? l10n.zoomLockedTooltip : l10n.zoomOutTooltip,
+            onTap: locked ? null : onZoomOut,
             compact: compact,
           ),
           _ZoomButton(
             fieldKey: 'scene-bar-zoom-reset',
             glyph: label,
-            tooltip: l10n.zoomResetTooltip,
-            onTap: onReset,
+            tooltip: locked ? l10n.zoomLockedTooltip : l10n.zoomResetTooltip,
+            onTap: locked ? null : onReset,
             compact: compact,
           ),
           _ZoomButton(
             fieldKey: 'scene-bar-zoom-in',
             glyph: '+',
-            tooltip: l10n.zoomInTooltip,
-            onTap: onZoomIn,
+            tooltip: locked ? l10n.zoomLockedTooltip : l10n.zoomInTooltip,
+            onTap: locked ? null : onZoomIn,
             compact: compact,
           ),
+          // THE LOCK ITSELF, beside the number it fixes. Its own colour carries the state: accent for
+          // fixed, the bar's ordinary ink for free.
+          if (onToggleLock != null)
+            _ZoomButton(
+              fieldKey: 'scene-bar-zoom-lock',
+              glyph: locked ? '🔒' : '🔓',
+              tooltip: locked
+                  ? l10n.tooltipViewLockOn
+                  : l10n.tooltipViewLockOff,
+              onTap: onToggleLock,
+              compact: compact,
+              selected: locked,
+            ),
         ],
       ),
     ],
@@ -723,6 +780,7 @@ class _ZoomButton extends StatelessWidget {
     required this.tooltip,
     required this.onTap,
     required this.compact,
+    this.selected = false,
   });
 
   /// The widget key the tests and the driving harness find this button by.
@@ -740,6 +798,12 @@ class _ZoomButton extends StatelessWidget {
   /// Whether this button is drawn at the narrow form's smaller size.
   final bool compact;
 
+  /// Whether this button shows a state rather than only an action.
+  ///
+  /// True for the lock while the view is fixed: the accent fill is the same signal the page-mode
+  /// toggle uses for its active half, so "this is on" looks the same wherever it is drawn.
+  final bool selected;
+
   @override
   Widget build(BuildContext context) => Tooltip(
     message: tooltip,
@@ -753,15 +817,20 @@ class _ZoomButton extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
+          color: selected ? sceneBarAccent : null,
           border: Border.all(
-            color: onTap == null ? sceneBarCaptionColor : sceneBarAccent,
+            color: selected
+                ? sceneBarAccent
+                : (onTap == null ? sceneBarCaptionColor : sceneBarAccent),
             width: 1.5,
           ),
         ),
         child: Text(
           glyph,
           style: TextStyle(
-            color: onTap == null ? sceneBarCaptionColor : sceneBarTextColor,
+            color: selected
+                ? sceneBarColor
+                : (onTap == null ? sceneBarCaptionColor : sceneBarTextColor),
             fontSize: compact ? 13 : 16,
             fontWeight: FontWeight.w700,
           ),

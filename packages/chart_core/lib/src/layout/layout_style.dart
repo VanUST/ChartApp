@@ -49,13 +49,14 @@ class LayoutStyle {
     this.barHeight = 44,
     this.systemSpacing = 12,
     this.sectionLabelHeight = 22,
-    this.melodyStaffSpace = 9,
+    this.melodyStaffSpace = 13,
     this.melodyStaffGap = 8,
-    this.melodyStaffHeight = 36,
-    this.melodyBandHeight = 270,
-    this.beatMarkHeight = 12,
-    this.beatMarkGap = 2,
-    this.beatMarkMinCellWidth = 16,
+    this.melodyStaffHeight = 52,
+    this.melodyBandHeight = 196,
+    this.beatMarkHeight = 15,
+    this.beatMarkGap = 3,
+    this.beatMarkMinCellWidth = 18,
+    this.showBeatCaptions = false,
   });
 
   /// How text is measured.
@@ -110,6 +111,18 @@ class LayoutStyle {
   /// ledger lines it needs — is an exact multiple of this value, measured in it rather than in
   /// pixels. That is what lets the geometry be derived by hand and asserted exactly, and it is why
   /// a change to the staff's size is one number rather than a page of arithmetic.
+  ///
+  /// WHY IT IS 13 AND NOT THE 9 IT WAS. This number is chosen from the READING DISTANCE, which is
+  /// the only distance this application is drawn for: a musician at a stand, an arm's length from a
+  /// tablet lying on it. At the owner's own fitted scale — 0.70, measured on his tablet in A65 — a
+  /// staff space of 9 page pixels is 6.3 logical pixels on the glass, so a notehead is 7.6 pixels
+  /// wide and the five lines are less than two millimetres apart: the staff was being drawn at a
+  /// size where a notehead is smaller than the chord character beside it, and the owner's report is
+  /// that the staff looks bad and unclear. 13 page pixels is 9.1 logical pixels at that scale,
+  /// which puts a notehead at 10.9 and a space at very nearly the 2.1 mm of printed music — the
+  /// size a chart is engraved at, which is the size a reader is trained on. The cost is stated in
+  /// [melodyBandHeight] and paid by the page rather than by the musician's eyes: the staff is 44 per
+  /// cent taller than it was, and the band around it is not.
   final double melodyStaffSpace;
 
   /// The vertical gap between the chord line's bottom edge and the melody staff's own band.
@@ -144,6 +157,16 @@ class LayoutStyle {
   /// all reserves [melodyEmptyBandHeight] instead, which is the same staff with none of the ledger
   /// room this value exists to guarantee; see that getter for the derivation and for why the reserve
   /// can depend on whether a note exists while the STAFF itself cannot (D29).
+  ///
+  /// WHY IT IS 196 AND NOT THE 270 IT WAS, AND WHY THAT IS NOT A PROMISE TAKEN BACK. The guarantee
+  /// this value encodes is `melodyStaffHeight + 2 * 5 * melodyStaffSpace` — every step
+  /// [melodyStepOf] can return has a glyph inside its own band — and the layout CENTRES the staff in
+  /// the band, so each half only has to hold half a staff, the five ledger steps on that side, and
+  /// half a notehead: 26 + 65 + 6 + 1 for the stroke = 98, doubled = 196. The old 270 was not
+  /// derived from anything: it was 2.76 times the guarantee it was supposed to encode, so a chart
+  /// with one note in it reserved 117 page pixels of empty air above the five lines and as much
+  /// again below them, and the owner's report of that page is "too much empty space" and "the staff
+  /// does not belong". The guarantee is untouched; the slack around it is gone.
   final double melodyBandHeight;
 
   /// The vertical room a system gives up for a DECLARED melody staff that carries no note at all.
@@ -153,7 +176,7 @@ class LayoutStyle {
   /// missing one — the five lines, the clef and the beat captions are all still drawn. What D29 did
   /// not say, and what its own numbers make obvious on a chart nobody will ever put a note on, is
   /// that a staff with nothing to write on it must reserve room for notes that do not exist:
-  /// [melodyBandHeight] is 270 pixels of which 216 is the five ledger lines either side of the
+  /// [melodyBandHeight] is 196 pixels of which 130 is the five ledger lines either side of the
   /// staff, and the guarantee it encodes — "every step [melodyStepOf] can return has a glyph inside
   /// its own band" — is vacuously true when there is no glyph. The reserve follows the music; the
   /// staff follows the declaration.
@@ -192,6 +215,11 @@ class LayoutStyle {
   /// [melodyStepOf] can produce has a glyph inside it — five ledger lines either side of the five
   /// lines — and taking room out of it for a caption would move the staff on every chart that
   /// already has one. The marker is drawn in the space the staff's own centring leaves below it.
+  ///
+  /// WHY IT IS 15. The ordinal under the staff is the answer to «ориентироваться внутри такта
+  /// трудно» — the defect the owner named before anything else — so it has to be READ, not merely
+  /// present: the painter draws it at 0.9 of a staff space (11.7 logical pixels at the default
+  /// size), whose line box is about 15. A shorter box would clip the digits the row exists for.
   final double beatMarkHeight;
 
   /// The vertical gap between the melody staff's bottom line and the top of a beat marker's box.
@@ -200,12 +228,35 @@ class LayoutStyle {
   /// of it, and small enough that it stays clear of the next system's heading.
   final double beatMarkGap;
 
+  /// Whether the beat captions under the staff are drawn at all.
+  ///
+  /// FALSE, AND THE REASON IS THE OWNER LOOKING AT HIS OWN SCREEN. The captions — the digits on the
+  /// bar that opens a system and the tick on every column — were added because he had named
+  /// «ориентироваться внутри такта трудно» as a defect before anything else, so the aid was meant to
+  /// help. His report of the result is «какие то непонятные черты и цифры под нотным станом ... если
+  /// это просто убрать - уже будет лучше». The aid failed, and the honest response to a musician
+  /// saying that about his own screen is to take it away rather than to defend why it should have
+  /// worked.
+  ///
+  /// WHAT REMAINS FOR ORIENTATION, said rather than assumed: a touch on a column of the staff opens
+  /// the note palette FOR THAT BEAT and its header names it («Такт 1 · доля 1»), the selected cell is
+  /// highlighted on the page, and the selection line names the bar and beat. Whether that is enough
+  /// is the owner's call and is put to him as a question in the decision record — it is not settled
+  /// here.
+  ///
+  /// The flag rather than a deleted feature, and the reason is that a feature which is OFF can be
+  /// redesigned by whoever shows him a version that reads; a feature deleted in a hurry leaves nothing
+  /// to redesign. It is off by default so that no screen has to opt out of noise.
+  final bool showBeatCaptions;
+
   /// The narrowest cell that can carry a beat's ORDINAL NUMBER instead of one tick.
   ///
   /// A beat is named by its number in a bar (1, 2, 3, 4 …), and that number needs horizontal room
   /// the tick does not. Below this width the engine publishes a tick per beat and no digits, so a
   /// crowded bar shows the beat GRID without printing numbers that would touch each other. The
-  /// value is a product decision, not a measurement: a two-digit ordinal is about 12 logical
-  /// pixels at the caption's size, and this leaves four pixels of air beside it.
+  /// value is a product decision, not a measurement: a single digit is about 7 logical pixels at
+  /// the caption's size and a two-digit ordinal about 13, so 18 leaves five pixels of air beside the
+  /// widest one — and it is set at the same value as the application's `minCellWidth`, so a four-beat
+  /// bar always has room to name its beats.
   final double beatMarkMinCellWidth;
 }

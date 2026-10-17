@@ -297,7 +297,7 @@ void _reportBeats(String label, PageLayout page) {
     if (bar.beatMarkers.isEmpty) {
       stdout.writeln(
         'probe.beats name=$label bar=${bar.barIndex} markers=0 '
-        '(no staff declared, so no beat caption is drawn)',
+        '(the style draws no beat caption under the staff)',
       );
       continue;
     }

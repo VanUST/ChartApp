@@ -826,4 +826,162 @@ void main() {
       'refused=${layer.viewGestureRefusalCount - before} strokes=0 ${viewOf(page)}',
     );
   });
+
+  // PURPOSE: Measure the owner's «кнопка фиксирования масштаба» — that while it is on, NOTHING moves
+  //          the drawn scale: not a pinch, not the three МАСШТАБ controls, not a change of page mode.
+  //          It exists because "the scale is fixed" is a claim, and this project's rule is that a
+  //          claim about a layout carries the number it rests on.
+  // INPUTS: The viewer pumped at the size the first case uses.
+  // OUTPUTS: `view.test.lock` lines on stdout with the drawn scale before and after each attempt, and
+  //          pass/fail on the four claims: the pinch is refused, the buttons are disabled and their
+  //          callbacks change nothing, a page-mode change cannot change the size, and releasing the
+  //          lock does not move the chart.
+  // KEYWORDS: test, view-lock, pinch, disabled, page-mode, drawn-scale, no-jump
+  testWidgets(
+    'the fixed scale resists a pinch, the buttons and a mode change',
+    (WidgetTester tester) async {
+      await pumpViewer(tester, viewChart());
+      // Two steps in, through the interface, so the locked number is not the identity: a lock that is
+      // only tested at ×1.0 cannot tell "fixed" from "the pinch never arrived".
+      for (int step = 0; step < 2; step++) {
+        await tester.tap(
+          find.byKey(const ValueKey<String>('scene-bar-zoom-in')),
+        );
+        await tester.pumpAndSettle();
+      }
+      final PageLayout free = chartPainter(tester).page;
+      stdout.writeln('view.test.lock before_locking ${viewOf(free)}');
+
+      await tester.tap(find.byKey(const ValueKey<String>('viewer-view-lock')));
+      await tester.pumpAndSettle();
+      final PageLayout locked = chartPainter(tester).page;
+      expect(
+        locked.drawnScale,
+        free.drawnScale,
+        reason: 'locking is not a change of magnification in either direction',
+      );
+      expect(locked.pan, free.pan);
+
+      // --- A PINCH IS REFUSED ------------------------------------------------------------------
+      final Offset centre = tester.getRect(pageSurfaceFinder()).center;
+      final TestGesture first = await tester.startGesture(
+        centre - const Offset(60, 0),
+        pointer: 31,
+      );
+      final TestGesture second = await tester.startGesture(
+        centre + const Offset(60, 0),
+        pointer: 32,
+      );
+      await tester.pump();
+      for (int step = 0; step < 4; step++) {
+        await first.moveBy(const Offset(-20, 0));
+        await second.moveBy(const Offset(20, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await first.up();
+      await second.up();
+      await tester.pumpAndSettle();
+      final PageLayout afterPinch = chartPainter(tester).page;
+      expect(
+        afterPinch.drawnScale,
+        closeTo(locked.drawnScale, 1e-9),
+        reason: 'a fixed scale does not pinch',
+      );
+      expect(
+        afterPinch.pan,
+        locked.pan,
+        reason: 'a fixed view does not pan either',
+      );
+      stdout.writeln(
+        'view.test.lock pinch span_from=60 span_to=140 ${viewOf(afterPinch)} '
+        'drawn_scale_from=${locked.drawnScale.toStringAsFixed(4)} '
+        'drawn_scale_to=${afterPinch.drawnScale.toStringAsFixed(4)}',
+      );
+
+      // --- THE THREE BUTTONS ARE DISABLED AND CHANGE NOTHING ------------------------------------
+      for (final String key in <String>[
+        'scene-bar-zoom-in',
+        'scene-bar-zoom-out',
+        'scene-bar-zoom-reset',
+      ]) {
+        final Finder button = find.byKey(ValueKey<String>(key));
+        expect(
+          button,
+          findsOneWidget,
+          reason: '$key stays on the bar when locked',
+        );
+        await tester.tap(button, warnIfMissed: false);
+        await tester.pumpAndSettle();
+      }
+      final PageLayout afterButtons = chartPainter(tester).page;
+      expect(
+        afterButtons.drawnScale,
+        closeTo(locked.drawnScale, 1e-9),
+        reason: 'the scale controls cannot move a fixed scale',
+      );
+      expect(afterButtons.pan, locked.pan);
+      stdout.writeln(
+        'view.test.lock buttons in_out_reset=3 ${viewOf(afterButtons)} '
+        'drawn_scale=${afterButtons.drawnScale.toStringAsFixed(4)} moved=false',
+      );
+
+      // --- A PAGE-MODE CHANGE RE-ENGRAVES BUT CANNOT RE-SCALE -----------------------------------
+      await tester.tap(
+        find.byKey(const ValueKey<String>('scene-bar-mode-pages')),
+      );
+      await tester.pumpAndSettle();
+      final PageLayout afterMode = chartPainter(tester).page;
+      expect(
+        afterMode.drawnScale,
+        closeTo(locked.drawnScale, 1e-6),
+        reason:
+            'a locked scale is held against a re-engraving too, which is the whole point of holding '
+            'the drawn scale rather than the zoom',
+      );
+      stdout.writeln(
+        'view.test.lock mode_change to=pages ${viewOf(afterMode)} '
+        'scale=${afterMode.scale.toStringAsFixed(4)} '
+        'drawn_scale=${afterMode.drawnScale.toStringAsFixed(4)} held=true',
+      );
+
+      // --- AND A PANE CHANGE, WHICH IS THE ONE IT CANNOT REFUSE ---------------------------------
+      //
+      // Hiding the chrome gives the chart a bigger pane, so the page mode re-engraves at a NEW scale.
+      // No control can refuse that — the window is not the application's to hold — which is why the
+      // lock holds the DRAWN scale and re-derives the zoom from whatever the new engraving produced.
+      await tester.tap(
+        find.byKey(const ValueKey<String>('viewer-chrome-toggle')),
+      );
+      await tester.pumpAndSettle();
+      final PageLayout afterPane = chartPainter(tester).page;
+      expect(
+        afterPane.drawnScale,
+        closeTo(locked.drawnScale, 1e-6),
+        reason: 'a bigger pane must not re-scale a fixed chart',
+      );
+      stdout.writeln(
+        'view.test.lock pane_change chrome=hidden ${viewOf(afterPane)} '
+        'scale=${afterPane.scale.toStringAsFixed(4)} '
+        'drawn_scale=${afterPane.drawnScale.toStringAsFixed(4)} held=true',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey<String>('viewer-chrome-toggle')),
+      );
+      await tester.pumpAndSettle();
+
+      // --- RELEASING THE LOCK IS NOT A JUMP -----------------------------------------------------
+      await tester.tap(find.byKey(const ValueKey<String>('viewer-view-lock')));
+      await tester.pumpAndSettle();
+      final PageLayout released = chartPainter(tester).page;
+      expect(
+        released.drawnScale,
+        closeTo(afterMode.drawnScale, 1e-6),
+        reason: 'a lock whose release moves the chart is a control a musician learns not to touch',
+      );
+      stdout.writeln(
+        'view.test.lock released ${viewOf(released)} '
+        'drawn_scale=${released.drawnScale.toStringAsFixed(4)}',
+      );
+    },
+  );
 }

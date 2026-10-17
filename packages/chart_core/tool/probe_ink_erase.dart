@@ -225,4 +225,135 @@ void main() {
     'PROBE anchor_removed=${removed.anchor.toJson()} '
     'anchor_restored=${restoredStroke?.anchor.toJson()}',
   );
+
+  // --- The DRAG: one path through four strokes, in the order it reaches them, once each. ----------
+  // This is the gesture the eraser is now driven by (the owner's "надо попасть сразу, неудобно"), and
+  // the two numbers a report must carry are HOW MANY strokes one gesture crosses and WHAT PUTTING
+  // THEM BACK COSTS. The path is fed the way a pointer feeds one: sample after sample, a pixel
+  // apart, so the trail's own resampling is exercised rather than bypassed.
+  final EditSession dragSession = EditSession(
+    document: DocumentState(song: song),
+    docId: song.id,
+  );
+  final List<InkStroke> four = <InkStroke>[
+    for (int row = 0; row < 4; row++)
+      straightStroke(id: 'drag-${row + 1}', anchor: anchor, y: 10 + row * 10),
+  ];
+  for (int index = 0; index < four.length; index++) {
+    dragSession.apply(
+      InkStrokeAddEvent(
+        docId: dragSession.docId,
+        seq: dragSession.seq,
+        index: index,
+        stroke: four[index],
+      ),
+    );
+  }
+  final DocumentState dragBefore = dragSession.document;
+  stdout.writeln(
+    'PROBE drag_document_before ids='
+    '${dragBefore.strokes.map((InkStroke s) => s.id).toList()} '
+    'undo_depth=${dragSession.undoDepth}',
+  );
+  final InkEraseTrail trail = InkEraseTrail(
+    page: page,
+    strokes: dragSession.document.strokes,
+  );
+  const double pathLocalX = 25;
+  int dragSamples = 0;
+  for (double localY = 2; localY <= 48; localY += 1) {
+    trail.addSample(surfaceOf(pathLocalX, localY));
+    dragSamples++;
+  }
+  stdout.writeln(
+    'PROBE drag_path samples=$dragSamples '
+    'from_local=($pathLocalX,2) to_local=($pathLocalX,48) '
+    'crossed=${trail.crossed.length} '
+    'ids_in_order=${trail.crossed.map((InkEraseHit h) => h.stroke.id).toList()} '
+    'distances=${trail.crossed.map((InkEraseHit h) => h.surfaceDistance.toStringAsFixed(2)).toList()}',
+  );
+  // THE SAME PATH AGAIN MUST CROSS NOTHING: a stroke is named once, and a hand that rubs back and
+  // forth over the same ink must not append a second deletion of it.
+  final InkEraseTrail repeat = InkEraseTrail(
+    page: page,
+    strokes: dragSession.document.strokes,
+  );
+  for (double localY = 2; localY <= 48; localY += 1) {
+    repeat.addSample(surfaceOf(pathLocalX, localY));
+  }
+  final int firstPass = repeat.crossed.length;
+  for (double localY = 48; localY >= 2; localY -= 1) {
+    repeat.addSample(surfaceOf(pathLocalX, localY));
+  }
+  stdout.writeln(
+    'PROBE drag_repeat first_pass=$firstPass after_paths=2 '
+    'crossed=${repeat.crossed.length} '
+    'ids=${repeat.crossed.map((InkEraseHit h) => h.stroke.id).toList()}',
+  );
+  // Apply the deletions in the order crossed, then put them back one undo at a time and count.
+  final int undoBeforeDrag = dragSession.undoDepth;
+  for (final InkEraseHit hit in trail.crossed) {
+    dragSession.eraseStroke(hit.stroke.id);
+  }
+  stdout.writeln(
+    'PROBE drag_applied crossed=${trail.crossed.length} '
+    'strokes_after=${dragSession.document.strokes.length} '
+    'ids_after=${dragSession.document.strokes.map((InkStroke s) => s.id).toList()} '
+    'undo_steps_added=${dragSession.undoDepth - undoBeforeDrag}',
+  );
+  int undos = 0;
+  while (dragSession.canUndo && dragSession.document != dragBefore) {
+    dragSession.undo();
+    undos++;
+    stdout.writeln(
+      'PROBE drag_undo n=$undos ids=${dragSession.document.strokes.map((InkStroke s) => s.id).toList()}',
+    );
+  }
+  stdout.writeln(
+    'PROBE drag_undo_total undos=$undos '
+    'document_equal=${dragSession.document == dragBefore} '
+    'ids_after_undo=${dragSession.document.strokes.map((InkStroke s) => s.id).toList()}',
+  );
+
+  // --- The COST of the trail on a page that is as inked as this application allows. ---------------
+  // The eraser runs on the thread that reads the pen, so the price of a screen-wide drag is a number
+  // this project must be able to read rather than assume. The stroke count and point count come from
+  // A61's measured full page (about five thousand accumulated points); the path is a screen wide.
+  final List<InkStroke> dense = <InkStroke>[
+    for (int row = 0; row < 40; row++)
+      InkStroke(
+        id: 'dense-$row',
+        tool: StrokeTool.pen,
+        color: '#102a43',
+        size: 3,
+        anchor: anchor,
+        points: <InkPoint>[
+          for (int point = 0; point < 120; point++)
+            InkPoint(
+              x: 4 + point * 1.2,
+              y: 4 + row * 2.2 + (point.isEven ? 0 : 0.8),
+              w: 0.5,
+              t: point * 4,
+            ),
+        ],
+      ),
+  ];
+  final Stopwatch stopwatch = Stopwatch()..start();
+  final InkEraseTrail denseTrail = InkEraseTrail(page: page, strokes: dense);
+  final int buildMicros = stopwatch.elapsedMicroseconds;
+  stopwatch.reset();
+  int denseSamples = 0;
+  for (double localX = 2; localX <= 60; localX += 0.5) {
+    denseTrail.addSample(surfaceOf(localX, 45));
+    denseSamples++;
+  }
+  final int walkMicros = stopwatch.elapsedMicroseconds;
+  stdout.writeln(
+    'PROBE cost strokes=${dense.length} '
+    'points=${dense.length * dense[0].points.length} '
+    'path_samples=$denseSamples build_ms=${(buildMicros / 1000).toStringAsFixed(3)} '
+    'walk_ms=${(walkMicros / 1000).toStringAsFixed(3)} '
+    'us_per_sample=${denseSamples == 0 ? '-' : (walkMicros / denseSamples).toStringAsFixed(1)} '
+    'crossed=${denseTrail.crossed.length}',
+  );
 }
