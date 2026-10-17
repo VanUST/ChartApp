@@ -9,9 +9,11 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// A quarter-note middle C.
 NoteMark middleCQuarter = NoteMark(
-  place: cellAt(0),
+  place: placeAt(0),
   pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
   value: NoteValue.plain(NoteBase.quarter),
 );
@@ -23,12 +25,12 @@ final Bar barWithOneNote = Bar(melody: <NoteMark>[middleCQuarter]);
 Bar barWithDrums = Bar(
   percussion: <PercussionMark>[
     PercussionMark(
-      place: cellAt(0),
+      place: placeAt(0),
       instrument: 36,
       value: NoteValue.plain(NoteBase.quarter),
     ),
     PercussionMark(
-      place: cellAt(2),
+      place: placeAt(2),
       instrument: 38,
       value: NoteValue.plain(NoteBase.quarter),
     ),
@@ -289,7 +291,7 @@ void main() {
         melodyFillsBar(TimeSignature.fourFour, <NoteMark>[
           for (int beat = 0; beat < 4; beat++)
             NoteMark(
-              place: cellAt(beat),
+              place: placeAt(beat),
               pitch: middleCQuarter.pitch,
               value: const NoteValue.plain(NoteBase.quarter),
             ),
@@ -302,7 +304,7 @@ void main() {
       final List<NoteMark> three = <NoteMark>[
         for (int beat = 0; beat < 3; beat++)
           NoteMark(
-            place: cellAt(beat),
+            place: placeAt(beat),
             pitch: middleCQuarter.pitch,
             value: const NoteValue.plain(NoteBase.quarter),
           ),
@@ -330,7 +332,7 @@ void main() {
       final List<NoteMark> notes = <NoteMark>[
         for (int beat = 0; beat < 3; beat++)
           NoteMark(
-            place: cellAt(beat),
+            place: placeAt(beat),
             pitch: middleCQuarter.pitch,
             value: halfTriplet,
           ),
@@ -343,7 +345,7 @@ void main() {
     test('a whole note fills 4/4 but overfills 6/8, which is only three quarters long', () {
       final List<NoteMark> whole = <NoteMark>[
         NoteMark(
-          place: cellAt(0),
+          place: placeAt(0),
           pitch: middleCQuarter.pitch,
           value: const NoteValue.plain(NoteBase.whole),
         ),
@@ -364,7 +366,7 @@ void main() {
         melody: <NoteMark>[middleCQuarter],
         percussion: <PercussionMark>[
           PercussionMark(
-            place: cellAt(0),
+            place: placeAt(0),
             instrument: 36,
             value: NoteValue.plain(NoteBase.quarter),
           ),
@@ -382,22 +384,22 @@ void main() {
         final Bar bar = Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(0)),
             ),
           ],
           melody: <NoteMark>[middleCQuarter],
           percussion: <PercussionMark>[
             PercussionMark(
-              place: cellAt(0),
+              place: placeAt(0),
               instrument: 36,
               value: NoteValue.plain(NoteBase.quarter),
             ),
           ],
         );
-        expect(bar.chords.single.pseudoBeat, 0);
-        expect(bar.melody.single.pseudoBeat, 0);
-        expect(bar.percussion.single.pseudoBeat, 0);
+        expect(bar.chords.single.offsetX, fixtureX(0));
+        expect(bar.melody.single.offsetX, fixtureX(0));
+        expect(bar.percussion.single.offsetX, fixtureX(0));
         expect(bar.toString(), contains('1 chord(s)'));
         expect(bar.toString(), contains('1 note(s)'));
         expect(bar.toString(), contains('1 hit(s)'));
@@ -406,7 +408,7 @@ void main() {
 
     test('a tie points forward from the earlier note', () {
       final NoteMark tied = NoteMark(
-        place: cellAt(0),
+        place: placeAt(0),
         pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
         value: NoteValue.plain(NoteBase.quarter),
         tiedToNext: true,

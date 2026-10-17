@@ -201,11 +201,12 @@ class _SectionBuilder {
 //          wide chord symbols is engraved slightly tighter than the old cell-per-measured-width
 //          layout drew it, and the bar itself is narrower because its width follows its content.
 //
-//          WHY THIS IS NOT THE TEMPORARY PSEUDO-GRID, ALTHOUGH THE ARITHMETIC COINCIDES TODAY.
-//          `PseudoGrid` in `src/song/pseudo_grid.dart` is an adapter that the next stage deletes; its
-//          numbers match these only because 8-and-18 is the one cell pitch this project has ever
-//          had. An iReal cell is a fact of the SOURCE FORMAT and stays forever, so it is derived
-//          here from the style rather than borrowed from a file that is going away.
+//          WHY THIS IS A GRID THE IMPORTER OWNS AND THE MODEL DOES NOT. iReal's own notation IS a
+//          grid: a chord sits in cell k of a bar and the format says so. This function is the one
+//          place that grid becomes a coordinate, and it runs ONCE, on the way in — nothing reads it
+//          back, and no part of the model or the engraving inverts it. The adapter that used to
+//          invert this arithmetic for the whole application was deleted with its last caller, so
+//          the numbers now agree with nothing but the source format, which is what they are FOR.
 // KEYWORDS: ireal, beat-to-coordinate, grid-conversion, import, cell-pitch, no-quantisation
 /// Returns the x a chord on [beat] of an imported bar is written at.
 double irealChordX(int beat) =>

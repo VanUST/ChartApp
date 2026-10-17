@@ -319,13 +319,13 @@ void main() async {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.4
       ..color = const Color(0xFFD9E2EC);
-    for (final PlacedCell cell in bar.cells) {
+    for (final LayoutRect cell in <LayoutRect>[bar.bounds]) {
       canvas.drawRect(
         Rect.fromLTWH(
-          cell.bounds.origin.x,
-          cell.bounds.origin.y,
-          cell.bounds.size.width,
-          cell.bounds.size.height,
+          cell.origin.x,
+          cell.origin.y,
+          cell.size.width,
+          cell.size.height,
         ),
         cellFrame,
       );

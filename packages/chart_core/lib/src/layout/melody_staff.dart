@@ -23,8 +23,6 @@ import '../pitch.dart';
 import '../song/bar.dart';
 import '../song/note.dart';
 import '../song/note_value.dart';
-import '../song/pseudo_grid.dart';
-import '../song/time_signature.dart';
 import 'geometry.dart';
 
 /// The proportions every melody glyph is drawn at, in multiples of one staff space.
@@ -564,7 +562,11 @@ PitchedNote melodyPitchOfStep(int step, {String clef = 'treble'}) {
   );
 }
 
-/// The accidental a [WrittenNote] needs, or null for a natural.
+/// The accidental sign a [WrittenNote] is written with, or null for a natural that needs none.
+///
+/// IT ANSWERS "WHAT SIGN STANDS FOR THIS PITCH", not "should this note print one": whether a sign is
+/// drawn at a given place depends on what was already drawn at that staff step earlier in the bar,
+/// and that is decided where the notes are placed (see [_notesOf]).
 ///
 /// A double sharp is written `x` and a double flat `bb`, which is the ordinary ASCII reading of
 /// both. A note altered by more than two semitones cannot be written with a single sign, and it is
@@ -610,26 +612,30 @@ int melodyBeamCount(NoteValue value) {
 //          reads grouping before he reads pitch; an engraver that draws the right notes with the
 //          wrong beams has written a different bar. That is why this is geometry with rules in it
 //          rather than a stroke drawn between two heads.
-// INPUTS: notes — the bar's placed notes, in the order the model stores them. staffSpace — the
-//         distance between two staff lines, the unit every proportion here is a multiple of.
-//         metrics — the beam proportions ([MelodyMetrics.beamThickness] and the three values beside
-//         it). timeSignature — the meter, whose own division into beats is what says how long a beat
-//         is and therefore which notes sound in the same one. staffMiddleLineY and staffSpace also
-//         place the band limit.
+// INPUTS: notes — the bar's placed notes, IN X ORDER (see [_notesOf]). staffSpace — the distance
+//         between two staff lines, the unit every proportion here is a multiple of. metrics — the
+//         beam proportions ([MelodyMetrics.beamThickness] and the three values beside it).
+//         staffMiddleLineY and staffSpace also place the band limit. THE METRE IS NOT AN INPUT:
+//         it used to decide which notes shared a beat, and it no longer decides anything.
 // OUTPUTS: One `_Beams` value: for each note, the stem it must draw when it is beamed (and null when
 //          it is not), and the [MelodyGlyphKind.beam] glyphs themselves. A bar with no note short
 //          enough to beam yields no beam glyph at all, and every note then keeps its own flag.
 //
 //          THE RULES, WHICH ARE NOTATION RATHER THAN TASTE. Each is stated where it is applied:
-//            1. A beam joins notes that SOUND IN ONE BEAT — never two (see [_beamRuns]). In 4/4 that
-//               gives eighth notes in pairs and sixteenths in fours, because that is how a beat
-//               divides; in 6/8 it gives eighths in threes, because the beat there is the dotted
-//               quarter.
-//            2. A beam never crosses a barline. The grouping is built from one bar's notes, and the
-//               horizontal room a beat's run takes is fitted into the bar (see [_notesOf]), so the
-//               rule is structural rather than checked after the fact.
-//            3. A beam does not span a rest: a cell that holds no note cannot be in a run, and a
-//               note that is not short enough to carry a beam ends the run it would have joined.
+//            1. A BEAM JOINS NOTES BY ADJACENCY — a maximal run of neighbouring notes that can be
+//               beamed at all (see [_beamRuns]). There is no beat boundary in the rule, because the
+//               boundary that used to cut runs was the METRE's and the owner removed the metre as a
+//               divider: A 4/4 BAR OF EIGHT EIGHTHS IS NOW ONE RUN OF EIGHT, NOT FOUR PAIRS. That is
+//               the consequence he accepted when he said the size is a label; pairs can come back
+//               through a break the MUSICIAN places, which is the honest way round — not through a
+//               grid the application reimposes on a page it was asked to free.
+//            2. A beam never crosses a barline. The grouping is built from one bar's notes, and a
+//               bar is the span between two recognised barlines (A73), so the rule is structural
+//               rather than checked after the fact.
+//            3. A beam does not span a rest: the model has no rest object, so a silence is either an
+//               absent note or a gap in x, and a gap does NOT cut a run — a beam over a written gap
+//               is what an engraver draws for a run whose middle note is silent. A note that is not
+//               short enough to carry a beam ends the run it would have joined.
 //            4. The number of beams over the group is the number its SHORTEST value needs, drawn
 //               one below the other, and each shorter value's extra beam covers only the notes that
 //               need it — see [_beamEnds] and the level loop in [_addBeamGroup].
@@ -644,15 +650,11 @@ _Beams _beamsOf({
   required List<_MelodyNote> notes,
   required double staffSpace,
   required MelodyMetrics metrics,
-  required TimeSignature timeSignature,
   required double staffMiddleLineY,
 }) {
   final List<_NoteStem?> stems = List<_NoteStem?>.filled(notes.length, null);
   final List<MelodyGlyph> glyphs = <MelodyGlyph>[];
-  for (final List<int> run in _beamRuns(
-    notes: notes,
-    timeSignature: timeSignature,
-  )) {
+  for (final List<int> run in _beamRuns(notes: notes)) {
     _addBeamGroup(
       run: run,
       notes: notes,
@@ -668,71 +670,38 @@ _Beams _beamsOf({
 
 // PURPOSE: Cut a bar's notes into the runs a beam may join, which is the whole musical question of
 //          beaming expressed as a partition rather than as a drawing.
-// INPUTS: notes — the bar's placed notes. timeSignature — the bar's meter, which is what says how long
-//         one beat is.
+// INPUTS: notes — the bar's placed notes, in X ORDER. The order is the whole of the input: a run is
+//         a maximal stretch of neighbouring notes that can be beamed, and "neighbouring" is the
+//         order the notes are drawn in, not the order the model happens to store them in.
 // OUTPUTS: The notes of each run, as indices into [notes], in bar order. A run holds at least two
-//          notes; every run is inside ONE BEAT.
+//          notes; a note that carries no beam of its own is a run of nothing and ends the run beside
+//          it.
 //
-//          WHERE A RUN ENDS, AND WHY EACH ENDING IS A MUSICAL FACT RATHER THAN A CONDITION:
-//            * THE BEAT CHANGES. Beams group by beat, not by the bar. In 4/4 the beat is the quarter
-//              and a beat boundary therefore breaks the beam: an eighth-note run of eight notes is
-//              four beams of two, not one beam of eight. In 6/8 the beat is the dotted quarter and
-//              `TimeSignature` gives two cells for the bar, so the same rule writes eighths in
-//              threes without a second rule being added for compound meter.
+//          WHERE A RUN ENDS, AND WHY THE ONE ENDING LEFT IS A MUSICAL FACT RATHER THAN A CONDITION:
 //            * THE NOTE IS TOO LONG TO BEAM. A quarter note carries no beam, so a beam cannot pass
-//              over one: the run that would have spanned it is cut on both sides.
-//            * THE NOTE NO LONGER SOUNDS IN THE BEAT ITS CELL STARTS. A note's place in time is the
-//              sum of the written durations before it, because the model orders a cell's notes by
-//              `step` and gives each one a duration; the model has no rest object, so a silence is
-//              either an empty cell or a cell that ran out of room. A cell that holds more than a
-//              beat's worth of notes — four eighths addressed to one beat — therefore carries notes
-//              that sound in the FOLLOWING beat, and those are beamed among themselves: the rule is
-//              about where a note sounds, so it survives an address that is coarser than the music.
-// KEYWORDS: beam-run, beat-boundary, rest-break, non-beamed-note, cell-duration, partition
-List<List<int>> _beamRuns({
-  required List<_MelodyNote> notes,
-  required TimeSignature timeSignature,
-}) {
-  final Map<int, List<int>> byBeat = <int, List<int>>{};
-  for (int index = 0; index < notes.length; index++) {
-    (byBeat[notes[index].note.pseudoBeat] ??= <int>[]).add(index);
-  }
-  final List<int> beats = byBeat.keys.toList()..sort();
-  // THE LENGTH OF ONE BEAT IS THE METER'S FACT AND NOT THE LAYOUT'S. A 4/4 bar is four quarters, so a
-  // beat is a quarter, and a 6/8 bar is two dotted quarters, so a beat is three eighths — which is
-  // what `TimeSignature.cellsPerBar` already says, and reading it from there is what keeps the beam
-  // grouping of a compound meter correct without a second rule for it.
-  final double beatLength =
-      timeSignature.numerator /
-      (timeSignature.denominator * timeSignature.cellsPerBar);
+//              over one: the run that would have spanned it is cut on both sides. This is the rule
+//              that keeps a bar of quarter notes unbeamed and a bar of runs beamed.
+//            * AND THAT IS ALL. There is deliberately NO boundary from the metre here: the run a
+//              beam joins is decided by the notes themselves, which is what "beamed by adjacency"
+//              means and what the owner's decision leaves as the honest starting point. A musician
+//              who wants a pair inside a bar of eight eighths places a break; the application does
+//              not decide it for him by counting to three.
+// KEYWORDS: beam-run, adjacency, no-metre, non-beamed-note, partition, one-rule
+List<List<int>> _beamRuns({required List<_MelodyNote> notes}) {
   final List<List<int>> runs = <List<int>>[];
-  for (final int beat in beats) {
-    List<int> run = <int>[];
-    int? runBeat;
-    double elapsed = 0;
-    for (final int index in byBeat[beat]!) {
-      final NoteValue value = notes[index].note.value;
-      // Which beat of the bar this note actually sounds in: the cell it is addressed to, plus the
-      // whole beats the durations before it have already filled.
-      final int sounding = beatLength <= 0
-          ? beat
-          : beat + (elapsed / beatLength).floor();
-      final bool beamable = melodyBeamCount(value) > 0;
-      if (!beamable || (run.isNotEmpty && sounding != runBeat)) {
-        if (run.length > 1) {
-          runs.add(run);
-        }
-        run = <int>[];
-      }
-      if (beamable) {
-        run.add(index);
-        runBeat = sounding;
-      }
-      elapsed += value.wholeNumerator / value.wholeDenominator;
+  List<int> run = <int>[];
+  for (int index = 0; index < notes.length; index++) {
+    if (melodyBeamCount(notes[index].note.value) > 0) {
+      run.add(index);
+      continue;
     }
     if (run.length > 1) {
       runs.add(run);
     }
+    run = <int>[];
+  }
+  if (run.length > 1) {
+    runs.add(run);
   }
   return runs;
 }
@@ -760,17 +729,13 @@ void _addBeamGroup({
   final double stemLength = metrics.stemLength * staffSpace;
   final double thickness = metrics.beamThickness * staffSpace;
   final double gap = metrics.beamGap * staffSpace;
-  // Left to right, because a beam is drawn from its first stem to its last. The model stores a cell's
-  // notes in step order, which is their order in time, but a chart that has been read back from a
-  // file is not guaranteed to be sorted, and a beam whose ends were taken in storage order would be
-  // drawn backwards on such a chart.
+  // Left to right, because a beam is drawn from its first stem to its last. The notes arrive in x
+  // order already (see [_notesOf]), and the sort is kept as the one place that states the
+  // requirement: a beam drawn from the second stem to the first would slope the wrong way and join
+  // the wrong pair. Two notes at the SAME x keep the order they arrived in, which is the order the
+  // model holds them — a stable tie-break rather than a second coordinate.
   final List<int> ordered = run.toList()
-    ..sort((int a, int b) {
-      final int byX = notes[a].centerX.compareTo(notes[b].centerX);
-      return byX != 0
-          ? byX
-          : notes[a].note.pseudoStep.compareTo(notes[b].note.pseudoStep);
-    });
+    ..sort((int a, int b) => notes[a].centerX.compareTo(notes[b].centerX));
   final bool up = _beamStemUp(<_MelodyNote>[
     for (final int i in ordered) notes[i],
   ]);
@@ -984,16 +949,20 @@ bool _beamStemUp(List<_MelodyNote> group) {
 // INPUTS: bar — the bar whose `melody` list to engrave. left and width — the bar's own horizontal
 //         extent, in page coordinates. staffMiddleLineY — the y of the staff's middle line.
 //         staffSpace — the distance between two lines, which is the unit every other number is a
-//         multiple of. clef — the staff's clef name. cellX — the x of each of the bar's cells,
-//         relative to [left], from the layout engine's own cell division; a note on a beat the bar
-//         has no cell for is dropped, matching what happens to a chord at the same address.
-//         metrics — the glyph proportions. includeClef — whether this bar opens a system and should
-//         therefore print the clef; the engine is the only thing that knows, and a clef on every bar
-//         is nine clefs on a line of nine.
+//         multiple of. clef — the staff's clef name. metrics — the glyph proportions.
+//         includeClef — whether this bar opens a system and should therefore print the clef; the
+//         engine is the only thing that knows, and a clef on every bar is nine clefs on a line of
+//         nine.
 // OUTPUTS: The staff, its box spanning [left]..[left] + [width] between the five lines and one
 //          glyph per drawn element, in draw order. A bar with no melody yields no glyphs but still
-//          yields its box, because the five lines run across every bar of a system. A note on a
-//          negative beat, or on a beat past the last cell, is skipped.
+//          yields its box, because the five lines run across every bar of a system.
+//
+//          EVERY NOTEHEAD IS AT ITS OWN PLACE, left plus offsetX. There is no filtering, no clamping to a
+//          column and no fitting of a run into one, because a note that the model holds is a note
+//          the musician wrote and the engraver's job is to draw it where he wrote it. A note beyond
+//          the bar's right edge cannot happen through the layout — a bar is measured to hold the
+//          furthest mark in it (see LayoutEngine._barWidth) — and a note a caller placed beyond it
+//          by hand is drawn there, visibly, rather than moved to a position nobody chose.
 // KEYWORDS: melody-placement, bar-engraving, draw-order, per-cell-address, glyph-list, clef, beam
 /// Returns the melody staff of [bar], with every glyph of its notes.
 PlacedMelodyStaff placeMelodyStaff({
@@ -1003,7 +972,6 @@ PlacedMelodyStaff placeMelodyStaff({
   required double staffMiddleLineY,
   required double staffSpace,
   required String clef,
-  required List<double> cellX,
   bool includeClef = false,
   MelodyMetrics metrics = const MelodyMetrics(),
 }) {
@@ -1028,22 +996,14 @@ PlacedMelodyStaff placeMelodyStaff({
   final List<_MelodyNote> notes = _notesOf(
     bar: bar,
     left: left,
-    width: width,
     staffMiddleLineY: staffMiddleLineY,
     staffSpace: staffSpace,
     clef: clef,
-    cellX: cellX,
-    stepOffset: metrics.stepOffset * staffSpace,
-    headHalf: metrics.noteheadWidth * staffSpace / 2,
-    edgeClearance: metrics.strokeWidth * staffSpace,
-    accidentalCharWidth: metrics.accidentalWidth * staffSpace,
-    accidentalGap: metrics.accidentalGap * staffSpace,
   );
   final _Beams beams = _beamsOf(
     notes: notes,
     staffSpace: staffSpace,
     metrics: metrics,
-    timeSignature: bar.timeSignature,
     staffMiddleLineY: staffMiddleLineY,
   );
   for (int index = 0; index < notes.length; index++) {
@@ -1054,10 +1014,10 @@ PlacedMelodyStaff placeMelodyStaff({
       stem: beams.stems[index],
       staffSpace: staffSpace,
       metrics: metrics,
-      // The accidental is drawn on the first note of a beat and on no other, so a chord written as
-      // several notes at one address carries one sign rather than one per note.
-      withAccidental:
-          note.atBeatStart && melodyAccidentalOf(note.pitch) != null,
+      // The accidental is drawn when this note's sign differs from the one already in force at its
+      // staff step earlier in the bar, so a repeated sharp is signed once and a change of sign is
+      // signed again. See [_notesOf] for the rule and for the one case it cannot write.
+      withAccidental: note.drawsAccidental,
     );
   }
   // The beams go down AFTER the stems they join, so a stroke and a stem meet cleanly instead of the
@@ -1127,7 +1087,7 @@ class _MelodyNote {
     required this.step,
     required this.centerX,
     required this.centerY,
-    required this.atBeatStart,
+    required this.drawsAccidental,
   });
 
   /// The written pitch, which is what an accidental is chosen from.
@@ -1148,135 +1108,71 @@ class _MelodyNote {
   /// The y of the notehead's centre, in page coordinates.
   final double centerY;
 
-  /// Whether this is the first note of its beat, which is where the accidental is drawn.
-  final bool atBeatStart;
+  /// Whether this note prints an accidental sign of its own, which depends on what was already
+  /// signed at its staff step earlier in the bar — see [_notesOf].
+  final bool drawsAccidental;
 }
 
 // PURPOSE: Turn a bar's model notes into placed notes, in the order they are drawn, so that a later
 //          function can reason about one note rather than re-reading the model.
-// INPUTS: As [placeMelodyStaff], minus the glyph list. [left] and [width] are the bar's own extent,
-//         and [cellX] holds the cell offsets RELATIVE to [left]. [stepOffset] is the greatest stride
-//         between two notes of one beat, [headHalf] the half-width of a notehead, and
-//         [edgeClearance] the ink one stroke wide that a note keeps clear of the barline — the three
-//         numbers the barline's clearance and the room left for a run are measured in.
-// OUTPUTS: The notes the staff can draw, in the bar's own storage order. A note is dropped when its
-//          beat has no cell: the bar's left padding is not a position in time, and a note drawn
-//          there would be one the musician can neither point at nor play where they wrote it.
+// INPUTS: bar — the bar whose `melody` list to engrave. left — the bar's own left edge, the origin
+//         its notes' offsets are measured from. staffMiddleLineY, staffSpace and clef — where the
+//         five lines sit and what a pitch means on them.
+// OUTPUTS: The bar's notes, SORTED BY X, each with its notehead's centre at `left + place.offsetX`.
 //
-//          AND EVERY NOTE IS KEPT INSIDE ITS OWN BAR, which is the horizontal half of a rule the
-//          beam rules state vertically: no sign of one bar may reach into the next. A beat's notes
-//          march right of their column by [stepOffset] each, and a beat that holds several of them
-//          — a sixteenth run, which is the case this engraving has to get right — can reach past the
-//          barline on the bar's last beat. So the stride SHRINKS when the run would not fit in the
-//          room the bar has left, and a note that still fell outside is pulled back to the bar's
-//          edge. Cramped notes inside their own bar are a blemish of this renderer, which the layout
-//          engine's note says it accepts ("a note wider than its column overhangs it"); notes outside
-//          their bar are a barline a reader cannot trust.
-// KEYWORDS: note-placement, address-filter, cell-column, draw-order, barline-containment,
-//           stride-fitting
+//          THE SORT IS A MUSICAL GUARANTEE AND IT CLOSES A MEASURED DEFECT. The model stores a note
+//          where an edit put it, and an editor that appends puts the second note of a run after the
+//          first — but an earlier build wrote a run typed left to right out in reverse, and the
+//          notes were engraved in the order the list happened to hold. Drawing in x order makes the
+//          order on the page a property of the positions rather than of the insertion history, so
+//          that defect cannot come back: whatever order the model holds, the page reads left to
+//          right.
+//
+//          WHICH NOTE CARRIES AN ACCIDENTAL, AND THE ONE CASE THIS RULE CANNOT WRITE. A note prints
+//          its sign when the sign differs from the one already in force at its staff step earlier
+//          in the same bar; the natural is the state a step starts in, so a plain note needs no
+//          sign. The case it cannot write is a NATURAL WRITTEN AFTER AN ALTERED NOTE AT THE SAME
+//          STEP IN THE SAME BAR: printed music shows a natural sign there, and this renderer has no
+//          natural glyph — a notehead with no sign is drawn, which can be read as still sharp. That
+//          is a limitation of the glyph set rather than of the position, it is named here rather
+//          than discovered on a page, and the fix is a music font rather than another rule.
+// KEYWORDS: note-placement, coordinate, x-order, sort, accidental-state, bar-local, no-cells
 List<_MelodyNote> _notesOf({
   required Bar bar,
   required double left,
-  required double width,
   required double staffMiddleLineY,
   required double staffSpace,
   required String clef,
-  required List<double> cellX,
-  required double stepOffset,
-  required double headHalf,
-  required double edgeClearance,
-  required double accidentalCharWidth,
-  required double accidentalGap,
 }) {
+  final List<NoteMark> ordered = bar.melody.toList()
+    ..sort((NoteMark a, NoteMark b) => a.offsetX.compareTo(b.offsetX));
   final List<_MelodyNote> notes = <_MelodyNote>[];
-  final Set<int> claimedBeats = <int>{};
-  // How many notes each cell holds, counted before anything is placed, because the stride of a beat's
-  // run depends on how many notes the run has.
-  final Map<int, int> notesPerBeat = <int, int>{};
-  for (final NoteMark note in bar.melody) {
-    if (note.pseudoBeat < 0 || note.pseudoBeat >= cellX.length) {
-      continue;
-    }
-    notesPerBeat[note.pseudoBeat] = (notesPerBeat[note.pseudoBeat] ?? 0) + 1;
-  }
-  for (final NoteMark note in bar.melody) {
-    if (note.pseudoBeat < 0 || note.pseudoBeat >= cellX.length) {
-      continue;
-    }
+  // The sign in force at each staff step, as the bar is read left to right. A step is a LINE OR
+  // SPACE, so it is shared by every octave of the same letter; that is the scope a key signature
+  // has and it is why the state is keyed by the step rather than by the pitch.
+  final Map<int, String> inForce = <int, String>{};
+  for (final NoteMark note in ordered) {
     final int step = melodyStepOf(
       note.pitch.note,
       octave: note.pitch.octave,
       clef: clef,
     );
-    // WHICH NOTE OF A BEAT CARRIES THE ACCIDENTAL, decided before the position because the position
-    // depends on it — see below.
-    final bool firstOfBeat = claimedBeats.add(note.pseudoBeat);
-    final String? accidental = melodyAccidentalOf(note.pitch.note);
-    // THE FIRST NOTE OF A BAR IS PUSHED CLEAR OF THE BARLINE BY HALF A NOTEHEAD, so that what lines
-    // up with the cell's column is the note's LEFT EDGE — which is what a chord symbol's box also
-    // does — instead of its centre. Drawn centred on the cell's own x, the notehead of a bar's first
-    // beat straddles the barline (measured: 0.2 page pixels on the staff's side of it at 13 staff
-    // units), and a note that touches the barline reads as a note in the previous bar.
-    final double headroom = headHalf;
-    // AND AN ACCIDENTAL ON THAT FIRST BEAT GETS WHATEVER ROOM THE BAR HAS LEFT, because the bar's own
-    // padding is smaller than the sign: measured at 13 staff units an accidental needs 13 page pixels
-    // and the padding is 8, so the sign would be drawn ACROSS the barline. Only the overflow is
-    // added, so an ordinary single sign moves nothing and the note keeps its column.
-    double accidentalShift = 0;
-    if (firstOfBeat && accidental != null && note.pseudoBeat == 0) {
-      // The room between the barline and the sign's own right edge is the bar's padding: the head's
-      // left edge lies ON the cell's column (the headroom above put it there), and the sign is drawn
-      // one gap further left again. Only the overflow moves the note.
-      final double needed =
-          accidental.length * accidentalCharWidth + accidentalGap;
-      if (needed > cellX[0]) {
-        accidentalShift = needed - cellX[0];
-      }
-    }
-    // WHERE A BEAT'S RUN GOES HORIZONTALLY. [stepOffset] is the spacing a pair of notes gets when the
-    // bar has room for it, and a bar with room keeps exactly the geometry it had before this was
-    // written. When the run would overrun the bar, the notes are drawn NEARER EACH OTHER rather than
-    // past the barline, so the group ends inside its own bar and still starts where its beat is.
-    //
-    // THE COMPROMISE IS NAMED HERE BECAUSE IT IS ONE. A row that is squeezed this way has noteheads
-    // that overlap, which is a blemish no engraver would accept — but the alternative is worse in the
-    // two ways that matter: sliding the group left so it keeps its spacing would put it over the
-    // PREVIOUS beat's notes (two beats interleaved is a wrong rhythm, not a cramped one), and letting
-    // it run on would cross the barline. The room is short because the layout engine reserves a
-    // cell's width for its CHORDS and refuses to let a melody widen one — see `_cellWidths`, whose
-    // note says a note that is wider than its column overhangs it. A bar spaced for its melody would
-    // be the real fix, and it is not this change.
-    final double firstX = cellX[note.pseudoBeat] + headroom + accidentalShift;
-    final int peers = notesPerBeat[note.pseudoBeat] ?? 1;
-    // A NOTE'S INK STOPS ONE STROKE SHORT OF THE BARLINE, and that stroke is the beam's own end: the
-    // outermost stem sits inside its head by half a stroke and the beam reaches half a stroke past
-    // the stem, so exactly one stroke of room is what keeps a beam ENDING at a barline instead of
-    // merging with it. Drawn flush the two marks read as one line, and a barline a reader cannot see
-    // the end of is the same defect as a beam crossing it.
-    final double inside = headHalf + edgeClearance;
-    final double room = width - inside - firstX;
-    final double stride = peers <= 1 || room <= 0
-        ? stepOffset
-        : (room / (peers - 1) < stepOffset ? room / (peers - 1) : stepOffset);
+    final String? sign = melodyAccidentalOf(note.pitch.note);
+    final bool drawsAccidental = (sign ?? '') != (inForce[step] ?? '');
+    inForce[step] = sign ?? '';
     notes.add(
       _MelodyNote(
         pitch: note.pitch.note,
         octave: note.pitch.octave,
         note: note,
         step: step,
-        // Contained in the bar as a hard guarantee, whatever the stride worked out to: the head's own
-        // half-width inside the bar's edge, less the stroke, so not even the beam's ink reaches the
-        // barline.
-        centerX: (left + firstX + note.pseudoStep * stride).clamp(
-          left + headHalf,
-          left + width - inside,
-        ),
+        centerX: left + note.offsetX,
         centerY: melodyStepCenterY(
           staffMiddleLineY: staffMiddleLineY,
           staffSpace: staffSpace,
           step: step,
         ),
-        atBeatStart: firstOfBeat,
+        drawsAccidental: drawsAccidental,
       ),
     );
   }

@@ -15,6 +15,8 @@ import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// A four-bar one-section chart, laid out deterministically by the package's default metrics.
 Song probeChart() => Song(
   id: 'probe-ink-erase',
@@ -32,7 +34,7 @@ Song probeChart() => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
@@ -80,7 +82,7 @@ void main() {
   }
   final PageLayout page = pages.first;
   final PlacedBar bar = page.bars.first;
-  final PlacedCell cell = bar.cells.first;
+  final LayoutRect cell = bar.bounds;
   final EventAnchor anchor = EventAnchor(
     sectionId: bar.sectionId,
     bar: bar.barIndex,
@@ -96,8 +98,8 @@ void main() {
 
   stdout.writeln(
     'PROBE layout page=${page.index} scale=${page.scale} '
-    'anchor=$anchor cell_rect=(${cell.bounds.left},${cell.bounds.top},'
-    '${cell.bounds.size.width},${cell.bounds.size.height})',
+    'anchor=$anchor cell_rect=(${cell.left},${cell.top},'
+    '${cell.size.width},${cell.size.height})',
   );
 
   // --- The near-miss: two parallel strokes six anchor-local pixels apart, aimed between. --------

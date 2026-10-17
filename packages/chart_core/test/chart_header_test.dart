@@ -15,6 +15,8 @@ import 'dart:io';
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// A section of [count] identical bars, so that a bar on page 1 and a bar on page 2 have the same
 /// content and their geometry is comparable number for number.
 Section sectionOf(String id, String label, int count, TimeSignature meter) =>
@@ -27,11 +29,11 @@ Section sectionOf(String id, String label, int count, TimeSignature meter) =>
             timeSignature: meter,
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(root: ChordRoot(0)),
               ),
               ChordMark(
-                place: cellAt(2),
+                place: placeAt(2),
                 chord: Chord(root: ChordRoot(7)),
               ),
             ],
@@ -215,21 +217,11 @@ void main() {
       expect(pages[1].header, isNull);
       expect(first.bounds.left, later.bounds.left);
       expect(first.bounds.size.width, later.bounds.size.width);
-      // Every cell column, relative to the bar's left edge.
-      expect(first.cells, hasLength(later.cells.length));
-      for (int index = 0; index < first.cells.length; index++) {
-        expect(
-          first.cells[index].bounds.left - first.bounds.left,
-          later.cells[index].bounds.left - later.bounds.left,
-          reason: 'cell $index column',
-        );
-        expect(
-          first.cells[index].bounds.size.width,
-          later.cells[index].bounds.size.width,
-          reason: 'cell $index width',
-        );
-      }
-      // And the chord's own box, relative to the bar it sits in.
+      // THE CHORDS, NOT THE CELLS. This case used to walk the bar's cells and compare their column
+      // offsets — `expect(first.cells, hasLength(later.cells.length))` and a loop over
+      // `first.bounds.bounds.left - first.bounds.left` — which compared the graph the metre
+      // drew inside a bar. The metre divides nothing now, and the chord block just below compares
+      // exactly this on the values that remain, so the cell block is gone rather than weakened.
       expect(first.chords, hasLength(2));
       for (int index = 0; index < first.chords.length; index++) {
         expect(

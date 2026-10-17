@@ -32,6 +32,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// Where the probe's PNGs are written when `STAFF_PROBE_OUT` says nothing.
 const String spacingProbeDirectory =
     r'C:\projects\ChartApp-acl-reports\note-reader\spacing';
@@ -158,7 +160,7 @@ Song _fixture() => Song(
               (3, 4, 5), // A4
             ])
               NoteMark(
-                place: cellAt(written.$1),
+                place: placeAt(written.$1),
                 pitch: PitchedNote(
                   note: WrittenNote(NoteLetter.values[written.$3], 0),
                   octave: written.$2,

@@ -304,6 +304,16 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String selectionPastedIntoBar(int bar) {
+    return 'Pasted into bar $bar.';
+  }
+
+  @override
+  String selectionRunWindowAt(int bar, int fromX, int toX) {
+    return 'selected: bar $bar, from $fromX to $toX px';
+  }
+
+  @override
   String selectionPastedAfter(int count, int bar) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -752,6 +762,23 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get metadataFooterFixTempo => 'Fix the tempo before saving.';
+
+  @override
+  String palettePositionBar(int bar) {
+    return 'Bar $bar';
+  }
+
+  @override
+  String get chordOutsideBand =>
+      'A chord goes above the staff: below the bar it is not read.';
+
+  @override
+  String get markLineBreak => 'Line break';
+
+  @override
+  String cuePositionAt(int x) {
+    return 'at $x px';
+  }
 
   @override
   String palettePosition(int bar, int cell) {

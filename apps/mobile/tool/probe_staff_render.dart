@@ -45,6 +45,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// Where the probe's PNGs are written. Outside the repository: a rendered image is evidence for one
 /// inspection, not an artefact to commit. Overridden by `STAFF_PROBE_OUT`.
 const String staffProbeDirectory =
@@ -174,7 +176,7 @@ Song _chart({
                 ? <ChordMark>[
                     for (int cell = 0; cell < 4; cell++)
                       ChordMark(
-                        place: cellAt(cell),
+                        place: placeAt(cell),
                         chord: Chord(
                           root: ChordRoot((index + cell) % 12),
                           quality: cell.isEven
@@ -187,7 +189,7 @@ Song _chart({
             melody: withNotes
                 ? <NoteMark>[
                     NoteMark(
-                      place: cellAt(0),
+                      place: placeAt(0),
                       pitch: PitchedNote(
                         note: WrittenNote(
                           NoteLetter.values[index % 7],
@@ -199,7 +201,7 @@ Song _chart({
                     ),
                     if (index == 7)
                       NoteMark(
-                        place: cellAt(0, 1),
+                        place: placeAt(0, 1),
                         pitch: PitchedNote(
                           note: WrittenNote(NoteLetter.g, 0),
                           octave: 4,
@@ -279,90 +281,40 @@ void _reportStaff(String label, PageLayout page, LayoutStyle style) {
   );
 }
 
-// PURPOSE: Describe one beat marker as the probe prints it: its beat, its label and the edges of its
-//          column. A function rather than an interpolated literal because the lint forbids two string
-//          literals adjacent in a list, and the description is longer than one.
-// INPUTS: marker — the placed marker.
-// OUTPUTS: A single string, never empty.
-// KEYWORDS: logging, marker, formatting
-String _markerText(PlacedBeatMarker marker) {
-  final String left = marker.bounds.left.toStringAsFixed(0);
-  final String right = marker.bounds.right.toStringAsFixed(0);
-  return 'b${marker.beat}:"${marker.label}"($left..$right)';
-}
+// The beat-marker formatter is gone with the markers themselves: the layout publishes none.
 
-// PURPOSE: Report every beat marker of the first bar and of a bar on the same system that does NOT
-//          open it, so the rule "the ordinals are printed once per system and the ticks run under
-//          every bar" is a printed difference rather than a claim.
-// INPUTS: label — the case's name. page — the laid-out page.
-// OUTPUTS: `probe.beats` on stdout, one line per sampled bar: the marker count, each marker's beat,
-//          its label and the left and right edge of its column.
-// KEYWORDS: beat-marker, column, ordinal, once-per-system, measurement
-void _reportBeats(String label, PageLayout page) {
-  final PlacedSystem system = page.systems.first;
-  for (final int index in <int>[0, 1]) {
-    if (index >= system.bars.length) {
-      continue;
-    }
-    final PlacedBar bar = system.bars[index];
-    if (bar.beatMarkers.isEmpty) {
-      stdout.writeln(
-        'probe.beats name=$label bar=${bar.barIndex} markers=0 '
-        '(the style draws no beat caption under the staff)',
-      );
-      continue;
-    }
-    final List<String> described = <String>[
-      for (final PlacedBeatMarker marker in bar.beatMarkers)
-        _markerText(marker),
-    ];
-    stdout.writeln(
-      'probe.beats name=$label bar=${bar.barIndex} '
-      'markers=${bar.beatMarkers.length} ${described.join(' ')}',
-    );
-  }
-}
-
-// PURPOSE: Report what a touch on the STAFF names and what a touch on the CHORD LINE names, at the
-//          centre of every column, so the two surfaces are proved to address the same beat and the
-//          chord line is proved not to have moved.
-// INPUTS: label — the case's name. page — the laid-out page.
-// OUTPUTS: `probe.hit` on stdout for the first bar of the first system: for each beat, the staff hit
-//          at the centre of the caption's box and the chord-line hit at the centre of the cell, and
-//          the two negative controls — a point above the staff's top line but inside the reserved
-//          band, and a point below the last marker.
-// KEYWORDS: hit-test, staff-versus-chord-line, negative-control, address-agreement
+// PURPOSE: Report what a touch on the STAFF names and what a touch on the CHORD LINE names, so the
+//          owner's rule is measured rather than assumed: above the staff is a chord, on the staff is a
+//          note, below the bar is neither.
+// INPUTS: label вЂ” the case's name. page вЂ” the laid-out page.
+// OUTPUTS: `probe.hit` on stdout for the first bar of the first system: the chord-line answer for a
+//          point at the bar's centre, the staff answer for a point on the five lines, and the
+//          negative control вЂ” a point above the staff's top line, inside the band the page reserved,
+//          which must name nothing.
+//
+//          THE BEAT MARKERS ARE GONE FROM THE LAYOUT, so the marker report this file used to print
+//          with them (`probe.beats`, one line per column) has no numbers to print: the grid it
+//          described is what this stage removed. What remains is what a musician can point at.
+// KEYWORDS: hit-test, staff-versus-chord-line, negative-control, no-markers
 void _reportHits(String label, PageLayout page) {
   final PlacedSystem system = page.systems.first;
   final PlacedBar bar = system.bars.first;
-  final List<String> pairs = <String>[];
-  for (int beat = 0; beat < bar.cells.length; beat++) {
-    final PlacedCell cell = bar.cells[beat];
-    final ChartHit? onChords = hitTestPage(
-      page,
-      LayoutOffset(
-        cell.bounds.left + cell.bounds.size.width / 2,
-        cell.bounds.top + cell.bounds.size.height / 2,
-      ),
-    );
-    String onStaff = 'none';
-    for (final PlacedBeatMarker marker in bar.beatMarkers) {
-      if (marker.beat != beat) {
-        continue;
-      }
-      final ChartHit? hit = hitTestMelodyStaff(
-        page,
-        LayoutOffset(
-          marker.bounds.left + marker.bounds.size.width / 2,
-          marker.bounds.bottom - marker.bounds.size.height / 3,
-        ),
-      );
-      onStaff = hit == null ? 'null' : '${hit.barIndex}/${hit.beat ?? 'none'}';
-    }
-    pairs.add('beat$beat:staff=$onStaff,chords=${onChords?.beat ?? 'none'}');
-  }
-  // The negative controls. One is above the staff's top line and inside the band the page reserved;
-  // it must name NOTHING, because the band is not the staff. The other is below the last caption.
+  final ChartHit? onChords = hitTestPage(
+    page,
+    LayoutOffset(
+      bar.bounds.left + bar.bounds.size.width / 2,
+      bar.bounds.top + bar.bounds.size.height / 2,
+    ),
+  );
+  final ChartHit? onStaff = bar.melody.isEmpty
+      ? null
+      : hitTestMelodyStaff(
+          page,
+          LayoutOffset(
+            bar.melody.bounds.left + bar.melody.bounds.size.width / 2,
+            bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
+          ),
+        );
   final double lineTop = bar.melody.isEmpty
       ? bar.bounds.bottom
       : bar.melody.bounds.top;
@@ -370,33 +322,13 @@ void _reportHits(String label, PageLayout page) {
     page,
     LayoutOffset(bar.bounds.left + bar.bounds.size.width / 2, lineTop - 12),
   );
-  final ChartHit? belowCaptions = bar.beatMarkers.isEmpty
-      ? null
-      : hitTestMelodyStaff(
-          page,
-          LayoutOffset(
-            bar.bounds.left + bar.bounds.size.width / 2,
-            bar.beatMarkers.first.bounds.bottom + 6,
-          ),
-        );
-  final PlacedBeatMarker? first = bar.beatMarkers.isEmpty
-      ? null
-      : bar.beatMarkers.first;
-  final LayoutOffset? probePoint = first == null
-      ? null
-      : LayoutOffset(
-          first.bounds.left + first.bounds.size.width / 2,
-          first.bounds.bottom - first.bounds.size.height / 3,
-        );
   stdout.writeln(
-    'probe.hit name=$label ${pairs.join(' ')} '
-    'staff_rect=${bar.melody.bounds} '
-    'marker_rect=${first?.bounds} '
-    'probe_point=$probePoint '
-    'staff_contains=${probePoint == null ? 'none' : bar.melody.bounds.contains(probePoint)} '
-    'marker_contains=${probePoint == null || first == null ? 'none' : first.bounds.contains(probePoint)} '
-    'above_staff=${aboveStaff?.beat ?? 'null'} '
-    'below_captions=${belowCaptions?.beat ?? 'null'}',
+    'probe.hit name=$label '
+    'chord_line=${onChords?.barIndex ?? 'none'} '
+    'staff=${onStaff?.barIndex ?? 'none'} '
+    'staff_x=${onStaff?.local.x.toStringAsFixed(1) ?? 'none'} '
+    'above_staff=${aboveStaff?.barIndex ?? 'null'} '
+    'staff_rect=${bar.melody.bounds}',
   );
 }
 
@@ -481,7 +413,7 @@ Song _beamChart() {
     int beat,
     int step,
   ) => NoteMark(
-    place: cellAt(beat, step),
+    place: placeAt(beat, step),
     pitch: PitchedNote(note: WrittenNote(letter, 0), octave: octave),
     value: NoteValue.plain(base),
   );
@@ -600,7 +532,7 @@ Song _beamChart() {
 List<ChordMark> _probeChords() => <ChordMark>[
   for (int cell = 0; cell < 4; cell++)
     ChordMark(
-      place: cellAt(cell),
+      place: placeAt(cell),
       chord: Chord(
         root: ChordRoot(cell * 3),
         quality: cell.isEven
@@ -630,7 +562,7 @@ void _reportNotes(String label, Song song, PageLayout page) {
         clef: placed.melody.clef ?? 'treble',
       );
       described.add(
-        '${note.pitch}:b${note.pseudoBeat}.${note.pseudoStep} step=$step '
+        '${note.pitch}:b${note.offsetX.toStringAsFixed(1)} step=$step '
         'ledger=${melodyLedgerLineOffsets(step).length}',
       );
     }
@@ -775,7 +707,6 @@ void main() {
     );
     _reportStaff('declared-empty', emptyPages.first, style);
     _reportHeader('declared-empty', declaredEmpty, emptyPages.first, style);
-    _reportBeats('declared-empty', emptyPages.first);
     _reportHits('declared-empty', emptyPages.first);
     final List<int> emptyBytes = await _renderToPng(
       emptyPages.first,
@@ -803,7 +734,6 @@ void main() {
     );
     _reportStaff('declared-notes', notePages.first, style);
     _reportHeader('declared-notes', declaredWithNotes, notePages.first, style);
-    _reportBeats('declared-notes', notePages.first);
     _reportHits('declared-notes', notePages.first);
     final List<int> noteBytes = await _renderToPng(
       notePages.first,
@@ -843,7 +773,6 @@ void main() {
     );
     _reportStaff('chords-only', plainPages.first, style);
     _reportHeader('chords-only', chordsOnly, plainPages.first, style);
-    _reportBeats('chords-only', plainPages.first);
     _reportHits('chords-only', plainPages.first);
     final List<int> plainBytes = await _renderToPng(
       plainPages.first,
@@ -1181,7 +1110,7 @@ void main() {
     /// The notes of one bar as the MODEL holds them, in the bar's own storage order.
     String modelOf(Song song, int barIndex) => <String>[
       for (final NoteMark note in song.barsInReadingOrder[barIndex].melody)
-        '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch}',
+        '${note.offsetX.toStringAsFixed(1)}:${note.pitch}',
     ].join(' ');
 
     final EditSession session = EditSession(
@@ -1196,10 +1125,11 @@ void main() {
       NoteLetter.f,
     ];
     for (final NoteLetter letter in typed) {
-      session.insertNote(
+      fixtureInsertNote(
+        session,
         sectionId: 'A',
         barIndex: 0,
-        beat: 0,
+        slot: 0,
         pitch: pitch(letter),
         value: NoteValue.plain(NoteBase.sixteenth),
       );
@@ -1210,18 +1140,20 @@ void main() {
     // noteheads. B4 is step 6, so its stem points DOWN and its tie must arch ABOVE them. A tie on
     // the stem's own side is read as a beam, and one that collides with a stem is read as a mistake.
     for (final int beat in <int>[0, 2]) {
-      session.insertNote(
+      fixtureInsertNote(
+        session,
         sectionId: 'A',
         barIndex: 1,
-        beat: beat,
+        slot: beat,
         pitch: pitch(beat == 0 ? NoteLetter.e : NoteLetter.b),
         value: const NoteValue.plain(NoteBase.quarter),
         tiedToNext: true,
       );
-      session.insertNote(
+      fixtureInsertNote(
+        session,
         sectionId: 'A',
         barIndex: 1,
-        beat: beat + 1,
+        slot: beat + 1,
         pitch: pitch(beat == 0 ? NoteLetter.e : NoteLetter.b),
         value: const NoteValue.plain(NoteBase.quarter),
       );
@@ -1231,10 +1163,11 @@ void main() {
     // --- could not hold. Written through the writer, so the address is the one a musician's -------
     // --- two taps produce.                                                                      ----
     for (int tap = 0; tap < 2; tap++) {
-      session.insertNote(
+      fixtureInsertNote(
+        session,
         sectionId: 'A',
         barIndex: 2,
-        beat: 0,
+        slot: 0,
         pitch: pitch(NoteLetter.b),
         value: NoteValue.plain(NoteBase.sixteenth),
       );
@@ -1242,18 +1175,20 @@ void main() {
 
     // --- AN EIGHTH AND TWO SIXTEENTHS: the case where "each note starts at the sum of the previous
     // durations" and "each note is one stride further right" are DIFFERENT pictures.
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 'A',
       barIndex: 3,
-      beat: 0,
+      slot: 0,
       pitch: pitch(NoteLetter.g),
       value: const NoteValue.plain(NoteBase.eighth),
     );
     for (final NoteLetter letter in <NoteLetter>[NoteLetter.a, NoteLetter.b]) {
-      session.insertNote(
+      fixtureInsertNote(
+        session,
         sectionId: 'A',
         barIndex: 3,
-        beat: 0,
+        slot: 0,
         pitch: pitch(letter),
         value: NoteValue.plain(NoteBase.sixteenth),
       );

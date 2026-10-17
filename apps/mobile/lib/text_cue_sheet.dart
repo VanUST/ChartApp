@@ -66,7 +66,7 @@ const double textCueNudge = 20;
 
 // PURPOSE: Open the text-cue sheet for one selected bar and resolve when the musician is finished.
 // INPUTS: context — where to open the sheet. session — the document being edited. sectionId and
-//         barIndex — the selected bar, in the model's own zero-based numbering. beat — the cell the
+//         barIndex — the selected bar, in the model's own zero-based numbering. offsetX — the place
 //         touch named, or null when it named the bar as a whole; a cue added here inherits that
 //         choice, so a remark about a beat is anchored to the beat and a remark about the bar is
 //         anchored to the bar. onChanged — called after every applied edit so the caller can
@@ -81,7 +81,7 @@ Future<void> showTextCueSheet(
   required EditSession session,
   required String sectionId,
   required int barIndex,
-  int? beat,
+  double? offsetX,
   VoidCallback? onChanged,
 }) async {
   if (session.song.barAt(sectionId, barIndex) == null) {
@@ -99,7 +99,7 @@ Future<void> showTextCueSheet(
       session: session,
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
+      offsetX: offsetX,
       onChanged: onChanged,
     ),
   );
@@ -114,7 +114,7 @@ class TextCueSheet extends StatefulWidget {
     required this.session,
     required this.sectionId,
     required this.barIndex,
-    this.beat,
+    this.offsetX,
     this.onChanged,
   });
 
@@ -128,7 +128,13 @@ class TextCueSheet extends StatefulWidget {
   final int barIndex;
 
   /// The cell the initial selection named, or null when it named the whole bar.
-  final int? beat;
+  /// The place the sheet was opened at along its bar, in bar-local logical pixels, or null when
+  /// the tap named the bar and no point in it.
+  ///
+  /// A new cue is written here. It is a coordinate and not a cell number: the remark lands where
+  /// the musician pointed, and the sheet names that place in pixels because the model has no
+  /// columns to name it by.
+  final double? offsetX;
 
   /// Called after every applied edit.
   final VoidCallback? onChanged;
@@ -303,8 +309,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
     final String? id = widget.session.insertTextCue(
       sectionId: _sectionId,
       barIndex: _barIndex,
-      beat: widget.beat,
-      offsetX: _defaultOffsetX,
+      offsetX: (widget.offsetX ?? 0) + _defaultOffsetX,
       offsetY: _defaultOffsetY,
     );
     if (id == null) {
@@ -319,7 +324,7 @@ class _TextCueSheetState extends State<TextCueSheet> {
     _focusWords();
     debugPrint(
       'viewer.textcue.add id=$id section=$_sectionId bar=$_barIndex '
-      'beat=${widget.beat ?? 'bar'}',
+      'x=${widget.offsetX?.toStringAsFixed(1) ?? 'bar'}',
     );
     _report(true, l10n.cueAddedTypeWords);
   }
@@ -574,22 +579,20 @@ class _TextCueSheetState extends State<TextCueSheet> {
     return -1;
   }
 
-  // PURPOSE: Word the column a cue is anchored to, so the list on the sheet says WHERE on the bar a
+  // PURPOSE: Word the place a cue is written at, so the list on the sheet says WHERE on the bar a
   //          remark sits and not only that it exists.
-  // INPUTS: cue — the cue whose column to name. l10n — the message catalogue, which carries both
-  //         wordings.
-  // OUTPUTS: The catalogue's word for a cue hung on the bar as a whole, otherwise `cell N` with N
-  //          counted as a musician counts.
+  // INPUTS: cue — the cue whose place to name. l10n — the message catalogue.
+  // OUTPUTS: The catalogue's word for a cue written at the bar's own left edge — the place a
+  //          navigation word at the top of a bar goes — otherwise the distance along the bar in
+  //          whole logical pixels.
   //
-  //          A CUE IS A COORDINATE NOW, so "which cell" is read from its own x through the temporary
-  //          pseudo-grid rather than from a stored beat. A cue placed left of the bar's first column
-  //          is one hung on the BAR — that is where a navigation word at the top of a bar goes, and
-  //          the shim reads that x back as a column before the first one. SHIM: when the cue sheet
-  //          names a position instead of a cell, this function goes with the grid it reads.
-  // KEYWORDS: cell-label, one-based, bar-level, total-function, localized, pseudo-grid
+  //          A CUE IS A COORDINATE, so this names the coordinate. It used to name a cell, read back
+  //          through the temporary grid; the number it prints now is the number the model stores,
+  //          which is the only truthful answer once a bar has no columns.
+  // KEYWORDS: place-label, coordinate, bar-level, total-function, localized
   String _cellLabel(TextCue cue, AppLocalizations l10n) {
-    final int beat = cue.place.pseudoBeat;
-    return beat < 0 ? l10n.cueWholeBar : l10n.cueCell(beat + 1);
+    final double x = cue.place.offsetX;
+    return x <= 0 ? l10n.cueWholeBar : l10n.cuePositionAt(x.round());
   }
 
   @override
@@ -705,13 +708,15 @@ class _TextCueSheetState extends State<TextCueSheet> {
   Widget _buildHeader() {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final Section? section = _song.sectionById(_sectionId);
-    final int? beat = widget.beat;
+    final double? x = widget.offsetX;
     final String detail = section == null
         ? l10n.formBarGone
         : l10n.cueDetail(
             _barIndex + 1,
             section.bars.length,
-            beat == null ? l10n.cueWholeBar : l10n.cueCell(beat + 1),
+            x == null || x <= 0
+                ? l10n.cueWholeBar
+                : l10n.cuePositionAt(x.round()),
             l10n.cueCount(_cuesHere.length),
           );
     return Row(

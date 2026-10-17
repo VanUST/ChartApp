@@ -17,6 +17,8 @@ import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 int _checks = 0;
 int _failures = 0;
 
@@ -34,7 +36,7 @@ Song _songWithChords({List<NoteMark> melody = const <NoteMark>[]}) => Song(
         Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellPlace('s1', 0, 0),
+              place: placeIn('s1', 0, 0),
               chord: Chord(
                 root: ChordRoot(9),
                 quality: ChordQuality.dominantSeventh,
@@ -58,7 +60,7 @@ NoteMark _note(
   NoteBase base = NoteBase.quarter,
   bool tied = false,
 }) => NoteMark(
-  place: cellAt(beat, step),
+  place: placeAt(beat, step),
   pitch: PitchedNote(note: WrittenNote(letter, alter), octave: octave),
   value: NoteValue.plain(base),
   tiedToNext: tied,
@@ -66,7 +68,7 @@ NoteMark _note(
 
 /// One note as the probe prints it: its address, its written pitch, its written value and its tie.
 String _render(NoteMark note) =>
-    '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} ${note.value}'
+    '${note.offsetX.toStringAsFixed(1)}:${note.pitch} ${note.value}'
     '${note.tiedToNext ? '~' : ''}';
 
 /// Every note of [document]'s first bar, as a readable string, in the model's own order.
@@ -116,10 +118,11 @@ void _writerBasics() {
     document: DocumentState(song: _songWithChords()),
   );
   final DocumentState before = session.document;
-  final bool inserted = session.insertNote(
+  final bool inserted = fixtureInsertNote(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 0,
+    slot: 0,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
     value: const NoteValue.plain(NoteBase.quarter),
   );
@@ -162,18 +165,20 @@ void _stackedNotesAndInverse() {
   final EditSession session = EditSession(
     document: DocumentState(song: _songWithChords()),
   );
-  session.insertNote(
+  fixtureInsertNote(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 0,
+    slot: 0,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
     value: const NoteValue.plain(NoteBase.quarter),
   );
   final DocumentState oneNote = session.document;
-  session.insertNote(
+  fixtureInsertNote(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 0,
+    slot: 0,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.g, 0), octave: 4),
     value: const NoteValue.plain(NoteBase.half),
   );
@@ -205,10 +210,9 @@ void _stackedNotesAndInverse() {
     'the cell reports both, by step',
     <String>['0.0:E4 quarter', '0.1:G4 half'],
     <String>[
-      for (final NoteMark note in session.existingNotesAt(
+      for (final NoteMark note in session.notesInBar(
         sectionId: 's1',
         barIndex: 0,
-        beat: 0,
       ))
         _render(note),
     ],
@@ -238,11 +242,12 @@ void _stackedNotesAndInverse() {
   // push it back up, which is exactly the case a delta-based inverse gets wrong". That renumbering was
   // the grid keeping itself dense, and the inverse no longer has to push anything: it puts back the
   // whole mark it removed, at the step that mark carried.
-  final bool deleted = session.deleteNoteAt(
+  final bool deleted = fixtureDeleteNote(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 0,
-    step: 0,
+    slot: 0,
+    sub: 0,
   );
   _same('delete returns true', true, deleted);
   _same('the surviving note keeps the step it was written at', <String>[
@@ -262,18 +267,20 @@ void _stackedNotesAndInverse() {
   );
 
   _section('an update keeps the address and carries the previous value whole');
-  final NoteMark? atStepOne = session.existingNoteAt(
+  final NoteMark? atStepOne = fixtureNoteAt(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 0,
-    step: 1,
+    slot: 0,
+    sub: 1,
   );
   _same('the note at 0.1 is G4 half', '0.1:G4 half', _renderNote(atStepOne));
-  final bool updated = session.updateNote(
+  final bool updated = fixtureUpdateNote(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 0,
-    step: 1,
+    slot: 0,
+    sub: 1,
     value: const NoteValue.plain(NoteBase.eighth),
   );
   _same('update returns true', true, updated);
@@ -290,11 +297,12 @@ void _stackedNotesAndInverse() {
   );
 
   _section('a tie is one field of one note, and it is undoable');
-  final bool tied = session.setNoteTie(
+  final bool tied = fixtureTieNote(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 0,
-    step: 1,
+    slot: 0,
+    sub: 1,
     tied: true,
   );
   _same('the tie was set', true, tied);
@@ -305,11 +313,12 @@ void _stackedNotesAndInverse() {
   _same(
     'setting it again is refused',
     false,
-    session.setNoteTie(
+    fixtureTieNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: 0,
-      step: 1,
+      slot: 0,
+      sub: 1,
       tied: true,
     ),
   );
@@ -326,10 +335,11 @@ void _noOpRefusals() {
   final EditSession session = EditSession(
     document: DocumentState(song: _songWithChords()),
   );
-  session.insertNote(
+  fixtureInsertNote(
+    session,
     sectionId: 's1',
     barIndex: 0,
-    beat: 1,
+    slot: 1,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.f, 0), octave: 4),
     value: const NoteValue.plain(NoteBase.quarter),
   );
@@ -338,27 +348,29 @@ void _noOpRefusals() {
   _same(
     'updating a note that is not there is refused',
     false,
-    session.updateNote(
+    fixtureUpdateNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: 3,
-      step: 0,
+      slot: 3,
+      sub: 0,
       value: const NoteValue.plain(NoteBase.half),
     ),
   );
   _same(
     'deleting a note that is not there is refused',
     false,
-    session.deleteNoteAt(sectionId: 's1', barIndex: 0, beat: 3, step: 0),
+    fixtureDeleteNote(session, sectionId: 's1', barIndex: 0, slot: 3, sub: 0),
   );
   _same(
     'updating a note to the value it already has is refused',
     false,
-    session.updateNote(
+    fixtureUpdateNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: 1,
-      step: 0,
+      slot: 1,
+      sub: 0,
       value: const NoteValue.plain(NoteBase.quarter),
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.f, 0), octave: 4),
     ),
@@ -366,21 +378,23 @@ void _noOpRefusals() {
   _same(
     'tying a note that is not tied is not a no-op, but untie is',
     false,
-    session.setNoteTie(
+    fixtureTieNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: 1,
-      step: 0,
+      slot: 1,
+      sub: 0,
       tied: false,
     ),
   );
   _same(
     'a beat past the last cell is refused',
     false,
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: 4,
+      slot: 4,
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
       value: const NoteValue.plain(NoteBase.quarter),
     ),
@@ -388,10 +402,11 @@ void _noOpRefusals() {
   _same(
     'a negative beat is refused',
     false,
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: -1,
+      slot: -1,
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
       value: const NoteValue.plain(NoteBase.quarter),
     ),
@@ -399,10 +414,11 @@ void _noOpRefusals() {
   _same(
     'a beat read from a bar that is not there is refused',
     false,
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 'nope',
       barIndex: 0,
-      beat: 0,
+      slot: 0,
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
       value: const NoteValue.plain(NoteBase.quarter),
     ),
@@ -410,10 +426,11 @@ void _noOpRefusals() {
   _same(
     'a note longer than the bar is refused',
     false,
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: 0,
+      slot: 0,
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
       value: const NoteValue(base: NoteBase.whole, dots: 1),
     ),
@@ -435,10 +452,11 @@ void _roundTripThroughTheContainer() {
   ];
   // Five notes on five beats, each a different written value, plus a tie and a stacked pair.
   for (int beat = 0; beat < bases.length; beat++) {
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 's1',
       barIndex: 0,
-      beat: beat,
+      slot: beat,
       pitch: PitchedNote(
         note: WrittenNote(NoteLetter.values[beat], beat.isEven ? 1 : -1),
         octave: 4,
@@ -450,17 +468,19 @@ void _roundTripThroughTheContainer() {
   // A second bar, so the second note of one beat can be written there too and the bar's own meter
   // is the ordinary 4/4 rather than the widened one the first bar just grew.
   session.duplicateBar(sectionId: 's1', barIndex: 0);
-  session.insertNote(
+  fixtureInsertNote(
+    session,
     sectionId: 's1',
     barIndex: 1,
-    beat: 0,
+    slot: 0,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.b, -1), octave: 3),
     value: const NoteValue.plain(NoteBase.quarter),
   );
-  session.insertNote(
+  fixtureInsertNote(
+    session,
     sectionId: 's1',
     barIndex: 1,
-    beat: 0,
+    slot: 0,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 5),
     value: const NoteValue.plain(NoteBase.sixteenth),
   );
@@ -583,7 +603,7 @@ void _transposition() {
 /// [note] as the probe prints it, with a readable placeholder when it is absent.
 String _renderNote(NoteMark? note) => note == null
     ? 'none'
-    : '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} ${note.value}';
+    : '${note.offsetX.toStringAsFixed(1)}:${note.pitch} ${note.value}';
 
 /// Every note of every bar of [document], in reading order.
 List<String> _allNotes(DocumentState document) => <String>[

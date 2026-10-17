@@ -19,6 +19,8 @@ import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// A twelve-bar two-section chart, laid out deterministically by the package's default metrics.
 Song probeChart() => Song(
   id: 'probe-view-transform',
@@ -37,7 +39,7 @@ Song probeChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
@@ -68,7 +70,7 @@ void main() {
   }
   final PageLayout engraved = pages.first;
   final PlacedBar bar = engraved.bars[3];
-  final PlacedCell cell = bar.cells.first;
+  final LayoutRect cell = bar.bounds;
   final EventAnchor aimed = EventAnchor(
     sectionId: bar.sectionId,
     bar: bar.barIndex,
@@ -78,16 +80,16 @@ void main() {
     'PROBE page pane=${paneWidth}x$paneHeight scale=${engraved.scale} '
     'systems=${engraved.systems.length} bars=${engraved.bars.length} '
     'aimed_cell=$aimed '
-    'cell_rect=(${cell.bounds.left},${cell.bounds.top},'
-    '${cell.bounds.size.width},${cell.bounds.size.height})',
+    'cell_rect=(${cell.left},${cell.top},'
+    '${cell.size.width},${cell.size.height})',
   );
 
   // The centre of the aimed cell, in the page's own engraved coordinates. Every view below puts the
   // nib on the point of the SURFACE that this cell centre maps to, which is the whole of "the pen
   // writes where it is put".
   final LayoutOffset cellCentre = LayoutOffset(
-    cell.bounds.left + cell.bounds.size.width / 2,
-    cell.bounds.top + cell.bounds.size.height / 2,
+    cell.left + cell.size.width / 2,
+    cell.top + cell.size.height / 2,
   );
 
   // Each view is (zoom, pan in surface pixels). The pans are chosen to be the CLAMPED extremes for
@@ -136,7 +138,7 @@ void main() {
     final ChartHit? hit = hitTestPage(page, page.pagePointOf(surfaceOfCell));
     final String hitAddress = hit == null
         ? '(none)'
-        : '${hit.sectionId}#${hit.barIndex} beat=${hit.beat}';
+        : '${hit.sectionId}#${hit.barIndex} beat=${hit.local.x}';
 
     // --- 4. WHERE THE PAINTER WOULD DRAW THE STORED STROKE. --------------------------------------
     // The painter resolves the anchor on the page, adds the stored anchor-local point, and applies

@@ -62,7 +62,7 @@ void main(List<String> args) {
         'bounds=(${bar.bounds.left.toStringAsFixed(0)},'
         '${bar.bounds.top.toStringAsFixed(0)},'
         '${bar.bounds.size.width.toStringAsFixed(0)}) '
-        'cells=${bar.cells.length} '
+        'cells=${bar.chords.length} '
         'model_notes=${_notesOf(song, bar.sectionId, bar.barIndex)} '
         'glyph_noteheads=${bar.melody.glyphs.where((MelodyGlyph g) => g.kind == MelodyGlyphKind.notehead).length}'
         '$notes',
@@ -80,6 +80,6 @@ String _notesOf(Song song, String sectionId, int barIndex) {
   }
   return <String>[
     for (final NoteMark note in bar.melody)
-      '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch}',
+      '${note.offsetX.toStringAsFixed(1)}:${note.pitch}',
   ].join(',');
 }

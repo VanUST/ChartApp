@@ -64,6 +64,8 @@ import 'dart:math' as math;
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// The owner's sample, unless a path is given on the command line.
 const String defaultChartPath =
     r'C:\projects\ChartApp-acl-reports\omr-sample\untitled.chart';
@@ -131,7 +133,7 @@ Bar barOfFour(List<(int, int)> pitches) => Bar(
   melody: <NoteMark>[
     for (int beat = 0; beat < pitches.length; beat++)
       NoteMark(
-        place: cellAt(beat),
+        place: placeAt(beat),
         pitch: PitchedNote(
           note: WrittenNote(NoteLetter.values[pitches[beat].$2], 0),
           octave: pitches[beat].$1,
@@ -376,7 +378,7 @@ void scoreFixture({
         );
         MelodyNoteHead? found;
         for (final MelodyNoteHead head in reading.heads) {
-          if (head.beat == note.pseudoBeat) {
+          if (head.offsetX == note.offsetX) {
             found = head;
             break;
           }
@@ -466,7 +468,8 @@ void readOwnerInk(String chartPath, {required bool withPlaceGate}) {
               staffSpace: 13,
               headTop: withPlaceGate ? bar.bounds.bottom : -1e6,
               headBottom: 1e6,
-              beatColumns: const <MelodyBeatColumn>[],
+              barLeft: bar.bounds.left,
+              barRight: bar.bounds.right,
             )
           : (withPlaceGate
                 ? frame
@@ -475,7 +478,8 @@ void readOwnerInk(String chartPath, {required bool withPlaceGate}) {
                     staffSpace: frame.staffSpace,
                     headTop: -1e6,
                     headBottom: 1e6,
-                    beatColumns: frame.beatColumns,
+                    barLeft: frame.barLeft,
+                    barRight: frame.barRight,
                     clef: frame.clef,
                   ));
       final MelodyNoteReading reading = const MelodyNoteReader().read(
@@ -500,7 +504,7 @@ void readOwnerInk(String chartPath, {required bool withPlaceGate}) {
       for (final MelodyNoteHead head in reading.heads) {
         stdout.writeln(
           'probe.owner.head bar=${bar.barIndex} ${head.pitch} '
-          'beat=${head.beat}.${head.orderInBeat} w=${f(head.widthFraction)} '
+          'beat=${head.offsetX}.${head.offsetX} w=${f(head.widthFraction)} '
           'h=${f(head.bandFraction)}',
         );
       }
@@ -543,7 +547,7 @@ NoteMark probeNote(
   int step = 0,
   NoteBase base = NoteBase.quarter,
 }) => NoteMark(
-  place: cellAt(beat, step),
+  place: placeAt(beat, step),
   pitch: PitchedNote(note: WrittenNote(letter, 0), octave: octave),
   value: NoteValue.plain(base),
 );
@@ -570,10 +574,11 @@ void reportRun({
   for (int index = 0; index < heads.length; index++) {
     final MelodyGlyph glyph = heads[index];
     final double centre = glyph.bounds.left + glyph.bounds.size.width / 2;
-    final MelodyBeatColumn? column = frame.columnAt(centre);
+    // WHETHER THE HEAD WAS DRAWN INSIDE ITS BAR, which is the only place question left now that
+    // the bar is one band rather than a row of columns.
+    final bool inside = frame.containsX(centre);
     stdout.writeln(
-      'probe.run.drawn index=$index x=${f(centre)} '
-      'column=${column == null ? 'none' : '${column.beat}'}',
+      'probe.run.drawn index=$index x=${f(centre)} in_bar=$inside',
     );
   }
   stdout.writeln(
@@ -589,12 +594,12 @@ void reportRun({
     frame: frame,
   );
   final Set<String> truth = <String>{
-    for (final NoteMark note in melody) '${note.pseudoBeat}.${note.pseudoStep}',
+    for (final NoteMark note in melody) '${note.offsetX.toStringAsFixed(1)}',
   };
   int right = 0;
   final Set<String> seen = <String>{};
   for (final MelodyNoteHead one in reading.heads) {
-    final String address = '${one.beat}.${one.orderInBeat}';
+    final String address = '${one.offsetX.toStringAsFixed(1)}';
     seen.add(address);
     final bool ok = truth.contains(address);
     if (ok) {
@@ -659,16 +664,14 @@ void measureBeatRun({
   }
   stdout.writeln(
     'probe.run tag=$tag notes=${melody.length} '
-    'cell=${f(bar.cells.isEmpty ? 0 : bar.cells.first.bounds.size.width)} '
+    'bar_width=${f(bar.bounds.size.width)} '
     'stride=${f(stride)} head=${f(head)} bars_on_page=${page.bars.length}',
   );
-  for (final PlacedCell cell in bar.cells) {
-    stdout.writeln(
-      'probe.run.cell beat=${cell.beat} '
-      'x=[${f(cell.bounds.left)},${f(cell.bounds.right)}] '
-      'w=${f(cell.bounds.size.width)}',
-    );
-  }
+  // THE BAR IS ONE BAND NOW, reported once: it used to print one line per beat column.
+  stdout.writeln(
+    'probe.run.bar x=[${f(bar.bounds.left)},${f(bar.bounds.right)}] '
+    'w=${f(bar.bounds.size.width)}',
+  );
   final List<InkStroke> strokes = inkOfBar(bar, degraded: degraded);
   reportRun(
     tag: tag,
@@ -684,88 +687,11 @@ void measureBeatRun({
   );
 }
 
-// PURPOSE: The CONTROL for [measureBeatRun]: the same beat's run engraved the way the page drew it
-//          BEFORE the cell was widened — one 18-pixel column per beat, a 20.8-pixel stride, and the
-//          second note therefore past its own column's right edge. It exists so that the repair is a
-//          difference between two numbers rather than a claim, and so that a future reader can see
-//          what the defect WAS without reconstructing it.
-// INPUTS: tag — the run's name; melody — the same notes the repaired run used.
-// OUTPUTS: The same `probe.run.*` lines, from a bar whose cells are the old width.
-// KEYWORDS: control, old-cell, 18, before-the-fix, defect-reproduction
-void measureOldCellRun({required String tag, required List<NoteMark> melody}) {
-  final LayoutStyle style = appStyle();
-  final Bar bar = Bar(melody: melody);
-  final double space = style.melodyStaffSpace;
-  final double cell = style.minCellWidth;
-  const int beats = 4;
-  const double left = 100;
-  const double middle = 260;
-  final List<double> cellX = <double>[
-    for (int beat = 0; beat < beats; beat++) style.barPadding + beat * cell,
-  ];
-  final double barWidth = 2 * style.barPadding + beats * cell;
-  final PlacedMelodyStaff staff = placeMelodyStaff(
-    bar: bar,
-    left: left,
-    width: barWidth,
-    staffMiddleLineY: middle,
-    staffSpace: space,
-    clef: 'treble',
-    cellX: cellX,
-  );
-  final MelodyStaffFrame frame = MelodyStaffFrame(
-    middleLineY: middle,
-    staffSpace: space,
-    // The staff's own ledger range, generous enough that the place gate cannot be what refuses a
-    // head: this run is about the COLUMN, and a second refusal reason would blur the number.
-    headTop: middle - 10 * space,
-    headBottom: middle + 10 * space,
-    beatColumns: <MelodyBeatColumn>[
-      for (int beat = 0; beat < beats; beat++)
-        MelodyBeatColumn(
-          beat: beat,
-          left: left + cellX[beat],
-          right: left + cellX[beat] + cell,
-        ),
-    ],
-    clef: 'treble',
-  );
-  final List<PageInkStroke> ink = <PageInkStroke>[];
-  int index = 0;
-  for (final MelodyGlyph glyph in staff.glyphs) {
-    final double glyphNib = glyph.kind == MelodyGlyphKind.beam
-        ? traceNib * 3
-        : traceNib;
-    final List<LayoutOffset> points = traceGlyph(
-      glyph,
-      pen: glyphNib,
-      pageOrigin: LayoutOffset.zero,
-    );
-    if (points.isEmpty) {
-      continue;
-    }
-    ink.add(PageInkStroke(id: 'old-${index++}', points: points, nib: glyphNib));
-  }
-  stdout.writeln(
-    'probe.run tag=$tag notes=${melody.length} cell=${f(cell)} '
-    'stride=${f(const MelodyMetrics().stepOffset * space)} '
-    'head=${f(const MelodyMetrics().noteheadWidth * space)} bars_on_page=1',
-  );
-  for (int beat = 0; beat < beats; beat++) {
-    stdout.writeln(
-      'probe.run.cell beat=$beat '
-      'x=[${f(left + cellX[beat])},${f(left + cellX[beat] + cell)}] '
-      'w=${f(cell)}',
-    );
-  }
-  reportRun(
-    tag: tag,
-    melody: melody,
-    glyphs: staff.glyphs,
-    ink: ink,
-    frame: frame,
-  );
-}
+// THE OLD-CELL CONTROL IS GONE, and its removal is a statement rather than an omission: it
+// re-engraved a run into 18-pixel columns to show that the second note of one beat used to
+// overflow its column. The engraving no longer assigns a position to a note at all — a note is
+// drawn at the place the model stores — so there is no column to overflow and nothing for a
+// control to reproduce. A control that cannot fail is not evidence.
 
 // PURPOSE: Measure the ONE exposure the place gate cannot close: a chord symbol written BELOW the
 //          bar, i.e. inside the band the melody staff occupies.
@@ -858,7 +784,7 @@ void readOwnerInkBelowBar(String chartPath) {
       for (final MelodyNoteHead head in reading.heads) {
         stdout.writeln(
           'probe.owner-below.head bar=${bar.barIndex} ${head.pitch} '
-          'beat=${head.beat}.${head.orderInBeat} step=${head.step} '
+          'beat=${head.offsetX}.${head.offsetX} step=${head.step} '
           'w=${f(head.widthFraction)} h=${f(head.bandFraction)}',
         );
       }
@@ -943,16 +869,7 @@ void main(List<String> arguments) {
       probeNote(NoteLetter.e, 5, beat: 0, step: 1),
     ],
   );
-  // AND THE SAME RUN AT THE OLD 18-PIXEL CELL, built by hand, as the explicit control: it is the
-  // fixture a musician's own ink is NOT — this is the engraving's own round trip, and it is where the
-  // defect is measured.
-  measureOldCellRun(
-    tag: 'one-beat-two-notes-old-cell',
-    melody: <NoteMark>[
-      probeNote(NoteLetter.c, 5, beat: 0, step: 0),
-      probeNote(NoteLetter.e, 5, beat: 0, step: 1),
-    ],
-  );
+  // The old-cell control is gone: there is no cell to overflow any more.
 
   // PART 6: A BEAMED PAIR, which the reader's own author named and did not measure. A beam is ink
   // that JOINS two heads at different heights, and the suspicion is that the joined component's rows

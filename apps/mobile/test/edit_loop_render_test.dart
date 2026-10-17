@@ -24,6 +24,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page width and height: the tablet viewport the other render instruments use.
 const double editPageWidth = 824;
 const double editPageHeight = 600;
@@ -76,14 +78,14 @@ Song editLoopChart() => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellPlace(_editedSection, index, 0),
+                place: placeIn(_editedSection, index, 0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
               ),
               ChordMark(
-                place: cellPlace(_editedSection, index, 2),
+                place: placeIn(_editedSection, index, 2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,
@@ -205,7 +207,7 @@ void _printBar(String label, Song chart, String sectionId, int barIndex) {
   final String cells = bar.chords
       .map(
         (ChordMark placed) =>
-            'cell ${placed.pseudoBeat + 1} (beat ${placed.pseudoBeat}) -> '
+            'cell ${placed.offsetX + 1} (beat ${placed.offsetX.toStringAsFixed(1)}) -> '
             '${placed.chord.render(chart.key, const SpellingTable())}',
       )
       .join(' | ');
@@ -225,7 +227,7 @@ void _dumpPlacedBar(String label, PageLayout page) {
     final String chords = bar.chords
         .map(
           (PlacedChord placed) =>
-              'cell ${placed.beat + 1} '
+              'chord@${placed.place.offsetX.toStringAsFixed(1)} '
               '${placed.chord.render(Key.cMajor, const SpellingTable())} '
               '@${placed.bounds.left.toStringAsFixed(1)}',
         )
@@ -298,10 +300,11 @@ void main() {
     _dumpPlacedBar('layout.before', pagesBefore.single);
 
     // --- THE EDIT, through the operation log and nothing else -----------------------------------
-    final ChordMark? held = session.existingChordAt(
+    final ChordMark? held = fixtureChordAt(
+      session,
       sectionId: _editedSection,
       barIndex: _editedBar,
-      beat: _editedBeat,
+      slot: _editedBeat,
     );
     expect(
       held,
@@ -312,13 +315,14 @@ void main() {
     final ChordRootChoice chosen = roots.firstWhere(
       (ChordRootChoice root) => root.pitchClass == 3,
     );
-    final bool applied = session.applyChordToCell(
+    final bool applied = fixtureChord(
+      session,
       sectionId: _editedSection,
       barIndex: _editedBar,
-      beat: _editedBeat,
+      slot: _editedBeat,
       chord: chordOf(chosen, ChordQuality.majorSeventh),
       size: held!.size,
-    );
+    ).applied;
     expect(applied, isTrue);
     final Song after = session.song;
     _printBar('after', after, _editedSection, _editedBar);
@@ -343,10 +347,10 @@ void main() {
     stdout.writeln(
       'render.wrote after=${afterPng.path} bytes=${afterPng.lengthSync()} '
       'selected_section=${selection.sectionId} '
-      'selected_bar=${selection.barIndex} selected_beat=${selection.beat} '
-      'selected_cell_rect=(${selection.cell!.bounds.left},'
-      '${selection.cell!.bounds.top},${selection.cell!.bounds.size.width},'
-      '${selection.cell!.bounds.size.height})',
+      'selected_bar=${selection.barIndex} selected_x=${selection.local.x} '
+      'selected_bar_rect=(${selection.bar.bounds.left},'
+      '${selection.bar.bounds.top},${selection.bar.bounds.size.width},'
+      '${selection.bar.bounds.size.height})',
     );
     _dumpPlacedBar('layout.after', pagesAfter.single);
 
@@ -395,25 +399,25 @@ void main() {
       logicalWidth: fitWidth,
       logicalHeight: fitHeight,
     );
-    final PlacedCell fittedCell = fittedAfter.bars
+    final LayoutRect fittedCell = fittedAfter.bars
         .firstWhere(
           (PlacedBar bar) =>
               bar.sectionId == _editedSection && bar.barIndex == _editedBar,
         )
-        .cells[_editedBeat];
+        .bounds;
     stdout.writeln(
       'render.wrote fitted_before=${fitBeforePng.path} '
       'fitted_after=${fitAfterPng.path} '
       'fit_scale_before=${fittedBefore.scale} '
       'fit_scale_after=${fittedAfter.scale} '
       'fitted_bars=${fittedAfter.bars.length} '
-      'fitted_cell_engraved=(${fittedCell.bounds.left},'
-      '${fittedCell.bounds.top},${fittedCell.bounds.size.width},'
-      '${fittedCell.bounds.size.height}) '
-      'fitted_cell_surface=(${fittedCell.bounds.left * fittedAfter.scale},'
-      '${fittedCell.bounds.top * fittedAfter.scale},'
-      '${fittedCell.bounds.size.width * fittedAfter.scale},'
-      '${fittedCell.bounds.size.height * fittedAfter.scale})',
+      'fitted_cell_engraved=(${fittedCell.left},'
+      '${fittedCell.top},${fittedCell.size.width},'
+      '${fittedCell.size.height}) '
+      'fitted_cell_surface=(${fittedCell.left * fittedAfter.scale},'
+      '${fittedCell.top * fittedAfter.scale},'
+      '${fittedCell.size.width * fittedAfter.scale},'
+      '${fittedCell.size.height * fittedAfter.scale})',
     );
   });
 }
@@ -427,12 +431,12 @@ ChartHit _selectionFor(PageLayout page) {
     (PlacedBar placed) =>
         placed.sectionId == _editedSection && placed.barIndex == _editedBar,
   );
-  final PlacedCell cell = bar.cells[_editedBeat];
+  final LayoutRect cell = bar.bounds;
   final ChartHit? hit = hitTestPage(
     page,
     LayoutOffset(
-      cell.bounds.left + cell.bounds.size.width / 2,
-      cell.bounds.top + cell.bounds.size.height / 2,
+      cell.left + cell.size.width / 2,
+      cell.top + cell.size.height / 2,
     ),
   );
   if (hit == null) {

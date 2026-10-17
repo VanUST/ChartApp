@@ -6,37 +6,36 @@
 //          the numbers a reader would check by hand are in the transcript and not only in a
 //          boolean.
 //
-//          IT COVERS BOTH SURFACES OVER THE SAME BARS. `hitTestPage` answers for the chord line and
-//          `hitTestMelodyStaff` for the staff below it, whose columns name beats. The staff cases
-//          are laid out with the engine's own style, which prints no beat captions, because the
-//          target used to be built out of those captions and switching them off switched note entry
-//          off with them (A68 §7) — so the cases assert that the answer does not depend on anything
-//          that can be switched off, with and without the captions printed.
+//          THE PROPERTY THIS FILE EXISTS FOR IS ONE SENTENCE: A TAP NAMES THE BAR IT LOOKS LIKE IT
+//          NAMES. It has failed on hardware twice — once when the staff's target was built out of
+//          the beat captions and switching the captions off made a tap name nothing, and once when
+//          the chord line's answer was narrowed by a column test whose columns could be absent. The
+//          first case below therefore walks EVERY bar of a page and taps its own centre, which is
+//          the check that would have caught both: an answer derived from a rectangle can be checked
+//          against that rectangle, and an answer derived from anything else cannot.
+//
+//          IT COVERS BOTH SURFACES OVER THE SAME BARS, and the two are the owner's rule made
+//          geometry: `hitTestPage` answers for the chord band, which is the bar's own rectangle;
+//          `hitTestMelodyStaff` answers for the staff below it; and a point below the staff is over
+//          neither. There are no columns in either answer — a hit carries the point in the bar's own
+//          coordinates, which is the frame a mark's place is written in.
 // INPUTS: None.
-// OUTPUTS: Pass/fail per behaviour, plus `hit.cell ...` and `hit.staff ...` lines on stdout naming
-//          the point tested and the address it returned.
+// OUTPUTS: Pass/fail per behaviour, plus `hit ...` and `hit.staff ...` lines on stdout naming the
+//          point tested and the address it returned.
 // KEYWORDS: test, hit-testing, round-trip, page-scale, fit, edge-case, hand-derived, evidence,
-//           melody-staff, beat-column, captions-off
+//           melody-staff, chord-band, no-grid, tap-names-the-bar
 import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
-/// A 4/4 bar holding one major triad on beat 0 and nothing else.
+import '../support/place_fixture.dart';
+
+/// A bar holding one major triad at the first fixture slot and nothing else.
 Bar oneChordBar(int rootPitchClass) => Bar(
   chords: <ChordMark>[
     ChordMark(
-      place: cellAt(0),
-      chord: Chord(root: ChordRoot(rootPitchClass)),
-    ),
-  ],
-);
-
-/// A 4/4 bar holding one chord on the given beat.
-Bar chordOnBeat(int rootPitchClass, int beat) => Bar(
-  chords: <ChordMark>[
-    ChordMark(
-      place: cellAt(beat),
+      place: placeAt(0),
       chord: Chord(root: ChordRoot(rootPitchClass)),
     ),
   ],
@@ -55,11 +54,11 @@ LayoutOffset centreOf(LayoutRect rect) => LayoutOffset(
   rect.top + rect.size.height / 2,
 );
 
-/// A song that DECLARES a pitched staff and carries a chord and a note on every beat.
+/// A song that DECLARES a pitched staff and carries a chord and a note at every fixture slot.
 ///
 /// The declaration is the point: D29 makes the staff exist because the chart asked for it, so every
 /// bar of this song carries one whether or not a note was written on it, and a tap on its five lines
-/// has something to name. Four bars of 4/4 gives sixteen columns to touch.
+/// has something to name.
 Song staffSong() => Song(
   title: 'Staff',
   staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
@@ -71,18 +70,16 @@ Song staffSong() => Song(
         for (int barIndex = 0; barIndex < 4; barIndex++)
           Bar(
             chords: <ChordMark>[
-              for (int beat = 0; beat < 4; beat++)
+              for (int slot = 0; slot < 4; slot++)
                 ChordMark(
-                  place: cellAt(beat),
-                  chord: Chord(root: ChordRoot(barIndex + beat)),
+                  place: placeAt(slot),
+                  chord: Chord(root: ChordRoot(barIndex + slot)),
                 ),
             ],
-            // A note on every beat, so the column a tap names is also the column a notehead stands
-            // in: the beat the hit test answers can be checked against the note that beat holds.
             melody: <NoteMark>[
-              for (int beat = 0; beat < 4; beat++)
+              for (int slot = 0; slot < 4; slot++)
                 NoteMark(
-                  place: cellAt(beat),
+                  place: placeAt(slot),
                   pitch: const PitchedNote(
                     note: WrittenNote(NoteLetter.e, 0),
                     octave: 4,
@@ -96,22 +93,10 @@ Song staffSong() => Song(
   ],
 );
 
-/// The point in [bar]'s staff that a musician would touch to choose [beat]: the beat's own column,
-/// at the height of the staff's middle line.
-///
-/// The column comes from the bar's cells and the height from the staff's published box, which are
-/// the two things the caller of the hit test is allowed to know; the captions under the staff are
-/// deliberately not consulted, because a tap must not depend on them.
-LayoutOffset staffTapPoint(PlacedBar bar, PlacedCell cell) => LayoutOffset(
-  cell.bounds.left + cell.bounds.size.width / 2,
-  bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
-);
-
 void main() {
   const LayoutEngine engine = LayoutEngine();
 
   // Two sections, so a page has more than one system and therefore a real margin between them.
-  // Section A is four bars — exactly one system at a 400-point page. Section B is two.
   final Song song = Song(
     title: 'Hit',
     sections: <Section>[sectionOf('sec-a', 'A', 4), sectionOf('sec-b', 'B', 2)],
@@ -121,31 +106,45 @@ void main() {
       .single;
 
   group('hitTestPage', () {
-    test('every cell of every bar answers with its own bar address', () {
-      // The round trip the whole feature rests on: take a bar and cell the layout produced, ask
-      // for the point at the middle of that cell, and get that same bar and cell back. Checked for
-      // every cell of every bar rather than one convenient example, because a hit test that works
-      // for the first bar and lies for the last is exactly the failure a single example hides.
+    test('every bar of a page answers with its own address', () {
+      // THE CHECK THE TABLET FOUND TWICE. The old case walked `bar.cells` and asked for the middle
+      // of each column — `the getter 'cells' isn't defined for the type 'PlacedBar'` is what it says
+      // now, and the column it walked was the grid. What replaces it is the property itself, stated
+      // without a grid: a point in a bar's own rectangle names that bar, and the hit's local x is the
+      // distance from the bar's left edge. Checked for EVERY bar rather than one convenient example,
+      // because a hit test that works for the first bar and lies for the last is exactly the failure
+      // a single example hides.
       int checked = 0;
       for (final PlacedBar bar in page.bars) {
-        for (final PlacedCell cell in bar.cells) {
-          final LayoutOffset point = centreOf(cell.bounds);
-          final ChartHit? hit = hitTestPage(page, point);
-          stdout.writeln(
-            'hit.cell point=(${point.x.toStringAsFixed(2)},'
-            '${point.y.toStringAsFixed(2)}) '
-            'answered=${hit == null ? 'null' : '${hit.sectionId}[${hit.barIndex}]'
-                      ' beat=${hit.beat}'} '
-            'expected=${bar.sectionId}[${bar.barIndex}] beat=${cell.beat}',
-          );
-          expect(hit, isNotNull);
-          expect(hit!.sectionId, bar.sectionId);
-          expect(hit.barIndex, bar.barIndex);
-          expect(hit.beat, cell.beat);
-          checked++;
-        }
+        final LayoutOffset point = centreOf(bar.bounds);
+        final ChartHit? hit = hitTestPage(page, point);
+        final double expectedX = point.x - bar.bounds.left;
+        stdout.writeln(
+          'hit point=(${point.x.toStringAsFixed(2)},'
+          '${point.y.toStringAsFixed(2)}) '
+          'answered=${hit == null ? 'null' : '${hit.sectionId}[${hit.barIndex}]'
+                    ' x=${hit.local.x.toStringAsFixed(2)}'} '
+          'expected=${bar.sectionId}[${bar.barIndex}] x=${expectedX.toStringAsFixed(2)}',
+        );
+        expect(
+          hit,
+          isNotNull,
+          reason:
+              'a tap in the middle of ${bar.sectionId}[${bar.barIndex}] must name that bar',
+        );
+        expect(hit!.sectionId, bar.sectionId);
+        expect(hit.barIndex, bar.barIndex);
+        expect(
+          hit.local.x,
+          closeTo(expectedX, 1e-9),
+          reason:
+              'the local x is the distance from the bar own left edge, which is the frame a '
+              'mark place is measured in',
+        );
+        checked++;
       }
-      expect(checked, 24, reason: 'four 4/4 bars plus two 4/4 bars');
+      expect(checked, page.bars.length);
+      expect(checked, 6, reason: 'four bars of section A and two of section B');
     });
 
     test('a point in the margin between two systems is over no bar', () {
@@ -183,8 +182,6 @@ void main() {
     });
 
     test('a point past the last bar of a system is over no bar', () {
-      // The page is 400 wide and four 76-wide bars end at x = 24 + 304 = 328, so x = 340 shares the
-      // stave's height with the music and lies past its right edge.
       final PlacedBar last = page.systems.first.bars.last;
       final LayoutOffset past = LayoutOffset(
         last.bounds.right + 12,
@@ -197,25 +194,21 @@ void main() {
       expect(hitTestPage(page, past), isNull);
     });
 
-    test('a point in a bar\'s padding is over the bar and over no cell', () {
-      // Cell 0 begins one barPadding (8) inside the left edge. A point 1 point inside the bar is
-      // therefore on the bar and on no cell — the state the viewer uses to select a whole bar.
+    test('BELOW THE BAR IS NEITHER: the chord line answers nothing there', () {
+      // THE OWNER'S RULE, AS AN ASSERTION: above the staff is a chord, on the staff is a note, below
+      // the bar is neither. The bar's own rectangle IS the chord band, so a point under it must not
+      // be answered by the chord line's hit test — that answer, on a chart with no staff, is the one
+      // that would tell a musician he had selected a bar when he had pointed at blank paper.
       final PlacedBar bar = page.bars.first;
-      final LayoutOffset inPadding = LayoutOffset(
-        bar.bounds.left + 1,
-        bar.bounds.top + bar.bounds.size.height / 2,
+      final LayoutOffset below = LayoutOffset(
+        bar.bounds.left + bar.bounds.size.width / 2,
+        bar.bounds.bottom + 1,
       );
-      final ChartHit? hit = hitTestPage(page, inPadding);
       stdout.writeln(
-        'hit.padding point=(${inPadding.x},${inPadding.y}) '
-        'answered=${hit == null ? 'null' : '${hit.sectionId}[${hit.barIndex}] '
-                  'beat=${hit.beat}'}',
+        'hit.below-bar point=(${below.x},${below.y}) '
+        'bar_bottom=${bar.bounds.bottom}',
       );
-      expect(hit, isNotNull);
-      expect(hit!.sectionId, 'sec-a');
-      expect(hit.barIndex, 0);
-      expect(hit.cell, isNull);
-      expect(hit.beat, isNull);
+      expect(hitTestPage(page, below), isNull);
     });
 
     test(
@@ -235,16 +228,21 @@ void main() {
       },
     );
 
-    test('a point on a cell boundary resolves to the cell before it', () {
-      // The same rule one level down: the columns tile the interior and each column contains its
-      // right edge, so a point exactly on the edge between cell 0 and cell 1 names cell 0. Stating
-      // it here is what stops the answer depending on the order the loop happens to use.
+    test('a point one pixel inside a bar is ON the bar', () {
+      // This case used to assert the opposite for a point in a bar's leading padding: "over the bar
+      // and over no cell", because a cell began one padding inside the edge. There is no cell to be
+      // outside of any more, so the padding is the bar's own writing space and a touch there names
+      // it — the state the viewer uses to select a whole bar is now every point in it.
       final PlacedBar bar = page.bars.first;
-      final LayoutOffset onEdge = LayoutOffset(
-        bar.cells[1].bounds.left,
-        centreOf(bar.cells[1].bounds).y,
+      final LayoutOffset inside = LayoutOffset(
+        bar.bounds.left + 1,
+        bar.bounds.top + bar.bounds.size.height / 2,
       );
-      expect(hitTestPage(page, onEdge)!.beat, 0);
+      final ChartHit? hit = hitTestPage(page, inside);
+      expect(hit, isNotNull);
+      expect(hit!.sectionId, 'sec-a');
+      expect(hit.barIndex, 0);
+      expect(hit.local.x, closeTo(1, 1e-9));
     });
   });
 
@@ -290,7 +288,7 @@ void main() {
     });
 
     test(
-      'a surface point round-trips back to the cell a fitted page drew there',
+      'a surface point round-trips back to the bar a fitted page drew there',
       () {
         // The bug this exists to catch: a hit test that assumes scale 1 answers correctly on every
         // ordinary page and wrongly only when FIT has shrunk one. The last bar is the strongest case,
@@ -303,8 +301,7 @@ void main() {
             .fitToPage(long, pageWidth: 1200, pageHeight: 900)
             .page!;
         final PlacedBar last = fitted.bars.last;
-        final PlacedCell lastCell = last.cells.last;
-        final LayoutOffset engraved = centreOf(lastCell.bounds);
+        final LayoutOffset engraved = centreOf(last.bounds);
         final LayoutOffset surface = LayoutOffset(
           engraved.x * fitted.scale,
           engraved.y * fitted.scale,
@@ -316,20 +313,22 @@ void main() {
         );
         expect(correct, isNotNull);
         expect(correct!.barIndex, last.barIndex);
-        expect(correct.beat, lastCell.beat);
+        expect(correct.local.x, closeTo(engraved.x - last.bounds.left, 1e-6));
 
         // And the naive reading of the same surface point — the one a hit test that forgot the scale
         // would take — is a different place on the page, so the conversion is load-bearing here.
         final ChartHit? naive = hitTestPage(fitted, surface);
         stdout.writeln(
           'hit.fit-scale scale=${fitted.scale} surface=(${surface.x},'
-          '${surface.y}) correct=${correct.barIndex}:${correct.beat} '
-          'naive=${naive == null ? 'null' : '${naive.barIndex}:${naive.beat}'}',
+          '${surface.y}) correct=${correct.barIndex}:'
+          '${correct.local.x.toStringAsFixed(1)} '
+          'naive=${naive == null ? 'null' : '${naive.barIndex}:'
+                    '${naive.local.x.toStringAsFixed(1)}'}',
         );
         expect(
           naive == null ||
               naive.barIndex != correct.barIndex ||
-              naive.beat != correct.beat,
+              (naive.local.x - correct.local.x).abs() > 1,
           isTrue,
           reason:
               'the unscaled reading must differ, or this test proves nothing',
@@ -340,23 +339,19 @@ void main() {
 
   group('hitTestMelodyStaff', () {
     // THE SECOND SURFACE, AND THE DEFECT THAT MADE THESE CASES NECESSARY. The staff's touch target
-    // used to be built out of the beat CAPTIONS: the touch band ran down to the caption row and each
+    // used to be built out of the beat CAPTIONS: the band ran down to the caption row and each
     // beat's column was that beat's marker. The owner read the captions and the tick marks as noise
-    // and asked for them to go; switching them off then switched off NOTE ENTRY, because a tap on the
-    // five lines named nothing. The tablet found it in one tap — `viewer.select staff ... hit=none` —
-    // after seventy tests stayed green, because the palette tests opened the palette directly instead
-    // of touching the staff. Every case below therefore lays the chart out with the engine's own
-    // style, which is the style that prints no captions.
+    // and asked for them to go; switching them off then switched off NOTE ENTRY, because a tap on
+    // the five lines named nothing. The tablet found it in one tap — `viewer.select staff ... hit=none`
+    // — after seventy tests stayed green. There are no captions to switch off any more (the engine
+    // publishes no markers at all), so the pair below instead proves the band itself answers, and
+    // that the answer carries the point rather than a column.
     final Song staffChart = staffSong();
     final PageLayout staffPage = engine
         .layout(staffChart, pageWidth: 400, pageHeight: 600)
         .first;
-    // The same chart engraved by a style that DOES print the captions, for the comparison below.
-    final PageLayout captionedPage = LayoutEngine(
-      style: const LayoutStyle(showBeatCaptions: true),
-    ).layout(staffChart, pageWidth: 400, pageHeight: 600).first;
 
-    test('a tap on a staff column names that beat, with the beat captions OFF', () {
+    test('a tap anywhere on a bar staff names that bar and the point tapped', () {
       int tapped = 0;
       for (final PlacedBar bar in staffPage.bars) {
         expect(
@@ -364,98 +359,51 @@ void main() {
           isFalse,
           reason: 'D29: the chart declared a staff, so the bar carries one',
         );
-        expect(
-          bar.beatMarkers,
-          isEmpty,
-          reason:
-              'the style prints no captions and no ticks under the staff — this is the state in '
-              'which note entry died, so the taps below are made in exactly it',
-        );
-        for (final PlacedCell cell in bar.cells) {
-          final LayoutOffset point = staffTapPoint(bar, cell);
+        // Four x positions across the staff, so the case cannot pass by one lucky middle.
+        for (int step = 0; step < 4; step++) {
+          final double x =
+              bar.melody.bounds.left +
+              bar.melody.bounds.size.width * (step + 1) / 5;
+          final LayoutOffset point = LayoutOffset(
+            x,
+            bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
+          );
           final ChartHit? hit = hitTestMelodyStaff(staffPage, point);
           stdout.writeln(
-            'hit.staff bar=${bar.barIndex} beat=${cell.beat} '
+            'hit.staff bar=${bar.barIndex} step=$step '
             'point=(${point.x.toStringAsFixed(2)},${point.y.toStringAsFixed(2)}) '
             'answered=${hit == null ? 'null' : '${hit.sectionId}[${hit.barIndex}] '
-                      'beat=${hit.beat}'}',
+                      'x=${hit.local.x.toStringAsFixed(2)}'}',
           );
           expect(
             hit,
             isNotNull,
             reason:
-                'a tap on the five lines of beat ${cell.beat} of bar ${bar.barIndex} must name '
-                'that beat: a staff whose columns cannot be touched is a staff notes cannot be '
-                'written on',
+                'a tap on the five lines of bar ${bar.barIndex} must name that bar: a staff whose '
+                'lines cannot be touched is a staff notes cannot be written on',
           );
           expect(hit!.sectionId, bar.sectionId);
           expect(hit.barIndex, bar.barIndex);
           expect(
-            hit.beat,
-            cell.beat,
-            reason: 'the column touched is the beat named, not a neighbour',
+            hit.local.x,
+            closeTo(x - bar.bounds.left, 1e-9),
+            reason:
+                'the x a tap names is the tap own place in the bar, which is the number a note '
+                'would be written at',
           );
           tapped++;
         }
       }
-      expect(tapped, 16, reason: 'four 4/4 bars, every beat touched once');
-    });
-
-    test('the same taps name the same beats whether the captions print or not', () {
-      // THE ANSWER MUST NOT DEPEND ON ANYTHING THAT CAN BE SWITCHED OFF. This is the pair that
-      // states the rule rather than one side of it: the same column of the same bar, touched at the
-      // same musical height, must answer the same address in both layouts. The captioned page is
-      // proved to have printed its captions first, so the comparison cannot pass by both pages
-      // being caption-less.
-      expect(
-        captionedPage.bars.first.beatMarkers,
-        isNotEmpty,
-        reason: 'the comparison is worthless unless one of the two layouts prints them',
-      );
-      int compared = 0;
-      for (int index = 0; index < staffPage.bars.length; index++) {
-        final PlacedBar silent = staffPage.bars[index];
-        final PlacedBar captioned = captionedPage.bars[index];
-        for (int cell = 0; cell < silent.cells.length; cell++) {
-          final ChartHit? off = hitTestMelodyStaff(
-            staffPage,
-            staffTapPoint(silent, silent.cells[cell]),
-          );
-          final ChartHit? on = hitTestMelodyStaff(
-            captionedPage,
-            staffTapPoint(captioned, captioned.cells[cell]),
-          );
-          expect(
-            off?.beat,
-            cell,
-            reason: 'captions off, bar $index cell $cell',
-          );
-          expect(
-            on?.beat,
-            off?.beat,
-            reason:
-                'bar $index cell $cell answered ${on?.beat} with the captions printed and '
-                '${off?.beat} without them: the beat a touch names must not move when a label '
-                'under the staff is switched off',
-          );
-          compared++;
-        }
-      }
-      stdout.writeln(
-        'hit.staff-captions compared=$compared '
-        'markers_off=${staffPage.bars.first.beatMarkers.length} '
-        'markers_on=${captionedPage.bars.first.beatMarkers.length} identical=true',
-      );
+      expect(tapped, 16, reason: 'four 4/4 bars, four points across each');
     });
 
     test('the touch band is the five lines and half a space below them', () {
       final PlacedBar bar = staffPage.bars.first;
-      final PlacedCell firstCell = bar.cells.first;
       final double space = bar.melody.bounds.size.height / 4;
-      final double columnX = centreOf(firstCell.bounds).x;
+      final double columnX = bar.melody.bounds.left + 12;
       final ChartHit? onTheLines = hitTestMelodyStaff(
         staffPage,
-        staffTapPoint(bar, firstCell),
+        LayoutOffset(columnX, bar.melody.bounds.top + 1),
       );
       // Half a space under the bottom line is where a notehead on the ledger line below the staff
       // sits, so that band is staff; a whole space below it is blank paper and is not.
@@ -468,51 +416,38 @@ void main() {
         LayoutOffset(columnX, bar.melody.bounds.bottom + space),
       );
       // Above the top line, inside the band the system reserved, there is nothing to touch either:
-      // the reserved band is not the staff, and a tap on it must not be told it named a beat.
+      // the reserved band is not the staff, and a tap on it must not be told it named a note.
       final ChartHit? aboveTheStaff = hitTestMelodyStaff(
         staffPage,
         LayoutOffset(columnX, bar.melody.bounds.top - 12),
       );
       stdout.writeln(
-        'hit.staff-band on_lines=${onTheLines?.beat} '
-        'on_ledger_note=${onTheLedgerNote?.beat} '
-        'below_band=${onBlankPaper?.beat} above_staff=${aboveTheStaff?.beat} '
+        'hit.staff-band on_lines=${onTheLines?.local.x.toStringAsFixed(1)} '
+        'on_ledger=${onTheLedgerNote?.local.x.toStringAsFixed(1)} '
+        'below_band=${onBlankPaper?.local.x} above_staff=${aboveTheStaff?.local.x} '
         'staff=(${bar.melody.bounds.top}..${bar.melody.bounds.bottom}) space=$space',
       );
       expect(onTheLines, isNotNull);
       expect(
-        onTheLedgerNote?.beat,
-        firstCell.beat,
+        onTheLedgerNote,
+        isNotNull,
         reason:
             'half a staff space under the bottom line is where a note on the ledger line below the '
-            'staff is drawn, so a touch there still names the beat of that column',
+            'staff is drawn, so a touch there is still on the staff',
       );
       expect(
         onBlankPaper,
         isNull,
         reason:
             'below the staff and its ledger room is blank paper: a touch there has not chosen a '
-            'beat, and answering anyway would put a note where nothing was touched',
+            'note, and answering anyway would put one where nothing was touched',
       );
       expect(
         aboveTheStaff,
         isNull,
         reason:
-            'the band the system reserves for the melody is not the staff: a tap on the paper above '
-            'the five lines names nothing',
-      );
-      // And a touch in the bar's own leading padding is over the bar and over no beat, which is the
-      // same answer the chord line gives for its own padding rather than a silent guess at beat 0.
-      final ChartHit? inPadding = hitTestMelodyStaff(
-        staffPage,
-        LayoutOffset(bar.bounds.left + 1, staffTapPoint(bar, firstCell).y),
-      );
-      expect(inPadding, isNotNull);
-      expect(inPadding!.barIndex, bar.barIndex);
-      expect(
-        inPadding.cell,
-        isNull,
-        reason: 'the padding before the first column names the bar and no beat',
+            'the band the system reserves above the staff is not the staff: a tap on the paper '
+            'above the five lines names nothing',
       );
     });
   });

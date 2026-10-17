@@ -506,6 +506,18 @@ abstract class AppLocalizations {
   /// **'{count, plural, one{copied {count} bar} other{copied {count} bars}} from bar {bar}'**
   String selectionCopied(int count, int bar);
 
+  /// Said after a window of one bar was pasted. The window is a stretch of the bar in pixels and no longer a number of cells, so the sentence names the bar it landed in.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasted into bar {bar}.'**
+  String selectionPastedIntoBar(int bar);
+
+  /// The selection line when the musician has named a run INSIDE one bar. The two ends are distances along the bar in logical pixels, because a place inside a bar is a coordinate and no longer a cell number.
+  ///
+  /// In en, this message translates to:
+  /// **'selected: bar {bar}, from {fromX} to {toX} px'**
+  String selectionRunWindowAt(int bar, int fromX, int toX);
+
   /// The result of a paste of bars, saying exactly where they went.
   ///
   /// In en, this message translates to:
@@ -1145,6 +1157,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Fix the tempo before saving.'**
   String get metadataFooterFixTempo;
+
+  /// The chord palette's header when the edited place is a coordinate rather than a beat: only the bar is named, because a place inside it is a distance and not a cell number.
+  ///
+  /// In en, this message translates to:
+  /// **'Bar {bar}'**
+  String palettePositionBar(int bar);
+
+  /// Said when a chord is refused because its place is not on the bar's chord line. It states the rule rather than scolding: above the staff is a chord, on the staff is a note and below the bar is neither.
+  ///
+  /// In en, this message translates to:
+  /// **'A chord goes above the staff: below the bar it is not read.'**
+  String get chordOutsideBand;
+
+  /// The bar-mark control that ends the line after this bar: the musician's own line break.
+  ///
+  /// In en, this message translates to:
+  /// **'Line break'**
+  String get markLineBreak;
+
+  /// How the text-cue sheet names where on its bar a remark sits, now that a place inside a bar is a distance in pixels and no longer a cell number.
+  ///
+  /// In en, this message translates to:
+  /// **'at {x} px'**
+  String cuePositionAt(int x);
 
   /// The chord palette's header: which bar and which cell it is about to edit, numbered from one across the whole chart.
   ///

@@ -91,12 +91,6 @@ export 'src/song/new_chart.dart';
 export 'src/song/note.dart';
 export 'src/song/note_value.dart';
 export 'src/song/play_order.dart';
-// SHIM, AND THE ONLY SHIMMED EXPORT IN THIS FILE: `src/song/pseudo_grid.dart` lets a caller that
-// still speaks in beats recover a beat and a step from a mark's place. It is temporary by
-// construction, it is documented as temporary where it is declared, and the stage that teaches the
-// layout to read the offset deletes both this line and that file. Nothing else in this package may
-// grow a dependency on it.
-export 'src/song/pseudo_grid.dart';
 export 'src/song/section.dart';
 export 'src/song/song.dart';
 export 'src/song/staff.dart';

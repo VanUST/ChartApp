@@ -38,6 +38,8 @@ import 'package:flutter/rendering.dart' hide Key;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// Where the probe's PNGs are written: outside the repository, on purpose.
 const String shellProbeDirectory = r'C:\projects\ChartApp-acl-reports\ui';
 
@@ -60,69 +62,69 @@ Song notationChart() {
     final List<NoteMark> melody = switch (index) {
       0 => <NoteMark>[
         NoteMark(
-          place: cellAt(0),
+          place: placeAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
         NoteMark(
-          place: cellAt(1),
+          place: placeAt(1),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
         NoteMark(
-          place: cellAt(2),
+          place: placeAt(2),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.g, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
         NoteMark(
-          place: cellAt(3),
+          place: placeAt(3),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.a, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
       ],
       1 => <NoteMark>[
         NoteMark(
-          place: cellAt(0),
+          place: placeAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.b, 0), octave: 4),
           value: NoteValue.plain(NoteBase.eighth),
           tiedToNext: true,
         ),
         NoteMark(
-          place: cellAt(1),
+          place: placeAt(1),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.b, 0), octave: 4),
           value: NoteValue.plain(NoteBase.eighth),
         ),
         NoteMark(
-          place: cellAt(2),
+          place: placeAt(2),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 5),
           value: NoteValue.plain(NoteBase.half),
         ),
       ],
       2 => <NoteMark>[
         NoteMark(
-          place: cellAt(0),
+          place: placeAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.b, -1), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
         NoteMark(
-          place: cellAt(1),
+          place: placeAt(1),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.a, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
         NoteMark(
-          place: cellAt(2),
+          place: placeAt(2),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.g, 0), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
         NoteMark(
-          place: cellAt(3),
+          place: placeAt(3),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.f, 1), octave: 4),
           value: NoteValue.plain(NoteBase.quarter),
         ),
       ],
       _ => <NoteMark>[
         NoteMark(
-          place: cellAt(0),
+          place: placeAt(0),
           pitch: PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
           value: NoteValue.plain(NoteBase.whole),
         ),
@@ -131,7 +133,7 @@ Song notationChart() {
     return Bar(
       chords: <ChordMark>[
         ChordMark(
-          place: cellAt(0),
+          place: placeAt(0),
           chord: Chord(
             root: ChordRoot(index % 12),
             quality: index.isEven
@@ -140,7 +142,7 @@ Song notationChart() {
           ),
         ),
         ChordMark(
-          place: cellAt(2),
+          place: placeAt(2),
           chord: Chord(
             root: ChordRoot((index + 5) % 12),
             quality: ChordQuality.dominantSeventh,
@@ -484,10 +486,10 @@ void main() {
     final PlacedSystem system = chart.systems.first;
     final PlacedBar firstBar = system.bars.first;
     final LayoutRect staff = firstBar.melody.bounds;
-    final PlacedCell cell = firstBar.cells[1];
+    final LayoutRect cell = firstBar.bounds;
     final LayoutOffset surface = chart.surfacePointOf(
       LayoutOffset(
-        cell.bounds.left + cell.bounds.size.width / 2,
+        cell.left + cell.size.width / 2,
         staff.top + staff.size.height / 2,
       ),
     );
@@ -495,7 +497,7 @@ void main() {
       find.byKey(const ValueKey<String>('viewer-document-frame')),
     );
     stdout.writeln(
-      'ui.staff bar=${firstBar.barIndex} beat=${cell.beat} '
+      'ui.staff bar=${firstBar.barIndex} beat=${cell.left} '
       'page_staff=(${staff.left.toStringAsFixed(1)},'
       '${staff.top.toStringAsFixed(1)},'
       '${staff.size.width.toStringAsFixed(1)}x'

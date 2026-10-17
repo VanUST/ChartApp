@@ -38,6 +38,85 @@
 
 part of '../oplog/oplog.dart';
 
+/// How near a place must be to an existing chord for an edit to REPLACE it rather than add another.
+///
+/// A REACH, NOT A GRID. It is the distance a finger has on the chord line when it aims at a symbol,
+/// which is about the height of the line itself: close enough that the symbol a musician clearly
+/// touched is the one he edits, far enough that two chords written side by side stay two chords. It
+/// is a constant of the EDITING gesture and not of the engraving, which is why it lives here and not
+/// in `LayoutStyle`.
+const double chordHitTolerance = 22;
+
+/// Half the height of the bar's chord line, which is how far a chord's own place may sit from the
+/// line's centre and still be ON the line.
+///
+/// THE OWNER'S RULE, AS A NUMBER: above the staff is a chord, on the staff is a note, below the bar is
+/// neither («Аккорды надо запретить ниже такта»). The chord band is the bar's own rectangle, whose
+/// height is the engraver's `LayoutStyle.barHeight`, so half of it either side of the centre is
+/// exactly the band. A chord outside it would be a chord drawn below the bar — where the rule says no
+/// chord and no note exists — and both organs refuse it: this constant is what the EDITOR refuses
+/// against, and `LayoutEngine._placeChords` clamps the box an old file may still carry.
+///
+/// IT IS THE ENGRAVER'S OWN NUMBER: half of `LayoutStyle.barHeight`'s default of 44, written as a
+/// literal because a constant expression may not read a field and this library may not depend on the
+/// engraving's configuration. The two are held together by a CHECK rather than by a promise —
+/// `chord_band_test.dart` asserts that twice this value is `const LayoutStyle().barHeight` — so a
+/// style that moves the chord line fails the suite instead of letting the editor and the engraving
+/// disagree about where the band ends.
+const double chordBandHalfHeight = 22;
+
+// PURPOSE: Name why a chord could not be written, so the surface can say which rule refused it
+//          instead of reporting a bare failure — and so "the bar does not exist" and "a chord may not
+//          be written there" are two different answers rather than one boolean.
+// INPUTS: None; produced by [EditSession.applyChordAt].
+// OUTPUTS: One of two tokens. Both mean NOTHING WAS WRITTEN.
+// KEYWORDS: chord-entry, refusal, named-outcome, chord-band, no-such-bar
+/// Why a chord was not written.
+enum ChordEntryRefusal {
+  /// The address names no bar of the song.
+  noSuchBar,
+
+  /// The place is not on the bar's chord line: below the bar, or above the staff's chord row.
+  outsideChordBand,
+}
+
+// PURPOSE: Report what an attempt to write a chord did, carrying the mark that is now in the document
+//          so the caller does not have to search for it again.
+// INPUTS: Built by [EditSession.applyChordAt] from the edit it made, or from the rule that refused it.
+// OUTPUTS: An immutable value with exactly one of [mark] and [refusal] set. [applied] is true on the
+//          success side, and its [mark] is the WHOLE value the document now holds — which for an
+//          update is the old chord with the new symbol, not the caller's argument.
+// KEYWORDS: chord-entry, outcome, applied, refused, whole-value, one-of-two
+/// What an attempt to write a chord did.
+class ChordEntry {
+  /// Creates an applied entry carrying the mark now in the document.
+  const ChordEntry.applied(ChordMark this.mark) : refusal = null;
+
+  /// Creates a refusal, which wrote nothing.
+  const ChordEntry.refused(ChordEntryRefusal this.refusal) : mark = null;
+
+  /// The chord the document now holds, or null when the attempt was refused.
+  final ChordMark? mark;
+
+  /// Why the attempt was refused, or null when it was applied.
+  final ChordEntryRefusal? refusal;
+
+  /// Whether a chord is now in the document.
+  bool get applied => refusal == null;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ChordEntry && other.mark == mark && other.refusal == refusal;
+
+  @override
+  int get hashCode => Object.hash(mark, refusal);
+
+  @override
+  String toString() => applied
+      ? 'ChordEntry.applied($mark)'
+      : 'ChordEntry.refused(${refusal!.name})';
+}
+
 /// One undoable edit: the event to apply on redo, and the event to apply on undo.
 class UndoOp {
   /// Creates an undoable edit whose redo event is [forward] and whose undo event is [undoEvent].
@@ -278,56 +357,76 @@ class EditSession {
     return true;
   }
 
-  // PURPOSE: Put a chosen chord into a cell, which is the edit the palette exists to make. It
-  //          decides between the catalogue's two chord events from what the document holds, so the
-  //          caller never has to know whether the cell was empty.
-  // INPUTS: sectionId and barIndex — the bar, in the model's own address. beat — the cell index
-  //         inside that bar. chord — the chosen chord. size — the engraved size to keep, normally
-  //         the size of the placement being replaced and [ChordSize.normal] for an empty cell.
-  // OUTPUTS: True when the edit was applied, false when the address names no bar at all. A cell
-  //          that already holds a `step 0` placement is REPLACED, which keeps its engraved size and
-  //          holds the addresses of every other chord in the bar still; an empty cell gets an
-  //          INSERTION at `step 0`. An insertion into a cell that already holds chords cannot
-  //          happen here, so no other chord's step is disturbed, and a chart written with two
-  //          chords packed on one beat keeps them where the composer put them.
+  // PURPOSE: Put a chosen chord into a bar AT A PLACE, which is the edit the palette exists to make.
+  //          It decides between the catalogue's two chord events from what the document holds, so the
+  //          caller never has to know whether there was already a chord where the musician pointed.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. offsetX and offsetY — the
+  //         place inside that bar, in bar-local logical pixels, exactly as a tap reported them
+  //         (`ChartHit.local`). offsetY is the chord's own height on the chord line, and 0 means the
+  //         middle of it, which is where every chart written before this stage sits. chord — the
+  //         chosen chord. size — the engraved size, normally the size of the placement being
+  //         replaced. tolerance — how near an existing chord the place must be to REPLACE it rather
+  //         than add another; the default is half a chord line's height, which is the reach a finger
+  //         has on the symbols it is aiming at.
+  // OUTPUTS: A [ChordEntry]. [ChordEntry.applied] carries the mark now in the document — the new
+  //          one, or the updated one — and nothing else happens. [ChordEntryRefusal.noSuchBar] when
+  //          the address names no bar. [ChordEntryRefusal.outsideChordBand] when the place is not on
+  //          the bar's own chord line.
   //
-  //          A [beat] beyond the bar's meter is NOT rejected here. The number of cells a bar has is
-  //          the layout engine's rule and it lives in one place there — the meter's count widened
-  //          by any chord written past it — and a second copy of that arithmetic in this class
-  //          would be a copy that drifts. A beat the bar genuinely cannot hold is refused by
-  //          [DocumentReducerException] from the reducer, which is the same answer every other
-  //          caller gets.
-  // KEYWORDS: chord-edit, update-or-insert, address-stability, size-preservation, guard
-  /// Puts [chord] into the cell at ([sectionId], [barIndex], [beat]).
-  bool applyChordToCell({
+  //          THE CHORD BAND IS A LAW HERE AND NOT A THRESHOLD, and this is the organ that enforces
+  //          it. The owner ruled that a chord is written above the staff — on the bar's chord line —
+  //          and that below the bar there is neither a chord nor a note («Аккорды надо запретить ниже
+  //          такта»). So a place whose `offsetY` is further from the chord line than the line itself
+  //          is tall is REFUSED, by name, and NOTHING IS WRITTEN: a refusal that left half a chord
+  //          behind would be the same defect as a chord drawn where the rule says none may be. The
+  //          band's height is the engraver's own `barHeight`, read from [LayoutStyle] so that the
+  //          editor and the engraving cannot disagree about where the chord line ends.
+  // KEYWORDS: chord-edit, coordinate, update-or-insert, chord-band, refusal-writes-nothing,
+  //           named-outcome, undoable
+  /// Puts [chord] into the bar at ([sectionId], [barIndex]) at ([offsetX], [offsetY]).
+  ChordEntry applyChordAt({
     required String sectionId,
     required int barIndex,
-    required int beat,
+    required double offsetX,
+    double offsetY = 0,
     required Chord chord,
     ChordSize size = ChordSize.normal,
+    double tolerance = chordHitTolerance,
   }) {
     final Bar? bar = _document.song.barAt(sectionId, barIndex);
     if (bar == null) {
-      return false;
+      return const ChordEntry.refused(ChordEntryRefusal.noSuchBar);
     }
-    final ChordMark? existing = existingChordAt(
+    final double halfBand = chordBandHalfHeight;
+    if (!offsetY.isFinite || offsetY.abs() > halfBand) {
+      return const ChordEntry.refused(ChordEntryRefusal.outsideChordBand);
+    }
+    final ChordMark? existing = existingChordNear(
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
+      offsetX: offsetX,
+      tolerance: tolerance,
     );
     if (existing == null) {
-      apply(
-        ChordInsertEvent(
-          docId: _docId,
-          seq: _seq,
-          chord: ChordMark(
-            place: cellPlace(sectionId, barIndex, beat),
-            chord: chord,
-            size: size,
-          ),
+      final ChordMark inserted = ChordMark(
+        place: AnchoredPlace(
+          anchor: EventAnchor(sectionId: sectionId, bar: barIndex),
+          offsetX: offsetX,
+          offsetY: offsetY,
         ),
+        chord: chord,
+        size: size,
       );
-      return true;
+      apply(ChordInsertEvent(docId: _docId, seq: _seq, chord: inserted));
+      return ChordEntry.applied(inserted);
+    }
+    // The replacement keeps the existing chord's own place — including its height on the chord line —
+    // and only the symbol and the engraving size change. A musician changing a chord is not asking
+    // for it to move, and a chord that slid because its symbol got longer would be the application
+    // rewriting a place he chose.
+    final ChordMark updated = existing.copyWith(chord: chord, size: size);
+    if (updated == existing) {
+      return ChordEntry.applied(existing);
     }
     apply(
       ChordUpdateEvent(
@@ -336,37 +435,36 @@ class EditSession {
         from: existing.copyWith(
           place: _placeIn(sectionId, barIndex, existing.place),
         ),
-        // The replacement keeps the existing chord's own place — including a step above zero, so a
-        // packed pair stays packed — and only the symbol and the engraving size change.
-        to: existing.copyWith(
-          place: _placeIn(sectionId, barIndex, existing.place),
-          chord: chord,
+        to: updated.copyWith(
+          place: _placeIn(sectionId, barIndex, updated.place),
         ),
       ),
     );
-    return true;
+    return ChordEntry.applied(updated);
   }
 
-  // PURPOSE: Write a chord into a cell from the SYMBOL a musician typed — `Dm7`, `G7`, `Cmaj7`,
+  // PURPOSE: Write a chord into a bar from the SYMBOL a musician typed — `Dm7`, `G7`, `Cmaj7`,
   //          `F#7#11` — which is one action where the palette's root-then-quality sequence is
   //          three. Owner decision D28 names the musician's own habit: he calls a chord by writing
   //          it, so the surface that lets him type it is the one that matches how he thinks.
-  // INPUTS: sectionId, barIndex and beat — the cell, in the model's own address. symbol — the text
-  //         the musician typed, which is read in the chart's WRITTEN key because that is the key the
-  //         document spells its chords in.
-  // OUTPUTS: A [ChordSymbolParse] — the chord that was written, or the reason the text could not be
-  //          read. On a read the chord goes into the document through [applyChordToCell], which
+  // INPUTS: sectionId, barIndex, offsetX and offsetY — the place, as in [applyChordAt]. symbol — the
+  //         text the musician typed, which is read in the chart's WRITTEN key because that is the key
+  //         the document spells its chords in.
+  // OUTPUTS: A [ChordSymbolParse] carrying the chord that was written, or the reason the text could
+  //          not be read. On a read the chord goes into the document through [applyChordAt], which
   //          means the event is an insert or an update on exactly the terms a palette tap already
-  //          uses, and an existing chord keeps its engraved size. On a refusal NOTHING is written:
-  //          a typed symbol that could not be read must not leave a half-chord behind, which is the
-  //          rule the reducer and the codec follow everywhere else.
+  //          uses. On a refusal NOTHING is written: a typed symbol that could not be read must not
+  //          leave a half-chord behind, which is the rule the reducer and the codec follow
+  //          everywhere else. A place outside the chord band is refused the same way and for the
+  //          same reason — see [applyChordAt].
   // KEYWORDS: chord-symbol, typed-entry, one-action, chart-key, refusal-writes-nothing, undoable,
-  //           d28
-  /// Reads [symbol] in the chart's written key and puts the chord it names into the cell.
-  ChordSymbolParse applyChordSymbolToCell({
+  //           chord-band, d28
+  /// Reads [symbol] in the chart's written key and puts the chord it names at the given place.
+  ChordSymbolParse applyChordSymbolAt({
     required String sectionId,
     required int barIndex,
-    required int beat,
+    required double offsetX,
+    double offsetY = 0,
     required String symbol,
     ChordSize size = ChordSize.normal,
   }) {
@@ -375,38 +473,39 @@ class EditSession {
     if (chord == null) {
       return parse;
     }
-    final bool applied = applyChordToCell(
+    final ChordEntry entry = applyChordAt(
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
+      offsetX: offsetX,
+      offsetY: offsetY,
       chord: chord,
       size: size,
     );
-    // A cell the bar cannot hold is a refusal like an unreadable symbol, and it is reported as one
-    // rather than as a success with nothing appended.
-    return applied
+    return entry.applied
         ? parse
         : const ChordSymbolRefusal(ChordSymbolReason.cellNotWritable);
   }
 
-  // PURPOSE: Remove the chord a cell holds, which is the palette's other action and the one the
-  //          catalogue's `chord.delete` exists for.
-  // INPUTS: sectionId, barIndex and beat as in [applyChordToCell].
-  // OUTPUTS: True when a chord was removed, false when the cell held none or the address names no
-  //          bar. Removal closes the gap in its beat, which is the reducer's documented rule; in
-  //          the ordinary one-chord-per-cell case there is no gap and the result is the same bar
-  //          without that chord.
-  // KEYWORDS: chord-delete, palette-action, guard, gap-closing
-  /// Removes the chord at ([sectionId], [barIndex], [beat]), reporting whether one was there.
-  bool removeChordAt({
+  // PURPOSE: Remove the chord a musician pointed at, which is the palette's other action and the
+  //          one the catalogue's `chord.delete` exists for.
+  // INPUTS: sectionId, barIndex and offsetX — the bar and the place along it; tolerance — how near
+  //         the place must be to a chord to name it. bar = the found mark's own place.
+  // OUTPUTS: True when a chord was removed, false when the bar holds none that near or the address
+  //          names no bar. The event carries the mark IN FULL, so undo restores the exact chord, its
+  //          size and its height on the line.
+  // KEYWORDS: chord-delete, palette-action, guard, whole-value, coordinate
+  /// Removes the chord nearest ([sectionId], [barIndex], [offsetX]), reporting whether one was there.
+  bool removeChordNear({
     required String sectionId,
     required int barIndex,
-    required int beat,
+    required double offsetX,
+    double tolerance = chordHitTolerance,
   }) {
-    final ChordMark? existing = existingChordAt(
+    final ChordMark? existing = existingChordNear(
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
+      offsetX: offsetX,
+      tolerance: tolerance,
     );
     if (existing == null) {
       return false;
@@ -423,32 +522,36 @@ class EditSession {
     return true;
   }
 
-  // PURPOSE: Answer what a cell currently holds, so the palette can open showing the chord the
-  //          musician is about to change rather than an unrelated default.
-  // INPUTS: sectionId, barIndex and beat as above.
-  // OUTPUTS: The placement at that cell with the lowest step, or null when the cell is empty or the
-  //          address names no bar. The lowest step is the one the cell's own column is labelled
-  //          with: a packed pair `E7b5 A7` occupies one beat as two steps, and the palette edits
-  //          the first of them. A cell carrying a second chord is therefore reachable only by
-  //          removing the first, which is a gap this class reports rather than hides.
-  // KEYWORDS: cell-query, lowest-step, packed-beat, null-when-empty
-  /// Returns the chord the cell at ([sectionId], [barIndex], [beat]) holds, or null.
-  ChordMark? existingChordAt({
+  // PURPOSE: Answer which chord a musician pointed at, so the palette can open showing the chord he
+  //          is about to change rather than an unrelated default.
+  // INPUTS: sectionId, barIndex and offsetX — the bar and the place along it. tolerance — the reach,
+  //         in bar-local logical pixels.
+  // OUTPUTS: The nearest mark within [tolerance], or null when the bar is empty or holds nothing that
+  //          near. Ties go to the earlier mark in model order, which is the order the bar was written
+  //          in — the same rule `hit_test.dart`'s `nearestChordAt` applies, restated here because
+  //          this library may not import the layout: the editor's reach and the palette's are one
+  //          number, and the comparison is the same comparison.
+  // KEYWORDS: chord-query, nearest, tolerance, coordinate, palette-open, null-when-empty
+  /// Returns the chord nearest ([sectionId], [barIndex], [offsetX]), or null.
+  ChordMark? existingChordNear({
     required String sectionId,
     required int barIndex,
-    required int beat,
+    required double offsetX,
+    double tolerance = chordHitTolerance,
   }) {
     final Bar? bar = _document.song.barAt(sectionId, barIndex);
     if (bar == null) {
       return null;
     }
     ChordMark? found;
+    double best = tolerance;
     for (final ChordMark placed in bar.chords) {
-      if (placed.pseudoBeat != beat) {
-        continue;
-      }
-      if (found == null || placed.pseudoStep < found.pseudoStep) {
-        found = placed;
+      final double distance = (placed.offsetX - offsetX).abs();
+      if (found == null || distance < best) {
+        if (distance <= tolerance) {
+          found = placed;
+          best = distance;
+        }
       }
     }
     return found;
@@ -646,13 +749,11 @@ class EditSession {
   //          and over refuse because refusing a legal address would make the gesture unusable in the
   //          middle of a chart, which is where a musician most often wants it.
   //
-  //          A WINDOW OF BEATS IS DIFFERENT, and its decided behaviour is REPLACE, not insert: a bar's
-  //          grid has no room to insert a beat without moving everything after it, which would be a
-  //          change of the bar's rhythm the musician did not ask for. So the target cells are
-  //          overwritten, and the whole previous bar travels in the event — one undo puts it back
-  //          exactly. A window that does not fit inside the target bar's METRE is refused rather than
-  //          reshaped: spilling it past the barline or widening the bar's grid would be the
-  //          application composing.
+  //          A WINDOW IS DIFFERENT, and its decided behaviour is REPLACE, not insert: a window names a
+  //          stretch of one bar, and the marks the paste lands on are overwritten rather than pushed
+  //          aside, because pushing them aside would change a rhythm the musician did not ask to
+  //          change. The whole previous bar travels in the event, so one undo puts it back exactly.
+  //          See [_pasteWindow] for what a window is now that it is a coordinate range.
   // KEYWORDS: paste, insert-not-replace, one-undo, ink-reanchored, moves-carried, typed-refusal,
   //           no-partial-effect, d35, d36
   /// Pastes [clip] at [at], reporting what happened.
@@ -669,7 +770,11 @@ class EditSession {
     }
     return switch (clip.depth) {
       SelectionDepth.bars => _pasteBars(at: at, clip: clip, section: section),
-      SelectionDepth.beats => _pasteBeats(at: at, clip: clip, section: section),
+      SelectionDepth.window => _pasteWindow(
+        at: at,
+        clip: clip,
+        section: section,
+      ),
     };
   }
 
@@ -731,77 +836,76 @@ class EditSession {
     return ClipPasteOutcome.pasted;
   }
 
-  // PURPOSE: Write a window of beats into the target bar, replacing those cells, as one event.
-  // INPUTS: at — the target, which must name a cell. clip — a beat-deep clip. section — the target
-  //         section, already resolved.
-  // OUTPUTS: [ClipPasteOutcome.pasted] when the event was appended; [ClipPasteOutcome.needsCell]
-  //          when the target names no cell; [ClipPasteOutcome.windowDoesNotFit] when the window
-  //          would leave the bar's metre.
+  // PURPOSE: Write a window of x into the target bar as one event, moving what the copy took onto
+  //          the place the musician pointed at.
+  // INPUTS: at — the target, which must name a place inside a bar. clip — a window-deep clip.
+  //         section — the target section, already resolved.
+  // OUTPUTS: [ClipPasteOutcome.pasted] when the event was appended;
+  //          [ClipPasteOutcome.needsCell] when the target names no place;
+  //          [ClipPasteOutcome.noSuchRun] when the clip is not one bar's window.
   //
-  //          WHAT TRAVELS AND WHAT IS REPLACED. The window's chords and notes are taken from the
-  //          clip's single bar, moved to the target beat, and written into a copy of the target bar
-  //          whose own cells in that window are REMOVED first — replace, stated rather than silent.
-  //          Everything of the target bar outside the window is untouched. The window's cell-anchored
-  //          ink is re-anchored the same way the bars-only paste does it, with fresh ids.
+  //          A PASTE IS A TRANSLATION, AND THERE IS NOTHING ELSE IN IT. Every mark of the source bar
+  //          whose own x lies in the copied window moves by `target - source`; every mark of the
+  //          target bar whose x lies in the target window is REMOVED first, so the paste replaces
+  //          what it lands on rather than stacking on top of it. What is outside both windows is
+  //          untouched, on both sides.
   //
-  //          WHY THE METRE AND NOT THE WIDENED GRID DECIDES WHETHER IT FITS. A bar's cells are its
-  //          metre widened by any chord written past it, and only the metre is the bar's own promise
-  //          about how many beats it holds. Letting a window fit into the widened part would put a
-  //          note in a column the bar does not have; refusing is one sentence a musician can act on
-  //          ("эта доля не помещается в такт"), and the widened grid is reachable by copying whole
-  //          bars instead.
-  // KEYWORDS: paste-window, replace-cells, whole-bar-inverse, metre-fit, ink-reanchor, one-event
-  ClipPasteOutcome _pasteBeats({
+  //          THE OLD RULE THAT REFUSED A WINDOW THE BAR COULD NOT HOLD IS GONE, and its removal is a
+  //          consequence of the model rather than a relaxation. A bar's width follows its content, so
+  //          a window written past the barline makes the bar wider instead of spilling off it, and
+  //          there is no metre to check a width against. `windowDoesNotFit` remains in the enum for
+  //          callers that branch on it; nothing here produces it.
+  //
+  //          THE INK MOVES WITH ITS WINDOW: a stroke whose first point lies in the source window is
+  //          translated by the same distance, its points being bar-local already. That is the whole
+  //          of "handwriting travels with its bar" applied to a window (owner decision D32).
+  // KEYWORDS: paste-window, translation, replace-window, no-metre, ink-translated, one-event
+  ClipPasteOutcome _pasteWindow({
     required ChartSelection at,
     required ChartClip clip,
     required Section section,
   }) {
-    final int? targetBeat = at.firstBeat;
-    if (targetBeat == null) {
+    final double? targetX = at.firstX;
+    final double? targetEnd = at.lastX;
+    if (targetX == null || targetEnd == null) {
       return ClipPasteOutcome.needsCell;
     }
     if (clip.bars.length != 1) {
-      // A beat-deep clip is always taken from one bar (`ChartSelection.beats` cannot span bars), so
-      // this is a clip that was not built by `chartClipOf` and cannot be applied to a grid.
+      // A window clip is always taken from one bar (`ChartSelection.window` cannot span bars), so
+      // this is a clip that was not built by `chartClipOf` and cannot be placed.
       return ClipPasteOutcome.noSuchRun;
     }
     final Bar target = section.bars[at.firstBar];
-    final int cells = target.timeSignature.cellsPerBar;
-    if (targetBeat < 0 || targetBeat + clip.beatCount > cells) {
-      return ClipPasteOutcome.windowDoesNotFit;
-    }
     final Bar source = clip.bars.single;
-    final int sourceFrom = clip.source.firstBeat!;
-    final int sourceTo = clip.source.lastBeat!;
+    final double sourceFrom = clip.source.firstX ?? 0;
+    final double sourceTo = clip.source.lastX ?? 0;
+    final double shift = targetX - sourceFrom;
+    bool inSource(double x) => x >= sourceFrom && x < sourceTo;
+    bool inTarget(double x) => x >= targetX && x < targetEnd;
+
     final List<ChordMark> chords = <ChordMark>[
       for (final ChordMark placed in target.chords)
-        if (placed.pseudoBeat < targetBeat ||
-            placed.pseudoBeat >= targetBeat + clip.beatCount)
-          placed,
+        if (!inTarget(placed.offsetX)) placed,
       for (final ChordMark placed in source.chords)
-        if (placed.pseudoBeat >= sourceFrom && placed.pseudoBeat <= sourceTo)
+        if (inSource(placed.offsetX))
           placed.copyWith(
-            place: cellPlace(
-              at.sectionId,
-              at.firstBar,
-              targetBeat + (placed.pseudoBeat - sourceFrom),
-              placed.pseudoStep,
+            place: AnchoredPlace(
+              anchor: EventAnchor(sectionId: at.sectionId, bar: at.firstBar),
+              offsetX: placed.offsetX + shift,
+              offsetY: placed.place.offsetY,
             ),
           ),
     ]..sort(_compareChordAddresses);
     final List<NoteMark> melody = <NoteMark>[
       for (final NoteMark note in target.melody)
-        if (note.pseudoBeat < targetBeat ||
-            note.pseudoBeat >= targetBeat + clip.beatCount)
-          note,
+        if (!inTarget(note.offsetX)) note,
       for (final NoteMark note in source.melody)
-        if (note.pseudoBeat >= sourceFrom && note.pseudoBeat <= sourceTo)
+        if (inSource(note.offsetX))
           note.copyWith(
-            place: cellPlace(
-              at.sectionId,
-              at.firstBar,
-              targetBeat + (note.pseudoBeat - sourceFrom),
-              note.pseudoStep,
+            place: AnchoredPlace(
+              anchor: EventAnchor(sectionId: at.sectionId, bar: at.firstBar),
+              offsetX: note.offsetX + shift,
+              offsetY: note.place.offsetY,
             ),
           ),
     ]..sort(_compareNoteAddresses);
@@ -809,12 +913,6 @@ class EditSession {
     final Set<String> taken = <String>{
       for (final InkStroke stroke in _document.strokes) stroke.id,
     };
-    // THE INK MOVES BY THE WINDOW'S OWN WIDTH, and by nothing else: a beat-deep clip's strokes are
-    // rebased to their bar, so what places them inside the window is their own points. Writing the
-    // window at another beat therefore translates those points by the columns between the two
-    // windows, which is what the old beat arithmetic on the anchor did when the anchor still had a
-    // beat to move.
-    final double windowShift = (targetBeat - sourceFrom) * PseudoGrid.cellPitch;
     final List<InkStroke> pastedStrokes = <InkStroke>[
       for (final InkStroke stroke in clip.strokes)
         InkStroke(
@@ -825,12 +923,7 @@ class EditSession {
           anchor: EventAnchor(sectionId: at.sectionId, bar: at.firstBar),
           points: <InkPoint>[
             for (final InkPoint point in stroke.points)
-              InkPoint(
-                x: point.x + windowShift,
-                y: point.y,
-                w: point.w,
-                t: point.t,
-              ),
+              InkPoint(x: point.x + shift, y: point.y, w: point.w, t: point.t),
           ],
         ),
     ];
@@ -882,7 +975,7 @@ class EditSession {
         outcome: SelectionTransposeOutcome.noSuchSection,
       );
     }
-    if (selection.isBeatWindow) {
+    if (selection.isWindow) {
       return SelectionTransposition(
         selection: selection,
         semitones: semitones,
@@ -1035,20 +1128,16 @@ class EditSession {
   // INPUTS: left and right — the two placements.
   // OUTPUTS: A negative, zero or positive integer, as a comparator must return.
   // KEYWORDS: chord-address, ordering, deterministic-rebuild
-  int _compareChordAddresses(ChordMark left, ChordMark right) {
-    final int byBeat = left.pseudoBeat.compareTo(right.pseudoBeat);
-    return byBeat != 0 ? byBeat : left.pseudoStep.compareTo(right.pseudoStep);
-  }
+  int _compareChordAddresses(ChordMark left, ChordMark right) =>
+      left.offsetX.compareTo(right.offsetX);
 
   // PURPOSE: Order two melody notes by their address, for the same reason as
   //          [_compareChordAddresses].
   // INPUTS: left and right — the two placements.
   // OUTPUTS: A negative, zero or positive integer.
   // KEYWORDS: note-address, ordering, deterministic-rebuild
-  int _compareNoteAddresses(NoteMark left, NoteMark right) {
-    final int byBeat = left.pseudoBeat.compareTo(right.pseudoBeat);
-    return byBeat != 0 ? byBeat : left.pseudoStep.compareTo(right.pseudoStep);
-  }
+  int _compareNoteAddresses(NoteMark left, NoteMark right) =>
+      left.offsetX.compareTo(right.offsetX);
 
   // --- Sections: the form a chart is made of -----------------------------------------------
   // INPUTS: sectionId — a section of the song, whose own meter and position decide the new one's.
@@ -1634,35 +1723,29 @@ class EditSession {
 
   // PURPOSE: Put a piece of text a musician wants to read on the chart — `To Coda`, `D.C. al
   //          Fine`, `Solo`, `Vamp`, `4×` — at an address in the music, through the operation log.
-  // INPUTS: sectionId and barIndex — the bar to hang it on, in the model's own address. beat — the
-  //         column inside that bar to hang it on, or null to hang it on the bar itself, which is
-  //         what a remark about the whole bar (a navigation word at the top of it) wants. offsetX
-  //         and offsetY — where the words sit from that point, in bar-local logical pixels; the
-  //         defaults place a bar-level cue in the bar's sign band. text — the words, empty to insert
-  //         and then type into (see the section note).
-  // OUTPUTS: The new cue's identity, or null when the address names no bar or [beat] is negative —
-  //          in both cases nothing is appended and the document is untouched. The cue is appended
-  //          at the END of the cue list, which is the end of the render order: a cue put on a bar
-  //          now is drawn over cues that were already there, so the musician sees what they just
-  //          wrote rather than the remark it landed on top of.
+  // INPUTS: sectionId and barIndex — the bar to hang it on, in the model's own address. offsetX and
+  //         offsetY — where the words sit, in bar-local logical pixels; the defaults put the cue at
+  //         the bar's own left edge. text — the words, empty to insert and then type into (see the
+  //         section note).
+  // OUTPUTS: The new cue's identity, or null when the address names no bar — in which case nothing
+  //          is appended and the document is untouched. The cue is appended at the END of the cue
+  //          list, which is the end of the render order: a cue put on a bar now is drawn over cues
+  //          that were already there, so the musician sees what they just wrote rather than the
+  //          remark it landed on top of.
   //
-  //          THE COLUMN IS FOLDED INTO THE OFFSET HERE, and that is the shim's write direction: a
-  //          cue's place is a coordinate now, so "the third beat, two pixels in" is one number rather
-  //          than an address plus an offset. A caller that has only a column still names it, and the
-  //          stored place is where that column is — which is what keeps the cue on the column it was
-  //          written on when the layout stops having columns at all.
-  // KEYWORDS: text-cue, insert, anchored, bar-level, cell-level, offset, render-order, undoable,
-  //           pseudo-grid
-  /// Inserts a text cue at ([sectionId], [barIndex], [beat]) and returns its id, or null.
+  //          THE POSITION IS ONE NUMBER AND IT IS THE CALLER'S. There is no column argument any more:
+  //          "the third beat, two pixels in" used to be an address plus an offset and is now simply
+  //          where the words go, which is what the layout draws.
+  // KEYWORDS: text-cue, insert, anchored, offset, render-order, undoable, coordinate
+  /// Inserts a text cue at ([sectionId], [barIndex]) at the given offset, returning its id.
   String? insertTextCue({
     required String sectionId,
     required int barIndex,
-    int? beat,
     double offsetX = 0,
     double offsetY = 0,
     String text = '',
   }) {
-    if (beat != null && beat < 0) {
+    if (!offsetX.isFinite || !offsetY.isFinite) {
       return null;
     }
     if (_document.song.barAt(sectionId, barIndex) == null) {
@@ -1672,7 +1755,7 @@ class EditSession {
       id: _freshCueId(),
       place: AnchoredPlace(
         anchor: EventAnchor(sectionId: sectionId, bar: barIndex),
-        offsetX: beat == null ? offsetX : PseudoGrid.xOf(beat, 0) + offsetX,
+        offsetX: offsetX,
         offsetY: offsetY,
       ),
       text: text,
@@ -1719,7 +1802,7 @@ class EditSession {
   //          separates two remarks that landed on top of each other and how a cue written on the
   //          wrong bar is put right without retyping its words.
   // INPUTS: id — the cue to move. sectionId and barIndex — the bar to move it to. offsetX and
-  //         offsetY — the new position, in bar-local logical pixels.
+  //         offsetY — the new position, in bar-local logical pixels, which is the whole answer.
   // OUTPUTS: True when a move was appended, false when no cue carries [id], when the TARGET names
   //          no bar, and when the target place equals the one the cue already occupies. The target
   //          is deliberately not restricted to the cue's own bar or section: `textcue.move` carries a
@@ -1891,96 +1974,93 @@ class EditSession {
   // `step: 0` — which is the same distinction the note palette already draws between its "New note"
   // row and the row of a note already written.
 
-  // PURPOSE: Report the notes a beat already carries, so a surface can show what is there and name
-  //          which of them an edit acts on — the question that makes several notes on one beat
-  //          reachable at all, since two noteheads written at one address are one point on the page.
-  // INPUTS: sectionId and barIndex — the bar, in the model's own address. beat — the cell index
-  //         inside that bar.
-  // OUTPUTS: The notes at that cell in the model's own order, ascending by step, as a fresh list a
-  //          caller may reorder. Empty when the cell holds none, and empty when the address names no
-  //          bar: "no notes here" and "no bar here" answer the same way because every caller that
-  //          needs to tell them apart is already holding the bar (see [existingNoteAt]).
-  // KEYWORDS: melody, cell-query, stacked-notes, empty-when-absent, total-function
-  /// Returns the notes the cell at ([sectionId], [barIndex], [beat]) carries, by step.
-  List<NoteMark> existingNotesAt({
+  // PURPOSE: Report every note a bar carries, in the order it is drawn, so a surface can list what is
+  //          there and name which of them an edit acts on.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address.
+  // OUTPUTS: The bar's notes ordered by x, as a fresh list a caller may keep. Empty when the bar
+  //          holds none or the address names no bar.
+  //
+  //          THE WHOLE BAR AND NOT A WINDOW OF IT, which is the difference a coordinate model makes.
+  //          A palette used to list "the notes of this beat" because a beat was the unit of address;
+  //          now that a note's address IS its place, the honest list is the bar's melody in reading
+  //          order, with the note the musician pointed at marked among them. Two notes at one x are
+  //          both returned — a chord in the melody is several marks at one place — and nothing is
+  //          filtered by a tolerance, so an edit that moves a note a pixel cannot make it vanish from
+  //          the list it was chosen from.
+  // KEYWORDS: melody, note-list, reading-order, coordinate, order-by-x, whole-bar
+  /// Returns the bar's notes, ordered by x.
+  List<NoteMark> notesInBar({
     required String sectionId,
     required int barIndex,
-    required int beat,
   }) {
     final Bar? bar = _document.song.barAt(sectionId, barIndex);
     if (bar == null) {
       return const <NoteMark>[];
     }
-    return <NoteMark>[
-      for (final NoteMark note in bar.melody)
-        if (note.pseudoBeat == beat) note,
-    ];
+    return <NoteMark>[...bar.melody]..sort(_compareNoteAddresses);
   }
 
-  // PURPOSE: Answer which note sits at one exact address, so a surface carrying a `(beat, step)`
-  //          pair can read back the value it is editing rather than a copy it took when it opened —
-  //          the rule [textCueById] and `existingChordAt` already follow.
-  // INPUTS: sectionId, barIndex and beat as in [existingNotesAt]. step — the order within the cell.
-  // OUTPUTS: The note at that address, or null when the cell holds none there or the address names
-  //          no bar. Null is a real answer: the undo of an insertion is exactly how a note stops
-  //          existing, and a surface that must keep working after one needs to be told.
-  // KEYWORDS: melody, note-lookup, address, null-when-absent, total-function
-  /// Returns the note at ([sectionId], [barIndex], [beat], [step]), or null.
-  NoteMark? existingNoteAt({
+  // PURPOSE: Answer which single note a musician pointed at, so an edit can name it.
+  // INPUTS: As [notesNear].
+  // OUTPUTS: The note nearest [offsetX] within [tolerance], or null. Ties go to the earlier note in
+  //          model order — the same rule [existingChordNear] follows, so a tap names one mark the
+  //          same way on both surfaces.
+  // KEYWORDS: melody, note-query, nearest, tolerance, tie-break, null-when-none
+  /// Returns the note nearest ([sectionId], [barIndex], [offsetX]), or null.
+  NoteMark? existingNoteNear({
     required String sectionId,
     required int barIndex,
-    required int beat,
-    required int step,
+    required double offsetX,
+    double tolerance = chordHitTolerance,
   }) {
     final Bar? bar = _document.song.barAt(sectionId, barIndex);
     if (bar == null) {
       return null;
     }
+    NoteMark? found;
+    double best = tolerance;
     for (final NoteMark note in bar.melody) {
-      if (note.pseudoBeat == beat && note.pseudoStep == step) {
-        return note;
+      final double distance = (note.offsetX - offsetX).abs();
+      if (found == null || distance < best) {
+        if (distance <= tolerance) {
+          found = note;
+          best = distance;
+        }
       }
     }
-    return null;
+    return found;
   }
 
-  // PURPOSE: Put a note a musician chose on a beat of the melodic staff — the edit the note palette
-  //          exists to make, and the first thing in this application that can write `Bar.melody`
-  //          from a surface.
-  // INPUTS: sectionId and barIndex — the bar, in the model's own address. beat — the cell inside
-  //         that bar, the same address a chord is written at. pitch — the written pitch and octave.
-  //         value — the written duration. step — where in the cell's dense sequence the note lands:
-  //         0 puts it IN FRONT of everything the cell already holds, 1 after the first note, and
-  //         NULL — the default — means AFTER THE LAST NOTE THE CELL ALREADY HOLDS. tiedToNext —
-  //         whether the note is tied into the next one as well as inserted.
-  // OUTPUTS: True when an insertion was appended, false in three cases, none of which writes
-  //          anything. A [beat] below zero, or an explicit [step] below zero; a [beat] past the LAST
-  //          cell the bar has, since [LayoutEngine] drops a note it has no cell for exactly as it
-  //          drops a chord at the same address (`placeMelodyStaff`) so the edit would be a log row
-  //          nothing can see; and a [value] longer than the whole bar, for the same reason at the
-  //          other end. The input document is not mutated in any of the three: the guard runs before
-  //          [apply].
+  // PURPOSE: Put a note a musician chose at a place on the melodic staff — the edit the note palette
+  //          exists to make, and the way `Bar.melody` is written from a surface.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. offsetX — WHERE ALONG THE
+  //         BAR the notehead stands, in bar-local logical pixels; a note's place is its centre, which
+  //         is the number the ink reader measures and the number the engraver draws at. pitch — the
+  //         written pitch and octave, which is the note's HEIGHT. value — the written duration.
+  //         tiedToNext — whether the note is tied into the next one as well as inserted.
+  // OUTPUTS: True when an insertion was appended, false in two cases, neither of which writes
+  //          anything. A non-finite or NEGATIVE [offsetX] — a place left of the bar is not in the bar,
+  //          and drawing it there would put ink over the previous barline; and a [value] longer than
+  //          the whole bar, which is a note that cannot fit in the bar whatever its x. The input
+  //          document is not mutated in either case: the guard runs before [apply].
   //
-  //          The upper beat bound is kept HERE and not delegated to the reducer, deliberately:
-  //          `_withNoteInserted` has no opinion about the meter — the number of cells a bar has is
-  //          the layout engine's rule — and a chart READ BACK with a note past its meter must still
-  //          load. This is the caller-side guard on NEW edits, not a rule of the model.
-  // KEYWORDS: melody, note-insert, cell-address, dense-step, stacked-notes, append, guard, undoable
-  /// Inserts [pitch] of [value] into the cell at ([sectionId], [barIndex], [beat]).
+  //          WHAT NO LONGER HAPPENS, AND WHY ITS ABSENCE IS THE POINT. There is no beat bound and the
+  //          metre is not consulted: a bar's width follows its content, so a note written past the
+  //          last thing in the bar WIDENS the bar rather than being refused for falling outside a
+  //          grid. And there is no `step`: several notes at one x are several marks at one place, and
+  //          the order they are drawn in is their x — see `placeMelodyStaff`, which sorts by it.
+  // KEYWORDS: melody, note-insert, coordinate, wheel-no-step, append, guard, undoable
+  /// Inserts [pitch] of [value] at ([sectionId], [barIndex], [offsetX]).
   bool insertNote({
     required String sectionId,
     required int barIndex,
-    required int beat,
+    required double offsetX,
     required PitchedNote pitch,
     required NoteValue value,
-    int? step,
     bool tiedToNext = false,
   }) {
     final Bar? bar = _document.song.barAt(sectionId, barIndex);
-    if (bar == null || beat < 0 || (step != null && step < 0)) {
-      return false;
-    }
-    if (beat >= bar.timeSignature.cellsPerBar) {
+    if (bar == null || !offsetX.isFinite || offsetX < 0) {
       return false;
     }
     if (value.compareDuration(_wholeBarValue(bar)) > 0) {
@@ -1991,16 +2071,9 @@ class EditSession {
         docId: _docId,
         seq: _seq,
         note: NoteMark(
-          // THE NOTE ARRIVES AT THE END OF THE CELL UNLESS THE CALLER NAMED A STEP. A cell's notes
-          // are addressed by their order within it, and that order is one number on a column that
-          // the reducer does not renumber — so a caller that wants a note BEFORE the ones already
-          // written names a step, and omitting it is how a musician's next note goes after the one he
-          // just wrote. See the region note for the measurement behind that.
-          place: cellPlace(
-            sectionId,
-            barIndex,
-            beat,
-            step ?? _stepAfterCell(bar, beat),
+          place: AnchoredPlace(
+            anchor: EventAnchor(sectionId: sectionId, bar: barIndex),
+            offsetX: offsetX,
           ),
           pitch: pitch,
           value: value,
@@ -2014,39 +2087,37 @@ class EditSession {
   // PURPOSE: Change a note already written — its pitch, its duration or its tie — which is the edit
   //          a musician makes far more often than placing a new one, because a wrong note is
   //          corrected rather than deleted and re-placed.
-  // INPUTS: sectionId, barIndex, beat and step — the address of the note to change, which this
-  //         method does NOT change: moving a note is a deletion and an insertion, and
-  //         `NoteUpdateEvent` asserts that its two sides address the same cell. pitch, value and
-  //         tiedToNext — the new written form; null leaves that field as the note already has it,
-  //         so a caller that only picked a new duration does not have to restate the pitch.
-  // OUTPUTS: True when an update was appended, false in two cases. The address names no note; or the
-  //          new form is EQUAL to the old one field by field, which is the rule every other edit
-  //          here follows (see [setBarMark], [setVolta], [updateSong]): an event whose two sides are
-  //          equal is a log row that changed nothing and an offer to undo an edit that did not
-  //          happen. Equality is `NoteMark ==`, comparing pitch, value, beat, step and tie together,
-  //          so the comparison is the whole value rather than a boolean about the one field named.
+  // INPUTS: sectionId, barIndex and offsetX — the place of the note to change, with [tolerance] as
+  //         the reach. This method does NOT move the note: an update changes the pitch, the duration
+  //         or the tie, and the note stays written where it was, which `NoteUpdateEvent` asserts by
+  //         requiring both sides to name one bar. pitch, value and tiedToNext — the new written form;
+  //         null leaves that field as the note already has it.
+  // OUTPUTS: True when an update was appended, false in two cases. The place names no note; or the
+  //          new form is EQUAL to the old one field by field, which is the rule every other edit here
+  //          follows (see [setBarMark], [setVolta], [updateSong]): an event whose two sides are equal
+  //          is a log row that changed nothing and an offer to undo an edit that did not happen.
+  //          Equality is `NoteMark ==`, so the comparison is the whole value rather than a boolean
+  //          about the one field named.
   // KEYWORDS: melody, note-update, before-after, no-op-refusal, address-stable, undoable
-  /// Replaces the note at ([sectionId], [barIndex], [beat], [step]) with the given form.
+  /// Replaces the note nearest ([sectionId], [barIndex], [offsetX]) with the given form.
   bool updateNote({
     required String sectionId,
     required int barIndex,
-    required int beat,
-    required int step,
+    required double offsetX,
+    double tolerance = chordHitTolerance,
     PitchedNote? pitch,
     NoteValue? value,
     bool? tiedToNext,
   }) {
-    final NoteMark? from = existingNoteAt(
+    final NoteMark? from = existingNoteNear(
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
-      step: step,
+      offsetX: offsetX,
+      tolerance: tolerance,
     );
     if (from == null) {
       return false;
     }
-    // The replacement keeps the note's own place: an update changes the pitch, the duration or the
-    // tie, and the note stays written where it was.
     final NoteMark to = from.copyWith(
       pitch: pitch ?? from.pitch,
       value: value ?? from.value,
@@ -2055,32 +2126,39 @@ class EditSession {
     if (to == from) {
       return false;
     }
-    apply(NoteUpdateEvent(docId: _docId, seq: _seq, from: from, to: to));
+    apply(
+      NoteUpdateEvent(
+        docId: _docId,
+        seq: _seq,
+        from: from.copyWith(place: _placeIn(sectionId, barIndex, from.place)),
+        to: to,
+      ),
+    );
     return true;
   }
 
   // PURPOSE: Tie a note into the next one, or untie it — the gesture that writes a single sound
-  //          across a beat, and the only frame `tiedToNext` has in the model.
-  // INPUTS: sectionId, barIndex, beat and step — the note. tied — true to tie it forward, false to
-  //         untie it.
-  // OUTPUTS: True when an update was appended, false when the address names no note and false when
-  //          the note already carries that flag. Both directions are one field of one note, which is
-  //          why there is no second event: the model keeps the tie on the EARLIER note alone
+  //          across a barline, and the only frame `tiedToNext` has in the model.
+  // INPUTS: sectionId, barIndex and offsetX — the note, with [tolerance] as the reach. tied — true to
+  //         tie it forward, false to untie it.
+  // OUTPUTS: True when an update was appended, false when the place names no note and false when the
+  //          note already carries that flag. Both directions are one field of one note, which is why
+  //          there is no second event: the model keeps the tie on the EARLIER note alone
   //          (`NoteMark.tiedToNext`), so [updateNote] already writes either way.
   // KEYWORDS: melody, tie, tie-forward, toggle, one-field, undoable
-  /// Sets or clears the tie on the note at the given address, reporting whether it changed.
+  /// Sets or clears the tie on the note nearest the given place, reporting whether it changed.
   bool setNoteTie({
     required String sectionId,
     required int barIndex,
-    required int beat,
-    required int step,
+    required double offsetX,
+    double tolerance = chordHitTolerance,
     required bool tied,
   }) {
-    final NoteMark? from = existingNoteAt(
+    final NoteMark? from = existingNoteNear(
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
-      step: step,
+      offsetX: offsetX,
+      tolerance: tolerance,
     );
     if (from == null || from.tiedToNext == tied) {
       return false;
@@ -2088,40 +2166,45 @@ class EditSession {
     return updateNote(
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
-      step: step,
+      offsetX: from.offsetX,
+      tolerance: 0,
       tiedToNext: tied,
     );
   }
 
   // PURPOSE: Take a note off the staff, which is the half `note.insert`'s inverse needs and the
-  //          gesture that removes a note a musician put on the wrong beat.
-  // INPUTS: sectionId, barIndex, beat and step — the note to remove.
-  // OUTPUTS: True when a deletion was appended, false when the address names no note. The event
-  //          carries the note IN FULL, and the reducer closes the gap the note left in its cell, so
-  //          an undo restores the note and its neighbours' steps together: the inverse's
-  //          `note.insert` at the removed note's own step pushes the notes at or after that step back
-  //          up, and the reducer's sort puts them in the order they were in before. Measured on two
-  //          notes sharing a beat: deleting step 0 leaves the other at step 0, and undo returns a
-  //          document EQUAL to the one before the deletion, with both steps restored.
-  // KEYWORDS: melody, note-delete, gap-closing, whole-value, undoable
-  /// Removes the note at ([sectionId], [barIndex], [beat], [step]), reporting whether one was there.
-  bool deleteNoteAt({
+  //          gesture that removes a note a musician put in the wrong place.
+  // INPUTS: sectionId, barIndex and offsetX — the note, with [tolerance] as the reach.
+  // OUTPUTS: True when a deletion was appended, false when the place names no note. The event carries
+  //          the note IN FULL, so undoing the deletion restores the note, its place, its pitch, its
+  //          duration and its tie together — the whole value, which is the invariant every inverse in
+  //          this catalogue keeps.
+  // KEYWORDS: melody, note-delete, whole-value, undoable, coordinate
+  /// Removes the note nearest ([sectionId], [barIndex], [offsetX]), reporting whether one was there.
+  bool deleteNoteNear({
     required String sectionId,
     required int barIndex,
-    required int beat,
-    required int step,
+    required double offsetX,
+    double tolerance = chordHitTolerance,
   }) {
-    final NoteMark? removed = existingNoteAt(
+    final NoteMark? removed = existingNoteNear(
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
-      step: step,
+      offsetX: offsetX,
+      tolerance: tolerance,
     );
     if (removed == null) {
       return false;
     }
-    apply(NoteDeleteEvent(docId: _docId, seq: _seq, removed: removed));
+    apply(
+      NoteDeleteEvent(
+        docId: _docId,
+        seq: _seq,
+        removed: removed.copyWith(
+          place: _placeIn(sectionId, barIndex, removed.place),
+        ),
+      ),
+    );
     return true;
   }
 
@@ -2146,28 +2229,6 @@ class EditSession {
       }
     }
     return const NoteValue.plain(NoteBase.thirtySecond);
-  }
-
-  // PURPOSE: Report the step a note that ARRIVES at a cell must take, so that "the end of the
-  //          cell's sequence" is one rule instead of arithmetic the caller repeats — and so that a
-  //          caller adding the next note of a run writes no step at all.
-  // INPUTS: bar — the bar the note is going into. beat — the cell it is being written at.
-  // OUTPUTS: One past the HIGHEST step the bar already uses at [beat], and 0 when the cell is empty.
-  //          One past the highest and NOT the number of notes there, because a bar read back from a
-  //          file may carry a cell whose steps are not dense: with steps 3 and 4 present, the note
-  //          count is 2 and an insertion at 2 would push BOTH of them up and land in FRONT of them,
-  //          which is the reversal this whole path exists to avoid. The number returned is the
-  //          insertion point `_withNoteInserted` takes, and since it is past every step present,
-  //          nothing is pushed and the new note is last.
-  // KEYWORDS: melody, step, append, insertion-point, dense-sequence, non-dense-input, total-function
-  int _stepAfterCell(Bar bar, int beat) {
-    int next = 0;
-    for (final NoteMark note in bar.melody) {
-      if (note.pseudoBeat == beat && note.pseudoStep >= next) {
-        next = note.pseudoStep + 1;
-      }
-    }
-    return next;
   }
 
   // --- Ink: the strokes a musician wrote on the chart -------------------------------------------

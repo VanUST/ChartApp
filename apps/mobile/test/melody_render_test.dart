@@ -30,6 +30,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page the probe engraves.
 const double probePageWidth = 824;
 
@@ -140,7 +142,7 @@ NoteMark noteOf(
   int step = 0,
   bool tied = false,
 }) => NoteMark(
-  place: cellAt(beat, step),
+  place: placeAt(beat, step),
   pitch: PitchedNote(note: WrittenNote(letter, alter), octave: octave),
   value: value,
   tiedToNext: tied,
@@ -150,7 +152,7 @@ NoteMark noteOf(
 Bar melodyBar(List<NoteMark> melody) => Bar(
   chords: <ChordMark>[
     ChordMark(
-      place: cellAt(0),
+      place: placeAt(0),
       chord: Chord(root: ChordRoot(0)),
     ),
   ],
@@ -484,7 +486,7 @@ void main() {
       'bars=${page.bars.length} '
       'stave=${_r(bar.bounds)} staff=${_r(bar.melody.bounds)} '
       'system=${_r(page.systems.first.bounds)} '
-      'cells=${bar.cells.length}',
+      'cells=${bar.chords.length}',
     );
 
     int totalGlyphs = 0;
@@ -554,28 +556,29 @@ void main() {
     for (int index = 0; index < page.bars.length; index++) {
       final PlacedBar withStaff = page.bars[index];
       final PlacedBar plain = plainPage.bars[index];
-      for (int cell = 0; cell < withStaff.cells.length; cell++) {
-        final PlacedCell a = withStaff.cells[cell];
-        final PlacedCell b = plain.cells[cell];
-        expect(a.beat, b.beat, reason: 'bar $index cell $cell identity');
-        expect(a.bounds, b.bounds, reason: 'bar $index cell $cell rectangle');
-        LayoutOffset centre(LayoutRect r) =>
-            LayoutOffset(r.left + r.size.width / 2, r.top + r.size.height / 2);
-        final ChartHit? hitWith = hitTestPage(page, centre(a.bounds));
-        final ChartHit? hitPlain = hitTestPage(plainPage, centre(b.bounds));
-        expect(hitWith, isNotNull, reason: 'a tap on a cell must name it');
-        expect(hitPlain, isNotNull);
-        expect(hitWith!.sectionId, hitPlain!.sectionId);
-        expect(hitWith.barIndex, hitPlain.barIndex);
-        expect(hitWith.beat, hitPlain.beat);
-        comparedCells++;
-      }
+      // THE BAR IS THE TARGET NOW. This loop used to walk the two pages bar by bar and cell by cell
+      // and compare each cell identity and rectangle — 'cell $cell identity' — which was the grid the
+      // metre drew. With no columns, what the staff must not move is the BAR: the rectangle a tap
+      // names and the address it answers with are what a melody appearing must leave alone.
+      final LayoutRect a = withStaff.bounds;
+      final LayoutRect b = plain.bounds;
+      expect(a, b, reason: 'bar $index rectangle');
+      LayoutOffset centre(LayoutRect r) =>
+          LayoutOffset(r.left + r.size.width / 2, r.top + r.size.height / 2);
+      final ChartHit? hitWith = hitTestPage(page, centre(a));
+      final ChartHit? hitPlain = hitTestPage(plainPage, centre(b));
+      expect(hitWith, isNotNull, reason: 'a tap on a bar must name it');
+      expect(hitPlain, isNotNull);
+      expect(hitWith!.sectionId, hitPlain!.sectionId);
+      expect(hitWith.barIndex, hitPlain.barIndex);
+      expect(hitWith.local.x, closeTo(hitPlain.local.x, 1e-9));
+      comparedCells++;
     }
     expect(comparedCells, 32, reason: 'eight 4/4 bars');
     stdout.writeln(
-      'probe.hit-test cells_compared=$comparedCells '
-      'melody_first_cell=${_r(page.bars.first.cells.first.bounds)} '
-      'plain_first_cell=${_r(plainPage.bars.first.cells.first.bounds)} '
+      'probe.hit-test bars_compared=$comparedCells '
+      'melody_first_bar=${_r(page.bars.first.bounds)} '
+      'plain_first_bar=${_r(plainPage.bars.first.bounds)} '
       'identical=true',
     );
     stdout.writeln(
@@ -866,7 +869,7 @@ void main() {
 
     // THE FIELD THE CLEF STOOD IN: from just clear of the barline to just short of the first cell's
     // column, over the height of the five lines.
-    final double firstCellLeft = bar.cells.first.bounds.left;
+    final double firstCellLeft = bar.bounds.left;
     final int inTheClefsField = inkBetweenTheLines(
       left: bar.melody.bounds.left + 3,
       right: firstCellLeft - 2,

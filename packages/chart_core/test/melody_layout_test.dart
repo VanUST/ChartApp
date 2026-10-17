@@ -12,6 +12,8 @@ import 'dart:io';
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The chart every claim below is measured on: one section, [bars] bars, one chord and one quarter
 /// note per bar. A chord is `C` and a note is `G4`, which is inside the staff and needs no ledger
 /// line, so the height the melody costs is the BAND and not a ledger line's excursion.
@@ -28,13 +30,13 @@ Song melodyChart(int bars) => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(root: ChordRoot(0)),
               ),
             ],
             melody: <NoteMark>[
               NoteMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 pitch: const PitchedNote(
                   note: WrittenNote(NoteLetter.g, 0),
                   octave: 4,

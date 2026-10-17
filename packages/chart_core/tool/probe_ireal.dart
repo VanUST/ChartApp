@@ -90,7 +90,7 @@ void main(List<String> args) {
         final String chords = bar.chords
             .map(
               (ChordMark c) =>
-                  '${c.pseudoBeat}:${c.chord.render(song.key, const SpellingTable())}'
+                  '${c.offsetX.toStringAsFixed(1)}:${c.chord.render(song.key, const SpellingTable())}'
                   '${c.size == ChordSize.small ? '(s)' : ''}',
             )
             .join(' ');

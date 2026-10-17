@@ -39,6 +39,8 @@ import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// Where the PNGs are written. Outside the repository: an image is evidence for one inspection, not
 /// an artefact to commit.
 const String meterControlsDirectory =
@@ -95,7 +97,7 @@ Song _meterChart() => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(
                   root: ChordRoot(index * 2),
                   quality: ChordQuality.majorSeventh,

@@ -32,7 +32,6 @@ import '../pitch.dart';
 import '../song/bar.dart';
 import '../song/note.dart';
 import '../song/note_value.dart';
-import '../song/pseudo_grid.dart';
 import '../song/section.dart';
 import '../song/song.dart';
 import '../song/staff.dart';
@@ -46,11 +45,9 @@ import '../transposition.dart';
 // name the type; and until this change it lived in `anchor.dart` as a part of this very library, so
 // re-exporting it is what keeps the public surface of the catalogue the same shape it was.
 //
-// The same is true of the temporary pseudo-grid in `../song/pseudo_grid.dart`: the parts of this
 // library cannot carry imports of their own, and the edit session — a part — still builds a place
 // from a cell while the surface speaks in beats. Both exports go together when the shim dies.
 export '../anchored_place.dart';
-export '../song/pseudo_grid.dart';
 
 part 'barline.dart';
 part 'barline_events.dart';

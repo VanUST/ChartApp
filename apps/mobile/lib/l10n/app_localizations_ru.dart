@@ -319,6 +319,16 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String selectionPastedIntoBar(int bar) {
+    return 'Вставлено в такт $bar.';
+  }
+
+  @override
+  String selectionRunWindowAt(int bar, int fromX, int toX) {
+    return 'выбран: такт $bar, с $fromX до $toX px';
+  }
+
+  @override
   String selectionPastedAfter(int count, int bar) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -782,6 +792,23 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get metadataFooterFixTempo => 'Исправьте темп перед сохранением.';
+
+  @override
+  String palettePositionBar(int bar) {
+    return 'Такт $bar';
+  }
+
+  @override
+  String get chordOutsideBand =>
+      'Аккорд пишется над станом: ниже такта он не читается.';
+
+  @override
+  String get markLineBreak => 'Разрыв строки';
+
+  @override
+  String cuePositionAt(int x) {
+    return 'на $x px';
+  }
 
   @override
   String palettePosition(int bar, int cell) {

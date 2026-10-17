@@ -21,6 +21,8 @@ import 'dart:math' as math;
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The page the fixtures are engraved on, matching the application's own proportions.
 const double _pageWidth = 824;
 
@@ -57,7 +59,7 @@ Song _songOf(List<(int, int)> pitches) => Song(
           melody: <NoteMark>[
             for (int beat = 0; beat < pitches.length; beat++)
               NoteMark(
-                place: cellAt(beat),
+                place: placeAt(beat),
                 pitch: PitchedNote(
                   note: WrittenNote(NoteLetter.values[pitches[beat].$2], 0),
                   octave: pitches[beat].$1,
@@ -285,12 +287,21 @@ void main() {
         ],
         <int>[-2, -1, 0, 1],
       );
-      expect(
-        <int>[
-          for (final MelodyNoteHead head in result.reading.heads) head.beat,
-        ],
-        <int>[0, 1, 2, 3],
-      );
+      // THE HEADS COME BACK IN READING ORDER. The old expectation was the four columns `0, 1, 2, 3`
+      // — four heads in four beats, named by the grid. A head's place is its x less the bar's left
+      // edge, so what can be asserted without a grid is that the places ASCEND: the run reads left
+      // to right, which is the musical property the columns were standing in for.
+      final List<double> places = <double>[
+        for (final MelodyNoteHead head in result.reading.heads) head.offsetX,
+      ];
+      expect(places, hasLength(4));
+      for (int index = 1; index < places.length; index++) {
+        expect(
+          places[index],
+          greaterThan(places[index - 1]),
+          reason: 'head $index stands right of head ${index - 1}',
+        );
+      }
     });
 
     test('a descending run keeps its beats in order', () {
@@ -303,12 +314,21 @@ void main() {
         ],
         <String>['C5', 'B4', 'A4', 'G4'],
       );
-      expect(
-        <int>[
-          for (final MelodyNoteHead head in result.reading.heads) head.beat,
-        ],
-        <int>[0, 1, 2, 3],
-      );
+      // THE HEADS COME BACK IN READING ORDER. The old expectation was the four columns `0, 1, 2, 3`
+      // — four heads in four beats, named by the grid. A head's place is its x less the bar's left
+      // edge, so what can be asserted without a grid is that the places ASCEND: the run reads left
+      // to right, which is the musical property the columns were standing in for.
+      final List<double> places = <double>[
+        for (final MelodyNoteHead head in result.reading.heads) head.offsetX,
+      ];
+      expect(places, hasLength(4));
+      for (int index = 1; index < places.length; index++) {
+        expect(
+          places[index],
+          greaterThan(places[index - 1]),
+          reason: 'head $index stands right of head ${index - 1}',
+        );
+      }
     });
 
     test('two notes in ONE beat come back in the order they were drawn', () {
@@ -327,9 +347,11 @@ void main() {
         staffSpace: 13,
         headTop: 0,
         headBottom: 200,
-        beatColumns: <MelodyBeatColumn>[
-          MelodyBeatColumn(beat: 0, left: 0, right: 40),
-        ],
+        // THE BAR'S OWN EXTENT, not its beat columns: a head's place is measured from the bar
+        // and a head outside it was written in another bar. The frame used to be cut into one
+        // column per beat, which is the grid this stage removed.
+        barLeft: 0,
+        barRight: 40,
       );
       List<LayoutOffset> ringAt(double x, double y) => <LayoutOffset>[
         for (int i = 0; i <= 24; i++)
@@ -353,15 +375,14 @@ void main() {
         frame: frame,
       );
       expect(reading.heads, hasLength(2));
+      // TWO HEADS AT TWO PLACES, IN THE ORDER THEY WERE DRAWN. The two expectations here used to be
+      // `<int>[0, 0]` for the head's BEAT and `<int>[0, 1]` for its ordinal inside that beat —
+      // "both in beat 0, the first and the second of it". A head's address is now its own x, so the
+      // statement is made in the coordinates the ink was drawn at: the ring at x=12 and the ring at
+      // x=30 stand 18 apart, the left one first.
       expect(
-        <int>[for (final MelodyNoteHead head in reading.heads) head.beat],
-        <int>[0, 0],
-      );
-      expect(
-        <int>[
-          for (final MelodyNoteHead head in reading.heads) head.orderInBeat,
-        ],
-        <int>[0, 1],
+        <double>[for (final MelodyNoteHead head in reading.heads) head.offsetX],
+        <double>[12, 30],
       );
       expect(
         <String>[
@@ -423,9 +444,11 @@ void main() {
         staffSpace: 13,
         headTop: 0,
         headBottom: 200,
-        beatColumns: <MelodyBeatColumn>[
-          MelodyBeatColumn(beat: 0, left: 0, right: 40),
-        ],
+        // THE BAR'S OWN EXTENT, not its beat columns: a head's place is measured from the bar
+        // and a head outside it was written in another bar. The frame used to be cut into one
+        // column per beat, which is the grid this stage removed.
+        barLeft: 0,
+        barRight: 40,
       );
       final MelodyNoteReading reading = const MelodyNoteReader().read(
         sectionId: 'sec-1',
@@ -454,9 +477,11 @@ void main() {
         staffSpace: 13,
         headTop: 90,
         headBottom: 200,
-        beatColumns: <MelodyBeatColumn>[
-          MelodyBeatColumn(beat: 0, left: 0, right: 40),
-        ],
+        // THE BAR'S OWN EXTENT, not its beat columns: a head's place is measured from the bar
+        // and a head outside it was written in another bar. The frame used to be cut into one
+        // column per beat, which is the grid this stage removed.
+        barLeft: 0,
+        barRight: 40,
       );
       const List<PageInkStroke> head = <PageInkStroke>[
         PageInkStroke(
@@ -487,9 +512,11 @@ void main() {
         staffSpace: 13,
         headTop: 0,
         headBottom: 200,
-        beatColumns: <MelodyBeatColumn>[
-          MelodyBeatColumn(beat: 0, left: 0, right: 40),
-        ],
+        // THE BAR'S OWN EXTENT, not its beat columns: a head's place is measured from the bar
+        // and a head outside it was written in another bar. The frame used to be cut into one
+        // column per beat, which is the grid this stage removed.
+        barLeft: 0,
+        barRight: 40,
       );
       final MelodyNoteReading onStaff = const MelodyNoteReader().read(
         sectionId: 'sec-1',
@@ -533,7 +560,7 @@ void main() {
         <String>[
           for (final NoteMark note
               in session.song.sections.first.bars.first.melody)
-            '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} ${note.value.base.name}',
+            '${note.offsetX.toStringAsFixed(1)}:${note.pitch} ${note.value.base.name}',
         ],
         <String>['0.0:E4 quarter', '1.0:F4 quarter'],
       );
@@ -586,10 +613,11 @@ void main() {
       final EditSession session = EditSession(
         document: DocumentState(song: _blankSong()),
       );
-      session.insertNote(
+      fixtureInsertNote(
+        session,
         sectionId: 'sec-1',
         barIndex: 0,
-        beat: 0,
+        slot: 0,
         pitch: const PitchedNote(note: WrittenNote(NoteLetter.a, 0), octave: 3),
         value: const NoteValue.plain(NoteBase.half),
       );
@@ -600,7 +628,7 @@ void main() {
       expect(write.written, hasLength(1));
       expect(write.written.single.pitch.toString(), 'F4');
       final NoteMark first = session.song.sections.first.bars.first.melody
-          .firstWhere((NoteMark note) => note.pseudoBeat == 0);
+          .firstWhere((NoteMark note) => note.offsetX == fixtureX(0));
       expect(first.pitch.toString(), 'A3');
       expect(first.value.base, NoteBase.half);
     });

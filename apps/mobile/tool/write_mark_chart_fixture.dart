@@ -19,6 +19,8 @@ import 'dart:typed_data';
 import 'package:chart_core/chart_core.dart';
 import 'package:chartapp/chart_document.dart';
 
+import '../support/place_fixture.dart';
+
 void main(List<String> arguments) {
   final Directory directory = Directory(
     arguments.isNotEmpty ? arguments.first : 'build/chart_fixtures',
@@ -41,7 +43,7 @@ void main(List<String> arguments) {
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index * 2),
                     quality: ChordQuality.majorSeventh,

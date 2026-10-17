@@ -280,39 +280,8 @@ enum MelodyNoteRejection {
   final String token;
 }
 
-/// One column of a bar: a beat, and the x range its column was engraved in.
-///
-/// The range rather than just a left edge, because a notehead has width and a head drawn near a
-/// column's edge belongs to the column it mostly stands in; the column is also what turns a
-/// measured x into the beat address the model stores.
-class MelodyBeatColumn {
-  /// Creates the column of [beat] spanning [left] to [right], in the frame's coordinates.
-  const MelodyBeatColumn({
-    required this.beat,
-    required this.left,
-    required this.right,
-  });
-
-  /// Zero-based cell index inside the bar, the address a chord uses too.
-  final int beat;
-
-  /// The column's left edge.
-  final double left;
-
-  /// The column's right edge.
-  final double right;
-
-  /// The column's width.
-  double get width => right - left;
-
-  @override
-  String toString() =>
-      'MelodyBeatColumn($beat ${left.toStringAsFixed(1)}..'
-      '${right.toStringAsFixed(1)})';
-}
-
 /// The melody staff of one bar as NUMBERS: where its middle line is, how far apart its lines are,
-/// which clef names it, which band a notehead may lie in, and where its beats were engraved.
+/// which clef names it, which band a notehead may lie in, and how far the bar itself reaches.
 ///
 /// This is the whole of what the raster prototype had to recover from pixels and could not: it
 /// found the five lines by looking for long horizontal runs, checked they were equally spaced, and
@@ -327,7 +296,8 @@ class MelodyStaffFrame {
     required this.staffSpace,
     required this.headTop,
     required this.headBottom,
-    required this.beatColumns,
+    required this.barLeft,
+    required this.barRight,
     this.clef = 'treble',
     this.metrics = const MelodyMetrics(),
   });
@@ -357,12 +327,20 @@ class MelodyStaffFrame {
   /// The bottommost y a notehead's centre may lie at, inclusive; the mirror of [headTop].
   final double headBottom;
 
-  /// The bar's beat columns, in ascending order, as the layout engraved them.
+  /// The x of the bar's own LEFT edge, in the same coordinates [middleLineY] is measured in.
   ///
-  /// A head is dispatched to the column it stands in, and the columns are also why this reader
-  /// needs no truth to score against: the beat a note belongs to is read from the page's own
-  /// geometry rather than matched to an answer.
-  final List<MelodyBeatColumn> beatColumns;
+  /// IT IS THE ORIGIN A NOTE'S PLACE IS MEASURED FROM, because that is what `AnchoredPlace.offsetX`
+  /// means for anything written in a bar. Every head this reader accepts is reported as
+  /// `x - barLeft`, so the number a recognised note is stored at is the number the page shows and
+  /// no conversion stands between the two.
+  final double barLeft;
+
+  /// The x of the bar's own RIGHT edge, in the same coordinates.
+  ///
+  /// The other half of the place gate: a head drawn past the barline has been written in the next
+  /// bar, and claiming it here would put a note on a page where the musician did not write it. This
+  /// is the same refusal the columns used to express, expressed without a grid.
+  final double barRight;
 
   /// The clef this staff is written in, `treble` or `bass`, GIVEN rather than recognised.
   final String clef;
@@ -387,32 +365,23 @@ class MelodyStaffFrame {
   /// note at the top of it.
   int stepAtY(double y) => (4 - (y - middleLineY) / (staffSpace / 2)).round();
 
-  /// The column a head centred at [x] stands in, or null when it stands in none of them.
+  /// Whether a head centred at [x] was written inside this bar.
   ///
-  /// The column CONTAINING x is taken, boundary inclusive on the left and exclusive on the right so
-  /// that two adjacent columns cannot both claim a head exactly on their shared edge. A head drawn
-  /// half in one column and half in the next belongs to the one its centre is in.
+  /// Boundary inclusive on the left and exclusive on the right, so that a head exactly on a shared
+  /// barline belongs to the bar it opens rather than to the one it ends.
   ///
-  /// NULL IS A REAL ANSWER AND NOT A NEAREST GUESS. A head in the bar's padding, on the barline or
-  /// outside the bar was not written at a beat, and claiming the nearest one would put a note on the
-  /// page that the musician did not write — the same reasoning that makes a stroke the page cannot
-  /// place a refusal rather than a fabricated rectangle. The caller reports it as
-  /// [MelodyNoteRejection.beyondTheBar].
-  MelodyBeatColumn? columnAt(double x) {
-    for (final MelodyBeatColumn column in beatColumns) {
-      if (x >= column.left && x < column.right) {
-        return column;
-      }
-    }
-    return null;
-  }
+  /// FALSE IS A REAL ANSWER AND NOT A NEAREST GUESS. A head on the barline or past it was written in
+  /// another bar, and claiming it here would put a note on the page that the musician did not write
+  /// — the same reasoning that makes a stroke the page cannot place a refusal rather than a
+  /// fabricated rectangle. The caller reports it as [MelodyNoteRejection.beyondTheBar].
+  bool containsX(double x) => x >= barLeft && x < barRight;
 
   @override
   String toString() =>
       'MelodyStaffFrame(middle=${middleLineY.toStringAsFixed(1)}, '
       'space=${staffSpace.toStringAsFixed(1)}, $clef, '
       'heads ${headTop.toStringAsFixed(1)}..${headBottom.toStringAsFixed(1)}, '
-      '${beatColumns.length} column(s))';
+      'bar ${barLeft.toStringAsFixed(1)}..${barRight.toStringAsFixed(1)})';
 }
 
 /// One committed stroke placed on the PAGE: its points translated by its anchor's origin, together
@@ -449,13 +418,12 @@ class PageInkStroke {
 
 /// A notehead this reader accepted, with everything the model and a probe need to know about it.
 class MelodyNoteHead {
-  /// Creates a head centred at ([x], [y]) standing at staff [step] of [beat], [orderInBeat]-th.
+  /// Creates a head centred at ([x], [y]) standing at staff [step] with the given [pitch].
   const MelodyNoteHead({
     required this.x,
     required this.y,
     required this.step,
-    required this.beat,
-    required this.orderInBeat,
+    required this.offsetX,
     required this.pitch,
     required this.widthFraction,
     required this.bandFraction,
@@ -487,12 +455,14 @@ class MelodyNoteHead {
   /// The staff step the head's centre decodes to: 0 is the staff's bottom line, 4 its middle line.
   final int step;
 
-  /// The beat (cell) of the bar the head stands in, as the page's columns name it.
-  final int beat;
-
-  /// The head's position INSIDE its beat, counting from the left: 0 is the first note of the cell,
-  /// which is the ordinal [NoteMark.step] stores and the engraver draws at the k-th x (A75).
-  final int orderInBeat;
+  /// THE HEAD'S PLACE IN ITS BAR: `x` less the bar's own left edge.
+  ///
+  /// It is the number the model stores, and it is the whole address of a note now that the grid is
+  /// gone: a recognised head is written into the document at this offset and drawn back at the same
+  /// one, so nothing has to be converted between measuring and storing. It replaces the old pair
+  /// "beat + ordinal within the beat", which named a column and a rank inside it — a shape the model
+  /// no longer has.
+  final double offsetX;
 
   /// The pitch that staff step names, with a NATURAL alteration.
   ///
@@ -515,8 +485,8 @@ class MelodyNoteHead {
 
   @override
   String toString() =>
-      'MelodyNoteHead($pitch at step $step, beat $beat.$orderInBeat, '
-      'x=${x.toStringAsFixed(1)} y=${y.toStringAsFixed(1)}, '
+      'MelodyNoteHead($pitch at step $step, x=${x.toStringAsFixed(1)} '
+      '(+${offsetX.toStringAsFixed(1)} in its bar) y=${y.toStringAsFixed(1)}, '
       'w=${widthFraction.toStringAsFixed(2)}, '
       'ink=${strokeIds.isEmpty ? 'none' : strokeIds.join('+')})';
 }
@@ -657,22 +627,21 @@ class MelodyNoteReader {
       final double x = verdict.headX!;
       final double y = verdict.headY!;
       final int step = frame.stepAtY(y);
-      final MelodyBeatColumn? column = frame.columnAt(x);
       MelodyNoteRejection? place;
       if (y < frame.headTop || y > frame.headBottom) {
         place = MelodyNoteRejection.outsideTheStaff;
       } else if (step < melodyLowestStep || step > melodyHighestStep) {
         place = MelodyNoteRejection.notOnTheStaff;
-      } else if (column == null) {
+      } else if (!frame.containsX(x)) {
         place = MelodyNoteRejection.beyondTheBar;
       }
-      if (place != null || column == null) {
+      if (place != null) {
         refusals.add(
           MelodyNoteRefusal(
             x: x,
             y: y,
             nib: blob.widestNib,
-            reason: place ?? MelodyNoteRejection.beyondTheBar,
+            reason: place,
             widthFraction: verdict.widthFraction,
             bandFraction: verdict.bandFraction,
           ),
@@ -684,10 +653,7 @@ class MelodyNoteReader {
           x: x,
           y: y,
           step: step,
-          beat: column.beat,
-          // Filled in below, once every head of this cell is known: the ordinal is a RANK among
-          // the heads of one beat, and a single head's own position cannot say what that rank is.
-          orderInBeat: 0,
+          offsetX: x - frame.barLeft,
           pitch: melodyPitchOfStep(step, clef: frame.clef),
           widthFraction: verdict.widthFraction,
           bandFraction: verdict.bandFraction,
@@ -698,54 +664,24 @@ class MelodyNoteReader {
     return MelodyNoteReading(
       sectionId: sectionId,
       barIndex: barIndex,
-      heads: _orderedByBeat(heads),
+      heads: _orderedByX(heads),
       refusals: refusals,
     );
   }
 
-  // PURPOSE: Give every head of a beat its ordinal inside that beat, and hand the heads back in
-  //          reading order, which is the order the model addresses them in.
+  // PURPOSE: Hand the heads back in reading order, which is left to right, so that a caller writing
+  //          them into the model produces a bar the engraver reads the same way it was written.
   // INPUTS: heads — the accepted heads, in the order the blobs were found.
-  // OUTPUTS: The same heads, one per beat sorted left to right, and beats ascending. The ordinal is
-  //          the head's RANK by x within its own beat: the leftmost head of a cell is 0 and the
-  //          engraver draws step 0 leftmost (A75), so the ordinal is `NoteMark.step` and reading it
-  //          from the drawing is the same statement the engraver makes.
+  // OUTPUTS: The same heads, sorted by x. There is no ordinal and no rank any more: a head's address
+  //          is its own `offsetX`, so two heads at one x are two marks at one place — which the
+  //          model allows — rather than a first and a second of something.
   //
-  //          An empty list yields an empty list; a bar whose heads all fall in one beat yields that
-  //          beat's heads in x order.
-  // KEYWORDS: sub-beat-order, step-ordinal, reading-order, left-to-right, a75
-  List<MelodyNoteHead> _orderedByBeat(List<MelodyNoteHead> heads) {
+  //          An empty list yields an empty list.
+  // KEYWORDS: reading-order, left-to-right, x-order, no-ordinal
+  List<MelodyNoteHead> _orderedByX(List<MelodyNoteHead> heads) {
     final List<MelodyNoteHead> sorted = <MelodyNoteHead>[...heads]
-      ..sort((MelodyNoteHead a, MelodyNoteHead b) {
-        if (a.beat != b.beat) {
-          return a.beat.compareTo(b.beat);
-        }
-        return a.x.compareTo(b.x);
-      });
-    final List<MelodyNoteHead> ordered = <MelodyNoteHead>[];
-    int beat = -1;
-    int order = 0;
-    for (final MelodyNoteHead head in sorted) {
-      if (head.beat != beat) {
-        beat = head.beat;
-        order = 0;
-      }
-      ordered.add(
-        MelodyNoteHead(
-          x: head.x,
-          y: head.y,
-          step: head.step,
-          beat: head.beat,
-          orderInBeat: order,
-          pitch: head.pitch,
-          widthFraction: head.widthFraction,
-          bandFraction: head.bandFraction,
-          strokeIds: head.strokeIds,
-        ),
-      );
-      order++;
-    }
-    return ordered;
+      ..sort((MelodyNoteHead a, MelodyNoteHead b) => a.x.compareTo(b.x));
+    return sorted;
   }
 }
 
@@ -819,14 +755,11 @@ Map<String, MelodyStaffFrame> melodyFramesOfPage(PageLayout page) {
       staffSpace: space,
       headTop: writtenTop > bar.bounds.bottom ? writtenTop : bar.bounds.bottom,
       headBottom: writtenBottom,
-      beatColumns: <MelodyBeatColumn>[
-        for (final PlacedCell cell in bar.cells)
-          MelodyBeatColumn(
-            beat: cell.beat,
-            left: cell.bounds.left,
-            right: cell.bounds.right,
-          ),
-      ],
+      // The bar's own horizontal extent, which is what a head's place is measured from and what the
+      // boundary of "written in this bar" is. It is the CHORD LINE's rectangle, not the staff's: the
+      // two share their left edge and their width, and the bar's is the one the model addresses.
+      barLeft: bar.bounds.left,
+      barRight: bar.bounds.right,
       clef: staff.clef ?? 'treble',
     );
   }

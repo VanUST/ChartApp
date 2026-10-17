@@ -31,6 +31,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page the instrument engraves at. Narrow enough that a section of four bars is close
 /// to a full system, so adding one bar visibly re-flows the page rather than hiding in the margin.
 const double formPageWidth = 640;
@@ -156,14 +158,14 @@ Song formChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellPlace(section == 0 ? 'A' : 'B', index, 0),
+                  place: placeIn(section == 0 ? 'A' : 'B', index, 0),
                   chord: Chord(
                     root: ChordRoot(section * 4 + index),
                     quality: ChordQuality.majorSeventh,
                   ),
                 ),
                 ChordMark(
-                  place: cellPlace(section == 0 ? 'A' : 'B', index, 2),
+                  place: placeIn(section == 0 ? 'A' : 'B', index, 2),
                   chord: Chord(
                     root: ChordRoot(section * 4 + index),
                     quality: ChordQuality.minorSeventh,
@@ -322,7 +324,7 @@ String _barText(Song song, Bar bar) => bar.chords.isEmpty
           .map(
             (ChordMark placed) =>
                 '${placed.chord.render(song.key, const SpellingTable())}'
-                '@${placed.pseudoBeat}',
+                '@${placed.offsetX.toStringAsFixed(1)}',
           )
           .join(',');
 

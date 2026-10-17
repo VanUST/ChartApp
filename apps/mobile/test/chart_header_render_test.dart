@@ -19,6 +19,8 @@ import 'package:chart_ui/chart_ui.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page this file engraves, matching the render probes' surface.
 const double pageWidth = 824;
 
@@ -87,7 +89,7 @@ Song chartOf({
             timeSignature: meter,
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(root: ChordRoot(0)),
               ),
             ],

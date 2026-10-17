@@ -43,6 +43,8 @@ import 'dart:io';
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The distance between two staff lines in the geometry below.
 ///
 /// It is the application's own `LayoutStyle.melodyStaffSpace` of 13, so every coordinate asserted
@@ -57,11 +59,6 @@ const double _middleLineY = 200;
 /// The left edge and width of the bar the cases engrave, in page coordinates.
 const double _barLeft = 100;
 const double _barWidth = 200;
-
-/// The x of each of the bar's four cells, relative to [_barLeft], as the layout engine publishes
-/// them. Only the first is used by these cases; four are given because a 4/4 bar has four beats and
-/// the engraver drops a note whose beat has no cell.
-const List<double> _cellX = <double>[8, 56, 104, 152];
 
 /// The vertical centre of [glyph]'s box, which is the height the element is drawn at.
 ///
@@ -139,7 +136,7 @@ NoteMark _note(
   int step = 0,
   NoteValue value = const NoteValue.plain(NoteBase.quarter),
 }) => NoteMark(
-  place: cellAt(beat, step),
+  place: placeAt(beat, step),
   pitch: PitchedNote(
     note: WrittenNote(pitch.letter, pitch.alter),
     octave: pitch.octave,
@@ -163,7 +160,6 @@ PlacedMelodyStaff _engrave(
   staffMiddleLineY: _middleLineY,
   staffSpace: _staffSpace,
   clef: clef,
-  cellX: _cellX,
   includeClef: includeClef,
 );
 
@@ -1422,7 +1418,7 @@ void main() {
     /// it: a tie always points forward, so it is a field of the earlier note and not a pair id.
     PlacedMelodyStaff tiedPair(Written pitch) => _engrave(<NoteMark>[
       NoteMark(
-        place: cellAt(0),
+        place: placeAt(0),
         pitch: PitchedNote(
           note: WrittenNote(pitch.letter, pitch.alter),
           octave: pitch.octave,
@@ -1431,7 +1427,7 @@ void main() {
         tiedToNext: true,
       ),
       NoteMark(
-        place: cellAt(1),
+        place: placeAt(1),
         pitch: PitchedNote(
           note: WrittenNote(pitch.letter, pitch.alter),
           octave: pitch.octave,

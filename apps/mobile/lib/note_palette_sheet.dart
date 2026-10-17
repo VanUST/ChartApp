@@ -79,7 +79,7 @@ Future<void> showNotePalette(
   required EditSession session,
   required String sectionId,
   required int barIndex,
-  required int beat,
+  required double offsetX,
   required Key writtenKey,
   VoidCallback? onChanged,
 }) async {
@@ -94,7 +94,7 @@ Future<void> showNotePalette(
       session: session,
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
+      offsetX: offsetX,
       writtenKey: writtenKey,
       onChanged: onChanged,
     ),
@@ -110,7 +110,7 @@ class NotePaletteSheet extends StatefulWidget {
     required this.session,
     required this.sectionId,
     required this.barIndex,
-    required this.beat,
+    required this.offsetX,
     required this.writtenKey,
     this.onChanged,
   });
@@ -125,7 +125,11 @@ class NotePaletteSheet extends StatefulWidget {
   final int barIndex;
 
   /// The beat's index inside its bar.
-  final int beat;
+  /// The place the palette was opened at, in bar-local logical pixels.
+  ///
+  /// A NEW NOTE IS WRITTEN HERE, and a note is drawn at the x it is written at, so the tap's own
+  /// coordinate is the whole of what this sheet needs to know about where on the bar it is working.
+  final double offsetX;
 
   /// The key the document is written in, which the degree grid is spelled in.
   final Key writtenKey;
@@ -166,11 +170,16 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
   /// offered in the register the first one is written in, and four otherwise.
   late int _octave = _seedOctave();
 
-  /// The `(beat, step)` of the note an edit acts on, or null when the next pitch tap inserts a new
-  /// one. Deliberately an ADDRESS and not a copy of the note: the value is read back from the
-  /// session on every build, so an undo made while the sheet is open is reflected rather than
-  /// showing the note as it was when the row was tapped.
-  int? _editingStep;
+  /// The PLACE of the note an edit acts on, or null when the next pitch tap inserts a new one.
+  /// Deliberately an ADDRESS and not a copy of the note: the value is read back from the session on
+  /// every build, so an undo made while the sheet is open is reflected rather than showing the note
+  /// as it was when the row was tapped.
+  ///
+  /// A place is one number now — the notehead's x in its bar — and two notes sharing one x are two
+  /// marks at one place. That is the model's own answer, and it is why the list beside the grid is
+  /// the BAR's melody rather than a beat's: what a musician picks there is chosen by the row he
+  /// taps, and what the grid then writes is aimed at the place that row named.
+  double? _editingX;
 
   @override
   void initState() {
@@ -179,20 +188,20 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     // likely to be looking at; the first is the fallback when the address cannot be reread.
     final List<NoteMark> existing = _notesHere();
     if (existing.isNotEmpty) {
-      _editingStep = existing.last.pseudoStep;
-      _base = existing.last.value.base;
+      final NoteMark nearest = _nearestToWidgetX(existing);
+      _editingX = nearest.offsetX;
+      _base = nearest.value.base;
     }
   }
 
-  // PURPOSE: Read the beat's notes back from the session, which is what makes every control in this
+  // PURPOSE: Read the bar's notes back from the session, which is what makes every control in this
   //          sheet show the document as it stands rather than as it stood when the sheet opened.
   // INPUTS: None.
-  // OUTPUTS: The notes at this beat, ascending by step. Empty when the beat holds none.
-  // KEYWORDS: read-back, live-state, undo-aware, session-query
-  List<NoteMark> _notesHere() => widget.session.existingNotesAt(
+  // OUTPUTS: The bar's notes ordered by x. Empty when the bar holds none.
+  // KEYWORDS: read-back, live-state, undo-aware, session-query, whole-bar
+  List<NoteMark> _notesHere() => widget.session.notesInBar(
     sectionId: widget.sectionId,
     barIndex: widget.barIndex,
-    beat: widget.beat,
   );
 
   // PURPOSE: Choose the octave the grid opens in, from the bar rather than from a constant, so that
@@ -207,9 +216,9 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       widget.sectionId,
       widget.barIndex,
     );
-    final List<NoteMark> onBeat = _notesHere();
-    if (onBeat.isNotEmpty) {
-      return onBeat.last.pitch.octave;
+    final List<NoteMark> inBar = _notesHere();
+    if (inBar.isNotEmpty) {
+      return _nearestToWidgetX(inBar).pitch.octave;
     }
     if (bar == null || bar.melody.isEmpty) {
       return 4;
@@ -225,16 +234,36 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
 
   /// The note an edit currently acts on, or null when the next pitch tap inserts one.
   NoteMark? get _selected {
-    final int? step = _editingStep;
-    if (step == null) {
+    final double? x = _editingX;
+    if (x == null) {
       return null;
     }
-    return widget.session.existingNoteAt(
-      sectionId: widget.sectionId,
-      barIndex: widget.barIndex,
-      beat: widget.beat,
-      step: step,
-    );
+    for (final NoteMark note in _notesHere()) {
+      if (note.offsetX == x) {
+        return note;
+      }
+    }
+    return null;
+  }
+
+  // PURPOSE: Name the note of a bar that stands closest to the place the palette was opened at, so
+  //          the sheet opens on the note the musician pointed at rather than on the first one.
+  // INPUTS: notes — the bar's notes, in x order.
+  // OUTPUTS: The nearest by x. Never null: the caller only asks when the list is not empty, and an
+  //          empty list answers with the first element of nothing — which is why the guard is the
+  //          caller's and is stated here.
+  // KEYWORDS: nearest, seed, tap-place, opening-selection
+  NoteMark _nearestToWidgetX(List<NoteMark> notes) {
+    NoteMark best = notes.first;
+    double bestDistance = (best.offsetX - widget.offsetX).abs();
+    for (final NoteMark note in notes) {
+      final double distance = (note.offsetX - widget.offsetX).abs();
+      if (distance < bestDistance) {
+        best = note;
+        bestDistance = distance;
+      }
+    }
+    return best;
   }
 
   // PURPOSE: Apply one pitch as an edit of the selected note, or as an insertion when nothing is
@@ -253,7 +282,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
       final bool inserted = widget.session.insertNote(
         sectionId: widget.sectionId,
         barIndex: widget.barIndex,
-        beat: widget.beat,
+        offsetX: widget.offsetX,
         pitch: note,
         value: NoteValue.plain(_base),
       );
@@ -262,22 +291,19 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
         return;
       }
       HapticFeedback.selectionClick();
-      final List<NoteMark> after = _notesHere();
-      // THE NOTE JUST WRITTEN IS THE LAST OF THE CELL, because `insertNote` appends unless it is
-      // given a step — the oldest note keeps step 0 and the new one takes the highest step. The
-      // sheet selects it so a following tap CORRECTS the note he just wrote instead of adding a
-      // third one; selecting `first` here would aim the next tap at the note he wrote first.
-      setState(
-        () => _editingStep = after.isEmpty ? null : after.last.pseudoStep,
-      );
+      // THE NOTE JUST WRITTEN IS THE ONE AT THE PLACE THE SHEET WAS OPENED FROM, because that is
+      // where it was put. The sheet selects it so a following tap CORRECTS the note he just wrote
+      // instead of adding a third one; aiming the next tap at the bar's first note would be the
+      // reversal this palette already paid for once.
+      setState(() => _editingX = widget.offsetX);
       widget.onChanged?.call();
       return;
     }
     final bool updated = widget.session.updateNote(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
-      beat: widget.beat,
-      step: selected.pseudoStep,
+      offsetX: selected.offsetX,
+      tolerance: 0,
       pitch: note,
     );
     if (!updated) {
@@ -304,8 +330,8 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     final bool updated = widget.session.updateNote(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
-      beat: widget.beat,
-      step: selected.pseudoStep,
+      offsetX: selected.offsetX,
+      tolerance: 0,
       value: NoteValue.plain(base),
     );
     if (!updated) {
@@ -332,8 +358,8 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     final bool changed = widget.session.setNoteTie(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
-      beat: widget.beat,
-      step: selected.pseudoStep,
+      offsetX: selected.offsetX,
+      tolerance: 0,
       tied: !selected.tiedToNext,
     );
     if (!changed) {
@@ -355,17 +381,17 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     if (selected == null) {
       return;
     }
-    final bool removed = widget.session.deleteNoteAt(
+    final bool removed = widget.session.deleteNoteNear(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
-      beat: widget.beat,
-      step: selected.pseudoStep,
+      offsetX: selected.offsetX,
+      tolerance: 0,
     );
     if (!removed) {
       return;
     }
     HapticFeedback.selectionClick();
-    setState(() => _editingStep = null);
+    setState(() => _editingX = null);
     widget.onChanged?.call();
   }
 
@@ -513,7 +539,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
               _NotePreview(
                 clef: _previewClef,
                 notes: notes,
-                selectedStep: _editingStep,
+                selectedX: _editingX,
                 armedBase: _armedBase,
                 armedPitches: <PitchedNote>[
                   for (final WrittenNote degree
@@ -608,7 +634,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
               // The chord palette's own sentence, reused rather than duplicated: it names a bar and a
               // cell the way a musician counts, and it already says so in both languages. A second
               // string for the same two numbers would be a second place for them to disagree.
-              l10n.palettePosition(_barOrdinal(), widget.beat + 1),
+              l10n.palettePositionBar(_barOrdinal()),
               key: const ValueKey<String>('note-palette-position'),
               style: const TextStyle(
                 color: sheetOnPanelColor,
@@ -658,20 +684,20 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
     children: <Widget>[
       _sectionCaption(l10n.melodyGroup),
       const SizedBox(height: 4),
-      for (final NoteMark note in notes)
+      for (final (int index, NoteMark note) in notes.indexed)
         Padding(
           padding: const EdgeInsets.only(bottom: 4),
           child: Material(
-            color: note.pseudoStep == _editingStep
+            color: note.offsetX == _editingX
                 ? sheetSelectedCellColor
                 : sheetCellColor,
             borderRadius: BorderRadius.circular(8),
             child: InkWell(
-              key: ValueKey<String>('note-palette-note-${note.pseudoStep}'),
+              key: ValueKey<String>('note-palette-note-${note.offsetX}'),
               borderRadius: BorderRadius.circular(8),
               onTap: () => setState(() {
                 _refused = false;
-                _editingStep = note.pseudoStep;
+                _editingX = note.offsetX;
                 _base = note.value.base;
                 _lastBase = note.value.base;
                 _octave = note.pitch.octave;
@@ -687,7 +713,7 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
                     Expanded(
                       child: Text(
                         l10n.melodyNoteLine(
-                          note.pseudoStep + 1,
+                          index + 1,
                           '${note.pitch}',
                           noteBaseNotation(note.value.base),
                         ),
@@ -712,23 +738,21 @@ class _NotePaletteSheetState extends State<NotePaletteSheet> {
           ),
         ),
       Material(
-        color: _editingStep == null ? sheetSelectedCellColor : sheetCellColor,
+        color: _editingX == null ? sheetSelectedCellColor : sheetCellColor,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           key: const ValueKey<String>('note-palette-new'),
           borderRadius: BorderRadius.circular(8),
           onTap: () => setState(() {
             _refused = false;
-            _editingStep = null;
+            _editingX = null;
           }),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Text(
               l10n.melodyNewNote,
               style: TextStyle(
-                color: _editingStep == null
-                    ? sheetOnPanelColor
-                    : sheetAccentColor,
+                color: _editingX == null ? sheetOnPanelColor : sheetAccentColor,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -961,7 +985,7 @@ class _NotePreview extends StatelessWidget {
   const _NotePreview({
     required this.clef,
     required this.notes,
-    required this.selectedStep,
+    required this.selectedX,
     required this.armedBase,
     required this.armedPitches,
   });
@@ -969,11 +993,11 @@ class _NotePreview extends StatelessWidget {
   /// The staff's clef NAME, `treble` or `bass`, used to place pitches and never drawn.
   final String clef;
 
-  /// The notes this beat already carries, which are drawn as real notes.
+  /// The bar's notes, which are drawn as real notes.
   final List<NoteMark> notes;
 
   /// The step of the note an edit acts on, or null when the next tap inserts.
-  final int? selectedStep;
+  final double? selectedX;
 
   /// The duration an insertion would be written at, so the preview shows that head as well.
   final NoteBase armedBase;
@@ -1003,7 +1027,7 @@ class _NotePreview extends StatelessWidget {
       painter: _NotePreviewPainter(
         clef: clef,
         notes: notes,
-        selectedStep: selectedStep,
+        selectedX: selectedX,
         armedBase: armedBase,
         armedPitches: armedPitches,
         space: _space,
@@ -1018,7 +1042,7 @@ class _NotePreviewPainter extends CustomPainter {
   const _NotePreviewPainter({
     required this.clef,
     required this.notes,
-    required this.selectedStep,
+    required this.selectedX,
     required this.armedBase,
     required this.armedPitches,
     required this.space,
@@ -1035,7 +1059,8 @@ class _NotePreviewPainter extends CustomPainter {
   final List<NoteMark> notes;
 
   /// The step of the selected note, for the accent colour.
-  final int? selectedStep;
+  /// The place of the note drawn as selected, or null when nothing is.
+  final double? selectedX;
 
   /// The armed duration, drawn on the head of a note that does not carry one yet.
   final NoteBase armedBase;
@@ -1093,7 +1118,7 @@ class _NotePreviewPainter extends CustomPainter {
     // THEN THE BEAT'S NOTES, drawn the way the staff draws them: ledger lines under the head, a stem,
     // and a filled head unless the value is a half or a whole.
     for (final NoteMark note in notes) {
-      final bool selected = note.pseudoStep == selectedStep;
+      final bool selected = note.offsetX == selectedX;
       final Color colour = selected ? sheetAccentColor : _ink;
       final int step = melodyStepOf(
         note.pitch.note,
@@ -1187,7 +1212,7 @@ class _NotePreviewPainter extends CustomPainter {
   @override
   bool shouldRepaint(_NotePreviewPainter old) =>
       old.clef != clef ||
-      old.selectedStep != selectedStep ||
+      old.selectedX != selectedX ||
       old.armedBase != armedBase ||
       old.space != space ||
       !_sameNotes(old.notes, notes) ||

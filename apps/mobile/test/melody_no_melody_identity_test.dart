@@ -21,6 +21,8 @@ import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page the probe engraves, matching the render probe's own surface.
 const double probePageWidth = 824;
 
@@ -56,14 +58,14 @@ Song chordOnlySong() => Song(
         Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(
                 root: ChordRoot(0),
                 quality: ChordQuality.minorSeventh,
               ),
             ),
             ChordMark(
-              place: cellAt(2),
+              place: placeAt(2),
               chord: Chord(root: ChordRoot(9)),
             ),
           ],
@@ -72,7 +74,7 @@ Song chordOnlySong() => Song(
           openingBarline: Barline.repeatStart,
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(5)),
             ),
           ],
@@ -94,7 +96,7 @@ Song chordOnlySong() => Song(
           chords: <ChordMark>[
             for (int beat = 0; beat < 4; beat++)
               ChordMark(
-                place: cellAt(beat),
+                place: placeAt(beat),
                 chord: Chord(root: ChordRoot(beat)),
               ),
           ],
@@ -130,16 +132,17 @@ List<String> geometryDump(PageLayout page) {
         'bar ${bar.sectionId}#${bar.barIndex} bounds=${rect(bar.bounds)} '
         'melody=${rect(bar.melody.bounds)} glyphs=${bar.melody.glyphs.length}',
       );
-      for (final PlacedCell cell in bar.cells) {
+      for (final LayoutRect cell in <LayoutRect>[bar.bounds]) {
         lines.add(
-          'cell ${bar.sectionId}#${bar.barIndex} beat=${cell.beat} '
-          'bounds=${rect(cell.bounds)}',
+          'bar ${bar.sectionId}#${bar.barIndex} left=${cell.left} '
+          'bounds=${rect(cell)}',
         );
       }
       for (final PlacedChord chord in bar.chords) {
         lines.add(
-          'chord ${bar.sectionId}#${bar.barIndex} beat=${chord.beat} '
-          'step=${chord.step} bounds=${rect(chord.bounds)}',
+          'chord ${bar.sectionId}#${bar.barIndex} '
+          'x=${chord.place.offsetX.toStringAsFixed(1)} '
+          'y=${chord.place.offsetY.toStringAsFixed(1)} bounds=${rect(chord.bounds)}',
         );
       }
       for (final PlacedStaffText text in bar.staffText) {

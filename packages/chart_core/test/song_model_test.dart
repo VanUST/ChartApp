@@ -9,6 +9,8 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// A bar in 4/4 with a Dm7 on beat one and a G7 on beat one, one step later.
 ///
 /// Two chords sharing a beat is what a comma packs into one cell, and it is the case an anchor
@@ -16,11 +18,11 @@ import 'package:test/test.dart';
 Bar _packedBeat = Bar(
   chords: <ChordMark>[
     ChordMark(
-      place: cellAt(0),
+      place: placeAt(0),
       chord: Chord(root: ChordRoot(2), quality: ChordQuality.minorSeventh),
     ),
     ChordMark(
-      place: cellAt(0, 1),
+      place: placeAt(0, 1),
       chord: Chord(root: ChordRoot(7), quality: ChordQuality.dominantSeventh),
     ),
   ],
@@ -36,7 +38,7 @@ List<Bar> _repeatedPassage = <Bar>[
     volta: Volta(1),
     chords: <ChordMark>[
       ChordMark(
-        place: cellAt(0),
+        place: placeAt(0),
         chord: Chord(root: ChordRoot(0)),
       ),
     ],
@@ -84,35 +86,35 @@ void main() {
   group('ChordMark addressing', () {
     test('two chords packed onto one beat differ by their step', () {
       final ChordMark first = ChordMark(
-        place: cellAt(0),
+        place: placeAt(0),
         chord: Chord(root: ChordRoot(2)),
       );
       final ChordMark second = ChordMark(
-        place: cellAt(0, 1),
+        place: placeAt(0, 1),
         chord: Chord(root: ChordRoot(2)),
       );
       // Same chord, same beat, different place in the bar.
       expect(first.chord, second.chord);
-      expect(first.pseudoBeat, second.pseudoBeat);
+      expect(first.offsetX, second.offsetX);
       expect(first == second, isFalse);
     });
 
     test('the default step is zero and the default size is normal', () {
       final ChordMark chord = ChordMark(
-        place: cellAt(2),
+        place: placeAt(2),
         chord: Chord(root: ChordRoot(0)),
       );
-      expect(chord.pseudoStep, 0);
+      expect(chord.offsetX, fixtureX(0, 0));
       expect(chord.size, ChordSize.normal);
     });
 
     test('size is part of equality', () {
       final ChordMark normal = ChordMark(
-        place: cellAt(0),
+        place: placeAt(0),
         chord: Chord(root: ChordRoot(0)),
       );
       final ChordMark small = ChordMark(
-        place: cellAt(0),
+        place: placeAt(0),
         chord: Chord(root: ChordRoot(0)),
         size: ChordSize.small,
       );
@@ -171,20 +173,20 @@ void main() {
 
     test('keeps two chords on one beat in order under equality', () {
       expect(_packedBeat.chords.length, 2);
-      expect(_packedBeat.chords[0].pseudoStep, 0);
-      expect(_packedBeat.chords[1].pseudoStep, 1);
+      expect(_packedBeat.chords[0].offsetX, fixtureX(0, 0));
+      expect(_packedBeat.chords[1].offsetX, fixtureX(0, 1));
       // Built the other way round, the same bar is a different bar.
       final Bar reversed = Bar(
         chords: <ChordMark>[
           ChordMark(
-            place: cellAt(0, 1),
+            place: placeAt(0, 1),
             chord: Chord(
               root: ChordRoot(7),
               quality: ChordQuality.dominantSeventh,
             ),
           ),
           ChordMark(
-            place: cellAt(0),
+            place: placeAt(0),
             chord: Chord(
               root: ChordRoot(2),
               quality: ChordQuality.minorSeventh,

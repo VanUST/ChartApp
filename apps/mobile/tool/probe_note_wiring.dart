@@ -97,7 +97,7 @@ List<String> notesOf(EditSession session) => <String>[
   for (final Section section in session.song.sections)
     for (final Bar bar in section.bars)
       for (final NoteMark note in bar.melody)
-        '${note.pseudoBeat}.${note.pseudoStep}:${note.pitch}',
+        '${note.offsetX.toStringAsFixed(1)}:${note.pitch}',
 ];
 
 /// The page-space centre of the staff step [step] in column [beat] of the page's first bar.
@@ -109,13 +109,13 @@ LayoutOffset targetOf(PageLayout page, {int beat = 0, int step = 4}) {
   final MelodyStaffFrame frame = melodyFramesOfPage(
     page,
   )['${bar.sectionId}\u0000${bar.barIndex}']!;
-  final MelodyBeatColumn column = frame.beatColumns.firstWhere(
-    (MelodyBeatColumn one) => one.beat == beat,
-  );
+  // THE BAR'S OWN EXTENT, not a column: the frame publishes where the bar reaches, and a touch
+  // anywhere between those two x values is on its staff.
+  final MelodyStaffFrame column = frame;
   final double middle = frame.middleLineY;
   final double space = frame.staffSpace;
   return LayoutOffset(
-    (column.left + column.right) / 2,
+    (column.barLeft + column.barRight) / 2,
     middle + (4 - step) * (space / 2),
   );
 }
@@ -185,7 +185,7 @@ void main() {
     final double headWidth = frame.headWidth;
     print(
       'probe.wire.frame section=${bar.sectionId} bar=${bar.barIndex} '
-      'cell=${frame.beatColumns.first.right - frame.beatColumns.first.left} '
+      'width=${frame.barRight - frame.barLeft} '
       'space=${frame.staffSpace} head=${headWidth.toStringAsFixed(1)} '
       'window=${frame.headTop.toStringAsFixed(1)}..'
       '${frame.headBottom.toStringAsFixed(1)}',

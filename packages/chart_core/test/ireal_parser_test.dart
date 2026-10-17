@@ -15,7 +15,6 @@ import 'package:chart_core/src/chord.dart';
 import 'package:chart_core/src/ireal/obfuscation.dart';
 import 'package:chart_core/src/ireal/parser.dart';
 import 'package:chart_core/src/song/bar.dart';
-import 'package:chart_core/src/song/pseudo_grid.dart';
 import 'package:chart_core/src/song/section.dart';
 import 'package:chart_core/src/song/song.dart';
 import 'package:chart_core/src/song/time_signature.dart';
@@ -34,7 +33,7 @@ List<String> placementsOf(Bar bar) {
     final String slash = bass == null ? '' : '/${bass.pitchClass}';
     placements.add(
       '${chord.chord.root.pitchClass}${chord.chord.quality.token}$slash'
-      '@${chord.pseudoBeat}.${chord.pseudoStep}$size',
+      '@${chord.offsetX.toStringAsFixed(1)}$size',
     );
   }
   return placements;

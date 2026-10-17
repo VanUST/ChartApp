@@ -27,6 +27,8 @@ import 'dart:io';
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// A one-bar chart in C major that declares a pitched staff, so the melody has somewhere to live.
 Song _chart() => Song(
   id: 'note-order',
@@ -47,13 +49,9 @@ NoteValue get _sixteenth => const NoteValue.plain(NoteBase.sixteenth);
 
 /// The cell at ([beat]) of the chart's first bar, as the model holds it: `step:pitch` per note, in
 /// storage order.
-String _cell(EditSession session, int beat) => <String>[
-  for (final NoteMark note in session.existingNotesAt(
-    sectionId: 'A',
-    barIndex: 0,
-    beat: beat,
-  ))
-    '${note.pseudoStep}:${note.pitch}',
+String _cell(EditSession session) => <String>[
+  for (final NoteMark note in session.notesInBar(sectionId: 'A', barIndex: 0))
+    '${note.offsetX.toStringAsFixed(1)}:${note.pitch}',
 ].join(' ');
 
 void main() {
@@ -72,10 +70,11 @@ void main() {
     ];
     for (final NoteLetter letter in typed) {
       expect(
-        session.insertNote(
+        fixtureInsertNote(
+          session,
           sectionId: 'A',
           barIndex: 0,
-          beat: 0,
+          slot: 0,
           pitch: _pitch(letter),
           value: _sixteenth,
         ),
@@ -83,7 +82,7 @@ void main() {
         reason: 'the writer must accept a note at a cell the bar has',
       );
     }
-    final String observed = _cell(session, 0);
+    final String observed = _cell(session);
     stdout.writeln('note.order.run cell=$observed');
     expect(
       observed,
@@ -92,14 +91,16 @@ void main() {
           'C then D then E then F, typed into one beat, is C D E F and not F E D C: the engraver '
           'draws step order left to right, so a reversed cell is engraved as the wrong melody',
     );
-    // And the address a note lands at is a DENSE sequence from zero, which is what makes step
-    // usable as "the third note of the beat".
+    // AND EVERY NOTE HAS ITS OWN PLACE, which is what makes "the third note" a thing an edit can
+    // name. The old assertion here was `<int>[0, 1, 2, 3]` — a DENSE sequence of steps from zero,
+    // "what makes step usable as the third note of the beat". There is no step: the four notes are
+    // four x values, one fixture slot apart, and the list is in reading order.
     expect(
       session
-          .existingNotesAt(sectionId: 'A', barIndex: 0, beat: 0)
-          .map((NoteMark note) => note.pseudoStep),
-      <int>[0, 1, 2, 3],
-      reason: 'a cell of four notes is addressed 0..3 with no gap',
+          .notesInBar(sectionId: 'A', barIndex: 0)
+          .map((NoteMark note) => note.offsetX),
+      <double>[fixtureX(0), fixtureX(1), fixtureX(2), fixtureX(3)],
+      reason: 'four notes typed left to right stand left to right, each at its own place',
     );
   });
 
@@ -123,29 +124,32 @@ void main() {
     final EditSession session = EditSession(
       document: DocumentState(song: _chart()),
     );
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 'A',
       barIndex: 0,
-      beat: 0,
+      slot: 0,
       pitch: _pitch(NoteLetter.e),
       value: _sixteenth,
     );
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 'A',
       barIndex: 0,
-      beat: 0,
+      slot: 0,
       pitch: _pitch(NoteLetter.g),
       value: _sixteenth,
-      step: 2,
+      sub: 2,
     );
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: 'A',
       barIndex: 0,
-      beat: 0,
+      slot: 0,
       pitch: _pitch(NoteLetter.a),
       value: _sixteenth,
     );
-    final String observed = _cell(session, 0);
+    final String observed = _cell(session);
     stdout.writeln('note.order.front cell=$observed');
     expect(
       observed,
@@ -166,15 +170,16 @@ void main() {
         document: DocumentState(song: _chart()),
       );
       for (int tap = 0; tap < 2; tap++) {
-        session.insertNote(
+        fixtureInsertNote(
+          session,
           sectionId: 'A',
           barIndex: 0,
-          beat: 0,
+          slot: 0,
           pitch: _pitch(NoteLetter.b),
           value: _sixteenth,
         );
       }
-      final String observed = _cell(session, 0);
+      final String observed = _cell(session);
       stdout.writeln('note.order.same-pitch cell=$observed');
       expect(
         observed,
@@ -182,10 +187,13 @@ void main() {
         reason: 'the same pitch twice in one beat is two notes',
       );
       expect(
-        session
-            .existingNoteAt(sectionId: 'A', barIndex: 0, beat: 0, step: 1)
-            ?.pitch
-            .toString(),
+        fixtureNoteAt(
+          session,
+          sectionId: 'A',
+          barIndex: 0,
+          slot: 0,
+          sub: 1,
+        )?.pitch.toString(),
         'B4',
         reason: 'the second note is reachable at its own step, so an edit can tell them apart',
       );

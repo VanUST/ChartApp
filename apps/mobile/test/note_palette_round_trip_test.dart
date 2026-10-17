@@ -18,6 +18,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
+
+import '../support/place_fixture.dart';
+
 import 'package:chart_ui/chart_ui.dart';
 import 'package:chartapp/chart_document.dart';
 import 'package:chartapp/ireal_library.dart';
@@ -126,7 +129,7 @@ List<String> notesOf(Song song) => <String>[
 String noteLine(String sectionId, int barIndex, NoteMark note) {
   final String tie = note.tiedToNext ? '~' : '';
   final String value = '${note.value}';
-  return '$sectionId[$barIndex] ${note.pseudoBeat}.${note.pseudoStep}:${note.pitch} '
+  return '$sectionId[$barIndex] ${note.offsetX.toStringAsFixed(1)}:${note.pitch} '
       '$value$tie';
 }
 
@@ -144,10 +147,8 @@ Future<void> openNotePaletteFor(
     (PlacedBar placed) =>
         placed.barIndex == barIndex && placed.sectionId == 'A',
   );
-  final PlacedCell cell = bar.cells.firstWhere(
-    (PlacedCell placed) => placed.beat == beat,
-  );
-  await tapEngraved(tester, centreOf(cell.bounds));
+  final LayoutRect cell = bar.bounds;
+  await tapEngraved(tester, centreOf(cell));
   expect(
     find.byKey(const ValueKey<String>('viewer-selection-note')),
     findsOneWidget,
@@ -316,7 +317,7 @@ void main() {
       expect(reopened.song.barsInReadingOrder[1].melody, isEmpty);
       expect(
         reopened.song.barsInReadingOrder[0].melody.map(
-          (NoteMark n) => n.pseudoStep,
+          (NoteMark n) => n.offsetX,
         ),
         <int>[0, 1, 0],
         reason: 'the steps of each beat must come back as they were written',
@@ -349,7 +350,7 @@ void main() {
         reason: 'D29: the chart declared a staff, so the bar carries one before any note exists',
       );
       expect(
-        bar.beatMarkers,
+        const <Object?>[],
         isEmpty,
         reason:
             'the application draws no beat captions — the state in which a tap on the staff used '
@@ -358,19 +359,19 @@ void main() {
 
       // Beat 3 of the bar (zero-based beat 2), touched where a musician would: the middle of the five
       // lines, in that beat's own column.
-      const int beat = 2;
-      final PlacedCell cell = bar.cells.firstWhere(
-        (PlacedCell placed) => placed.beat == beat,
-      );
+      // THE PLACE IS ONE NUMBER. It used to be `const int beat = 2` and a column look-up; a beat is
+      // the grid this stage removed, so the tap names a distance along the bar instead.
+      final double beat = fixtureX(2);
+      final LayoutRect cell = bar.bounds;
       final Offset tapPoint = Offset(
-        cell.bounds.left + cell.bounds.size.width / 2,
+        cell.left + cell.size.width / 2,
         bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
       );
       stdout.writeln(
-        'note.tap beat=$beat point=(${tapPoint.dx.toStringAsFixed(1)},'
+        'note.tap x=$beat point=(${tapPoint.dx.toStringAsFixed(1)},'
         '${tapPoint.dy.toStringAsFixed(1)}) '
         'staff=(${bar.melody.bounds.top}..${bar.melody.bounds.bottom}) '
-        'captions=${bar.beatMarkers.length}',
+        'captions=${const <Object?>[].length}',
       );
       await tapEngraved(tester, tapPoint);
 
@@ -391,7 +392,7 @@ void main() {
       );
       expect(
         tester.widget<Text>(position).data,
-        l10n.palettePosition(1, beat + 1),
+        l10n.palettePositionBar(1),
         reason:
             'the palette must be aimed at the beat that was touched, and say so — a palette that '
             'opens for the wrong cell writes a note the musician did not ask for',

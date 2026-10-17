@@ -42,6 +42,8 @@ import 'package:chartapp/chart_document.dart';
 import 'package:chartapp/chart_source.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 int _failures = 0;
 int _checks = 0;
 
@@ -125,10 +127,11 @@ Future<void> _proveTheEditLoop() async {
 
   // --- 2. MUTATION GOES THROUGH THE LOG ------------------------------------------------------
   final DocumentState beforeEdit = session.document;
-  final ChordMark? held = session.existingChordAt(
+  final ChordMark? held = fixtureChordAt(
+    session,
     sectionId: _section,
     barIndex: _bar,
-    beat: _beat,
+    slot: _beat,
   );
   _same(
     'cell_holds_a_chord_before_the_edit',
@@ -138,13 +141,14 @@ Future<void> _proveTheEditLoop() async {
   final ChordRootChoice flatThree = roots.firstWhere(
     (ChordRootChoice r) => r.pitchClass == 3,
   );
-  final bool applied = session.applyChordToCell(
+  final bool applied = fixtureChord(
+    session,
     sectionId: _section,
     barIndex: _bar,
-    beat: _beat,
+    slot: _beat,
     chord: chordOf(flatThree, ChordQuality.majorSeventh),
     size: held?.size ?? ChordSize.normal,
-  );
+  ).applied;
   _same('apply.reported_applied', true, applied);
   _same(
     'apply.log_types',
@@ -152,10 +156,11 @@ Future<void> _proveTheEditLoop() async {
     session.log.map((ChartEvent e) => e.type).join(','),
   );
   _same('apply.seq', 1, session.seq);
-  final ChordMark? changed = session.existingChordAt(
+  final ChordMark? changed = fixtureChordAt(
+    session,
     sectionId: _section,
     barIndex: _bar,
-    beat: _beat,
+    slot: _beat,
   );
   _same(
     'cell_holds_the_chosen_chord_after_the_edit',
@@ -168,9 +173,12 @@ Future<void> _proveTheEditLoop() async {
     'the_neighbouring_cell_is_untouched',
     'Cmaj7',
     _render(
-      session
-          .existingChordAt(sectionId: _section, barIndex: _bar, beat: 0)
-          ?.chord,
+      fixtureChordAt(
+        session,
+        sectionId: _section,
+        barIndex: _bar,
+        slot: 0,
+      )?.chord,
       session.song.key,
     ),
   );
@@ -237,17 +245,18 @@ Future<void> _proveTheEditLoop() async {
   _same(
     'empty_cell_has_no_chord',
     true,
-    empty.existingChordAt(sectionId: _section, barIndex: _bar, beat: 1) == null,
+    fixtureChordAt(empty, sectionId: _section, barIndex: _bar, slot: 1) == null,
   );
-  final bool inserted = empty.applyChordToCell(
+  final bool inserted = fixtureChord(
+    empty,
     sectionId: _section,
     barIndex: _bar,
-    beat: 1,
+    slot: 1,
     chord: chordOf(
       roots.firstWhere((ChordRootChoice r) => r.pitchClass == 7),
       ChordQuality.dominantSeventh,
     ),
-  );
+  ).applied;
   _same('insert.reported_applied', true, inserted);
   _same(
     'insert.log_types',
@@ -426,12 +435,13 @@ Future<void> _proveTheEditLoop() async {
     true,
     _sameEvents(reopenedSession.log, session.log),
   );
-  final bool resumed = reopenedSession.applyChordToCell(
+  final bool resumed = fixtureChord(
+    reopenedSession,
     sectionId: _section,
     barIndex: _bar,
-    beat: _beat,
+    slot: _beat,
     chord: chordOf(flatThree, ChordQuality.minorSeventh),
-  );
+  ).applied;
   _same('resume.applied', true, resumed);
   _same(
     'resume.seq_continues',
@@ -488,14 +498,14 @@ Song probeChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
                   ),
                 ),
                 ChordMark(
-                  place: cellAt(2),
+                  place: placeAt(2),
                   chord: Chord(
                     root: ChordRoot(index + 2),
                     quality: ChordQuality.minorSeventh,
@@ -530,7 +540,7 @@ String _addressesOf(
       .map(
         (ChordMark placed) =>
             '${placed.chord.render(document.song.key, const SpellingTable())}'
-            '@${placed.pseudoBeat}.${placed.pseudoStep}',
+            '@${placed.offsetX.toStringAsFixed(1)}',
       )
       .join(',');
 }

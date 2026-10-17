@@ -56,6 +56,8 @@ import 'package:chartapp/viewer_screen.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The locales the app supports, in the order the probe prints them.
 const List<Locale> _locales = <Locale>[Locale('ru'), Locale('en')];
 
@@ -74,7 +76,7 @@ Song _namedSong() => Song(
         Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(0)),
             ),
           ],
@@ -99,7 +101,7 @@ Song _namelessSong() => Song(
         Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(0)),
             ),
           ],

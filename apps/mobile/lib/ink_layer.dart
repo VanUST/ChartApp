@@ -358,14 +358,14 @@ class InkCaptureLayer {
   final Map<String, MelodyNoteReading> _noteReadings =
       <String, MelodyNoteReading>{};
 
-  /// The note addresses the musician has REJECTED, as `section \u0000 bar \u0000 beat \u0000 step`.
+  /// The STROKES whose recognised note the musician has REJECTED, by ink identity.
   ///
   /// A rejected note is deleted from the model, which frees its address — so without this set the
   /// very next pass would read the same ink and write the same wrong note back, and the one-action
   /// repair would be a joke. It is session state for the same reason the switch is (A73 §7): the
   /// document has no place for "the musician said no to this". A rejection is forgotten when the ink
   /// that provoked it is erased, because ink he removed is not a mark he still means.
-  final Set<String> _rejectedNoteAddresses = <String>{};
+  final Set<String> _rejectedNoteStrokes = <String>{};
 
   /// Milliseconds of the last event of any kind that proved a stylus is near the glass.
   ///
@@ -1425,17 +1425,16 @@ class InkCaptureLayer {
       // THE MUSICIAN'S REJECTIONS ARE APPLIED HERE, in the layer that holds them, rather than inside
       // the writer: `chart_core` writes what a reading says, and "the musician said no to this
       // address" is a session decision that the document has nowhere to keep.
+      // A HEAD IS REMEMBERED BY ITS INK AND NOT BY ITS PIXELS. A rejection used to be filed under the
+      // head's beat and step; under a coordinate model the equivalent would be its x, and an x MOVES
+      // when the page reflows — the bar's own left edge is what the head's place is measured from, so
+      // the same handwriting on a re-engraved page yields a slightly different number and the musical
+      // answer "no" would be forgotten. The stroke ids are the ink itself: they do not move with the
+      // page, they are what the reader actually weighed, and hiding by them is already how a
+      // recognised note is drawn as structure (see `recognisedNoteStrokeIds`).
       final List<MelodyNoteHead> accepted = <MelodyNoteHead>[
         for (final MelodyNoteHead head in reading.heads)
-          if (!_rejectedNoteAddresses.contains(
-            _noteAddressKey(
-              placed.sectionId,
-              placed.barIndex,
-              head.beat,
-              head.orderInBeat,
-            ),
-          ))
-            head,
+          if (!head.strokeIds.any(_rejectedNoteStrokes.contains)) head,
       ];
       final MelodyNoteReading wanted = MelodyNoteReading(
         sectionId: reading.sectionId,
@@ -1452,11 +1451,11 @@ class InkCaptureLayer {
       // hidden while recognition is on — whether this pass wrote the note or found it already
       // written, because either way the note on the page is the structure and not the hand.
       for (final MelodyNoteHead head in accepted) {
-        if (_session.existingNoteAt(
+        if (_session.existingNoteNear(
               sectionId: placed.sectionId,
               barIndex: placed.barIndex,
-              beat: head.beat,
-              step: head.orderInBeat,
+              offsetX: head.offsetX,
+              tolerance: 0,
             ) ==
             null) {
           continue;
@@ -1474,7 +1473,7 @@ class InkCaptureLayer {
       for (final NoteMark note in write.written) {
         debugPrint(
           'note.found section=${placed.sectionId} bar=${placed.barIndex} '
-          'beat=${note.pseudoBeat} step=${note.pseudoStep} pitch=${note.pitch} '
+          'x=${note.offsetX.toStringAsFixed(1)} pitch=${note.pitch} '
           'value=${note.value} accidental=none duration=not-read',
         );
       }
@@ -1537,27 +1536,20 @@ class InkCaptureLayer {
         if (!head.strokeIds.contains(hit.stroke.id)) {
           continue;
         }
-        final bool deleted = _session.deleteNoteAt(
+        final bool deleted = _session.deleteNoteNear(
           sectionId: reading.sectionId,
           barIndex: reading.barIndex,
-          beat: head.beat,
-          step: head.orderInBeat,
+          offsetX: head.offsetX,
+          tolerance: 0,
         );
-        _rejectedNoteAddresses.add(
-          _noteAddressKey(
-            reading.sectionId,
-            reading.barIndex,
-            head.beat,
-            head.orderInBeat,
-          ),
-        );
+        _rejectedNoteStrokes.addAll(head.strokeIds);
         _recognisedNoteStrokes.removeAll(head.strokeIds);
         if (deleted) {
           _documentEdits++;
         }
         debugPrint(
           'note.rejected id=${hit.stroke.id} section=${reading.sectionId} '
-          'bar=${reading.barIndex} beat=${head.beat} step=${head.orderInBeat} '
+          'bar=${reading.barIndex} x=${head.offsetX.toStringAsFixed(1)} '
           'pitch=${head.pitch} deleted=$deleted '
           'ink=${head.strokeIds.join('+')} seq=${_session.seq}',
         );
@@ -1566,14 +1558,6 @@ class InkCaptureLayer {
     }
     return null;
   }
-
-  /// The address a rejection is filed under: the bar, the beat and the position inside the beat.
-  static String _noteAddressKey(
-    String sectionId,
-    int barIndex,
-    int beat,
-    int step,
-  ) => '$sectionId\u0000$barIndex\u0000$beat\u0000$step';
 
   // PURPOSE: Let a rejection die with the ink that provoked it, so that a musician who rubs out a
   //          misread note and draws another at the same place is listened to the second time.
@@ -1593,25 +1577,17 @@ class InkCaptureLayer {
         if (!head.strokeIds.contains(strokeId)) {
           continue;
         }
-        _rejectedNoteAddresses.remove(
-          _noteAddressKey(
-            entry.value.sectionId,
-            entry.value.barIndex,
-            head.beat,
-            head.orderInBeat,
-          ),
-        );
         forgotten.add(
           '${entry.value.sectionId}#${entry.value.barIndex}'
-          '.${head.beat}.${head.orderInBeat}',
+          '@${head.offsetX.toStringAsFixed(1)}',
         );
       }
     }
     if (forgotten.isNotEmpty) {
       debugPrint(
         'note.rejection.forgotten ink=$strokeId '
-        'addresses=${forgotten.join(',')} '
-        'rejected=${_rejectedNoteAddresses.length}',
+        'heads=${forgotten.join(',')} '
+        'rejected=${_rejectedNoteStrokes.length}',
       );
     }
   }

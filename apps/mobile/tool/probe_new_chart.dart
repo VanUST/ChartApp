@@ -33,6 +33,8 @@ import 'dart:typed_data';
 import 'package:chart_core/chart_core.dart';
 import 'package:chartapp/chart_document.dart';
 
+import '../support/place_fixture.dart';
+
 int _failures = 0;
 int _checks = 0;
 
@@ -131,10 +133,11 @@ Future<void> main() async {
     chartIdentityOf(renamer.document.song),
   );
   final EditSession editor0 = _sessionFor(blank);
-  editor0.applyChordToCell(
+  fixtureChord(
+    editor0,
     sectionId: newChartFirstSectionId,
     barIndex: 0,
-    beat: 0,
+    slot: 0,
     chord: const Chord(root: ChordRoot(0), quality: ChordQuality.majorTriad),
   );
   _same(
@@ -159,10 +162,11 @@ Future<void> main() async {
     document: DocumentState(song: blank),
     docId: blank.id,
   );
-  oldWay.applyChordToCell(
+  fixtureChord(
+    oldWay,
     sectionId: newChartFirstSectionId,
     barIndex: 0,
-    beat: 0,
+    slot: 0,
     chord: const Chord(root: ChordRoot(0), quality: ChordQuality.majorTriad),
   );
   final ChartFile oldFile = chartFileFor(
@@ -177,10 +181,11 @@ Future<void> main() async {
 
   // THE FIX, in the same shape: both sides read the rule from `documentIdFor`.
   final EditSession fixed = _sessionFor(blank);
-  fixed.applyChordToCell(
+  fixtureChord(
+    fixed,
     sectionId: newChartFirstSectionId,
     barIndex: 0,
-    beat: 0,
+    slot: 0,
     chord: const Chord(root: ChordRoot(0), quality: ChordQuality.majorTriad),
   );
   final ChartFile fixedFile = chartFileFor(
@@ -228,20 +233,22 @@ Future<void> main() async {
   _same(
     'a chord in bar 1 of A',
     true,
-    session.applyChordToCell(
+    fixtureChord(
+      session,
       sectionId: sectionA,
       barIndex: 0,
-      beat: 0,
+      slot: 0,
       chord: const Chord(root: ChordRoot(0), quality: ChordQuality.majorTriad),
     ),
   );
   _same(
     'a second chord in bar 2 of A',
     true,
-    session.applyChordToCell(
+    fixtureChord(
+      session,
       sectionId: sectionA,
       barIndex: 1,
-      beat: 2,
+      slot: 2,
       chord: const Chord(
         root: ChordRoot(7),
         quality: ChordQuality.dominantSeventh,
@@ -251,10 +258,11 @@ Future<void> main() async {
   _same(
     'a chord in B',
     true,
-    session.applyChordToCell(
+    fixtureChord(
+      session,
       sectionId: sectionB!,
       barIndex: 0,
-      beat: 0,
+      slot: 0,
       chord: const Chord(root: ChordRoot(9), quality: ChordQuality.minorTriad),
     ),
   );
@@ -298,10 +306,11 @@ Future<void> main() async {
   _same(
     'a note written on beat 2 of bar 1 of A, alongside the handwriting',
     true,
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: sectionA,
       barIndex: 0,
-      beat: 1,
+      slot: 1,
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.f, 1), octave: 4),
       value: const NoteValue.plain(NoteBase.eighth),
       tiedToNext: true,
@@ -436,8 +445,8 @@ Future<void> main() async {
   _same(
     'the note came back at beat 1, as F#4 tied, and the staff is declared',
     'beat=1 step=0 pitch=F#4 value=eighth tie=true staff=pitched',
-    'beat=${reopened.document.song.barsInReadingOrder.first.melody.single.pseudoBeat} '
-        'step=${reopened.document.song.barsInReadingOrder.first.melody.single.pseudoStep} '
+    'x=${reopened.document.song.barsInReadingOrder.first.melody.single.offsetX} '
+        '/ '
         'pitch=${reopened.document.song.barsInReadingOrder.first.melody.single.pitch} '
         'value=${reopened.document.song.barsInReadingOrder.first.melody.single.value} '
         'tie=${reopened.document.song.barsInReadingOrder.first.melody.single.tiedToNext} '

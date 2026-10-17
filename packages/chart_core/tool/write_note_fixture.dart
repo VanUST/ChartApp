@@ -11,20 +11,22 @@ import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// The melody of bar 1: a stacked pair on one beat and an eighth note tied forward.
 List<NoteMark> _barOne() => <NoteMark>[
   NoteMark(
-    place: cellAt(0),
+    place: placeAt(0),
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.c, 0), octave: 5),
     value: const NoteValue.plain(NoteBase.half),
   ),
   NoteMark(
-    place: cellAt(0, 1),
+    place: placeAt(0, 1),
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
     value: const NoteValue.plain(NoteBase.quarter),
   ),
   NoteMark(
-    place: cellAt(2),
+    place: placeAt(2),
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.g, 0), octave: 5),
     value: const NoteValue.plain(NoteBase.eighth),
     tiedToNext: true,
@@ -34,17 +36,17 @@ List<NoteMark> _barOne() => <NoteMark>[
 /// The melody of bar 2: a sharp, a flat and a note high enough to need ledger lines.
 List<NoteMark> _barTwo() => <NoteMark>[
   NoteMark(
-    place: cellAt(0),
+    place: placeAt(0),
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.f, 1), octave: 4),
     value: const NoteValue.plain(NoteBase.quarter),
   ),
   NoteMark(
-    place: cellAt(1),
+    place: placeAt(1),
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.b, -1), octave: 4),
     value: const NoteValue.plain(NoteBase.quarter),
   ),
   NoteMark(
-    place: cellAt(2),
+    place: placeAt(2),
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.a, 0), octave: 5),
     value: const NoteValue.plain(NoteBase.half),
   ),
@@ -69,7 +71,7 @@ Song _song(int bars) => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(
                   root: ChordRoot(<int>[0, 7, 9, 5][index % 4]),
                   quality: ChordQuality.majorTriad,
@@ -105,7 +107,7 @@ void main(List<String> args) {
     for (int index = 0; index < section.bars.length; index++) {
       for (final NoteMark note in section.bars[index].melody) {
         stdout.writeln(
-          'fixture note bar=${index + 1} beat=${note.pseudoBeat}.${note.pseudoStep} '
+          'fixture note bar=${index + 1} beat=${note.offsetX.toStringAsFixed(1)} '
           'pitch=${note.pitch} value=${note.value}'
           '${note.tiedToNext ? ' tied' : ''}',
         );

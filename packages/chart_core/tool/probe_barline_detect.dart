@@ -33,6 +33,8 @@ import 'dart:math' as math;
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// The sample the owner wrote, unless a path is given on the command line.
 const String defaultChartPath =
     r'C:\projects\ChartApp-acl-reports\omr-sample\untitled.chart';
@@ -291,7 +293,7 @@ Bar _barWithOneNote(Bar bar) => Bar(
   staffText: bar.staffText,
   melody: <NoteMark>[
     NoteMark(
-      place: cellAt(0),
+      place: placeAt(0),
       pitch: PitchedNote(note: WrittenNote(NoteLetter.b, -1), octave: 4),
       value: NoteValue.plain(NoteBase.quarter),
     ),

@@ -16,6 +16,8 @@ import 'package:chartapp/viewer_screen.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 // PURPOSE: Build a one-chord-per-bar chart of a requested length, so a test can decide how much
 //          music has to fit on the surface.
 // INPUTS: bars — how many bars. repeats — whether the passage carries a repeat sign and an
@@ -39,7 +41,7 @@ Song syntheticSong({required int bars, bool repeats = false, String? title}) =>
               Bar(
                 chords: <ChordMark>[
                   ChordMark(
-                    place: cellAt(0),
+                    place: placeAt(0),
                     chord: Chord(root: ChordRoot(0)),
                   ),
                 ],

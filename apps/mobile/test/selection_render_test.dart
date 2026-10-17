@@ -19,6 +19,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page width and height: the tablet viewport the other render instrument uses.
 const double selectionPageWidth = 824;
 const double selectionPageHeight = 600;
@@ -61,7 +63,7 @@ Song selectionChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
@@ -69,7 +71,7 @@ Song selectionChart() => Song(
                 ),
                 if (index.isEven)
                   ChordMark(
-                    place: cellAt(2),
+                    place: placeAt(2),
                     chord: Chord(
                       root: ChordRoot(index),
                       quality: ChordQuality.minorSeventh,
@@ -211,22 +213,22 @@ void main() {
     final PlacedBar bar = page.bars[8];
     expect(bar.sectionId, 'B');
     expect(bar.barIndex, 0);
-    final PlacedCell cell = bar.cells[2];
+    final LayoutRect cell = bar.bounds;
     final LayoutOffset point = LayoutOffset(
-      cell.bounds.left + cell.bounds.size.width / 2,
-      cell.bounds.top + cell.bounds.size.height / 2,
+      cell.left + cell.size.width / 2,
+      cell.top + cell.size.height / 2,
     );
     final ChartHit? hit = hitTestPage(page, point);
     expect(hit, isNotNull);
     expect(hit!.sectionId, 'B');
     expect(hit.barIndex, 0);
-    expect(hit.beat, 2);
+    expect(hit.local.x, 2);
 
     stdout.writeln(
       'render.select bar=9 cell=3 section=${bar.sectionId} '
-      'bar_index=${bar.barIndex} beat=${cell.beat} '
-      'cell_rect=(${cell.bounds.left},${cell.bounds.top},'
-      '${cell.bounds.size.width},${cell.bounds.size.height}) '
+      'bar_index=${bar.barIndex} beat=${cell.left} '
+      'cell_rect=(${cell.left},${cell.top},'
+      '${cell.size.width},${cell.size.height}) '
       'bar_rect=(${bar.bounds.left},${bar.bounds.top},'
       '${bar.bounds.size.width},${bar.bounds.size.height}) '
       'page_scale=${page.scale} page_bars=${page.bars.length} '
@@ -264,26 +266,26 @@ void main() {
     final PageLayout fitted = fit.page!;
     expect(fitted.scale, lessThan(1));
     final PlacedBar fitBar = fitted.bars[fitted.bars.length ~/ 2];
-    final PlacedCell fitCell = fitBar.cells[2];
+    final LayoutRect fitCell = fitBar.bounds;
     final ChartHit? fitHit = hitTestPage(
       fitted,
       LayoutOffset(
-        fitCell.bounds.left + fitCell.bounds.size.width / 2,
-        fitCell.bounds.top + fitCell.bounds.size.height / 2,
+        fitCell.left + fitCell.size.width / 2,
+        fitCell.top + fitCell.size.height / 2,
       ),
     );
     expect(fitHit, isNotNull);
     expect(fitHit!.barIndex, fitBar.barIndex);
-    expect(fitHit.beat, 2);
+    expect(fitHit.local.x, 2);
     stdout.writeln(
       'render.select.fit scale=${fitted.scale} '
-      'engraved_cell=(${fitCell.bounds.left},${fitCell.bounds.top},'
-      '${fitCell.bounds.size.width},${fitCell.bounds.size.height}) '
-      'surface_cell=(${fitCell.bounds.left * fitted.scale},'
-      '${fitCell.bounds.top * fitted.scale},'
-      '${fitCell.bounds.size.width * fitted.scale},'
-      '${fitCell.bounds.size.height * fitted.scale}) '
-      'bar_index=${fitBar.barIndex} beat=${fitCell.beat} '
+      'engraved_cell=(${fitCell.left},${fitCell.top},'
+      '${fitCell.size.width},${fitCell.size.height}) '
+      'surface_cell=(${fitCell.left * fitted.scale},'
+      '${fitCell.top * fitted.scale},'
+      '${fitCell.size.width * fitted.scale},'
+      '${fitCell.size.height * fitted.scale}) '
+      'bar_index=${fitBar.barIndex} left=${fitCell.left} '
       'fitted_bars=${fitted.bars.length}',
     );
     final File fittedPng = File(

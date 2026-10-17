@@ -58,6 +58,23 @@ enum BarMark {
 
   /// The player's stop, written `U`.
   playerEnding,
+
+  /// THE MUSICIAN'S OWN LINE BREAK: the next system begins at the bar after this one.
+  ///
+  /// WHY THIS IS A BAR MARK AND NOT A LAYOUT SETTING. The owner agreed to four line-breaking rules,
+  /// and the third of them is that a musician may break a line himself. A break is a decision about
+  /// the chart — it belongs to a bar, it survives being saved, reopened and re-engraved on another
+  /// device, and it must be undoable — so it travels the same road as the segno and the fermata
+  /// rather than living in a screen's state. It is written by `mark.set`, stored as its own name in
+  /// the file, and read by the layout engine's system builder ([LayoutEngine._buildSystems]), which
+  /// is the only consumer: it is an instruction to the PAGE, so no glyph stands for it. A system
+  /// that ends because the musician said so is the whole of how it is seen.
+  ///
+  /// IT IS NOT IMPORTED AND CANNOT BE. iReal writes no such sign; the importer's letters map to the
+  /// four musical marks above, so a chart that arrives from `.irealb` never carries a break — which
+  /// is right, because a break is a decision made about a page that does not exist until this
+  /// application lays one out.
+  lineBreak,
 }
 
 /// The size a chord is engraved at, which persists until changed.

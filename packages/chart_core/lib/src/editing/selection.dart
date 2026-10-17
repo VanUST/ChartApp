@@ -1,17 +1,18 @@
 // PURPOSE: Name the fragment a musician has SELECTED — a run of bars inside one section, or a
-//          window of beats inside one bar — as an ADDRESS in the interface, never as an entity of
-//          the document. The owner stated the purpose of the whole product as select, copy, paste
+//          window of x inside one bar — as an ADDRESS in the interface, never as an entity of the
+//          document. The owner stated the purpose of the whole product as select, copy, paste
 //          and transpose (D35) and then widened the selection to something finer than a bar
 //          (D36: "скопировать содержимое по тактам, нескольким тактам, каких-то нот внутри
 //          такта"). This type is the one place that answers "which music is selected", so copy,
 //          paste, transpose and the label all ask the same question of the same value.
-// INPUTS: A section id, two bar indices, and — only for a single bar — two beat indices.
-// OUTPUTS: An immutable [ChartSelection]. A selection naming several bars carries NO beats: a beat
-//          window is only expressible inside one bar, and the constructor DROPS the two beat fields
-//          (rather than throwing) when the bars differ, so a caller that extends a cell selection
+// INPUTS: A section id, two bar indices, and — only for a single bar — the two x values the
+//         window spans, in bar-local logical pixels.
+// OUTPUTS: An immutable [ChartSelection]. A selection naming several bars carries NO window: a
+//          window is only expressible inside one bar, and the constructor DROPS the two x fields
+//          (rather than throwing) when the bars differ, so a caller that extends a window selection
 //          onto a second bar gets the run of bars it visibly asked for and not a value that claims
 //          a window it cannot express.
-// KEYWORDS: selection, address, bar-range, beat-window, d35, d36, ui-state-not-document-state
+// KEYWORDS: selection, address, bar-range, window, coordinates, d35, d36, ui-state-not-document-state
 //
 // WHY A SELECTION IS NOT STORED ANYWHERE, AND WHY THAT IS THE POINT.
 //
@@ -23,58 +24,58 @@
 // reaches the log is the RESULT of an operation performed on a selection (a paste, a transposition),
 // and the selection itself is gone by then.
 //
-// WHY THE BEAT WINDOW STOPS AT ONE BAR.
+// WHY THE WINDOW IS AN X RANGE AND NOT A RUN OF BEATS.
 //
-// A beat is a column inside a bar. A window that began at beat 3 of bar 4 and ended at beat 2 of bar
-// 7 would have to be re-projected onto a target whose bars do not have the same metre, and the only
-// ways to do that are to clip it (destroying part of what the musician copied), to spill it across
-// bars (inventing a barline the musician did not write) or to refuse targets whose metre differs
-// (making the gesture unpredictable). None of those is a copy of what was selected. A window inside
-// ONE bar never has to answer that question: the pasted beats land in the target bar's own grid at
-// the offset the musician chose, and a window that does not fit is REFUSED rather than reshaped.
+// A beat was a column inside a bar, and a window of columns had to answer questions the model can no
+// longer ask: which column a mark sat in, how many columns a clip was wide, and what to do when the
+// target bar's metre differed. The owner removed the grid, so a position inside a bar is a
+// coordinate and a window is a RANGE OF THAT COORDINATE — the same number a mark's place is written
+// in. Copy and paste then become a TRANSLATION: every mark whose x lies in the source range moves by
+// the distance between the two ranges' left ends. Nothing is re-projected onto a grid, no metre is
+// consulted, and a window that spans more x than the target bar has room for simply makes the bar
+// wider, which is what a bar's width means now.
 //
-// WHY THE BARS AND NOT A SET OF NOTES.
+// WHY THE WINDOW STILL STOPS AT ONE BAR.
 //
-// "Каких-то нот внутри такта" could be read as an arbitrary set. A set would need an address per
-// note, and this model addresses a note by `(section, bar, beat, step)` — a position, not an
-// identity — so a set collected at copy time would name positions that the target does not have.
-// A window is expressible in the model's own coordinates (the same `beat` field an anchor already
-// carries), it is a rectangle the musician can see and touch, and it composes with the bar run
-// without a second address space. The set is the finer gesture this model does not have and would
-// have to invent identities for; the window is the same intention at the granularity the model
-// already has.
+// A bar is the smallest fragment that holds a barline, and a window that began in bar 4 and ended in
+// bar 7 would have to be re-projected onto a target whose bars are a different width. Cutting it at
+// one bar keeps the translation a single number; a musician who wants several bars selects the bars.
 import '../song/bar.dart';
 import '../song/section.dart';
 import '../song/song.dart';
 import 'bar_range.dart';
 
-// PURPOSE: Say how deep a selection goes — whole bars, or a window of beats inside one bar — so a
-//          caller can branch on the depth without testing nullable fields twice and disagreeing.
+// PURPOSE: Say how deep a selection goes — whole bars, or a window inside one bar — so a caller can
+//          branch on the depth without testing nullable fields twice and disagreeing.
 // INPUTS: None; the value is derived from a [ChartSelection].
 // OUTPUTS: One of two tokens. There is deliberately no third: a selection always names at least one
 //          whole bar, and the finer depth is a narrowing of that, not a different thing.
-// KEYWORDS: selection-depth, bars, beats, exhaustive, no-third-state
-/// How deep a selection goes: whole bars, or a window of beats inside one bar.
+// KEYWORDS: selection-depth, bars, window, exhaustive, no-third-state
+/// How deep a selection goes: whole bars, or a window inside one bar.
 enum SelectionDepth {
   /// The selection covers whole bars, and everything written in them.
   bars,
 
-  /// The selection covers a window of beats inside ONE bar.
-  beats,
+  /// The selection covers a window of x inside ONE bar.
+  ///
+  /// It was called `beats` until the grid was deleted, and the rename is the change: what a window
+  /// spans is a distance along the bar, not a count of the metre's columns.
+  window,
 }
 
 // PURPOSE: Name the music a musician selected, in the model's own coordinates, without holding any
 //          part of the document.
 // INPUTS: See the file header. Both validating doors are the two named constructors; the private
-//         constructor is what they normalise into.
+//          constructor is what they normalise into.
 // OUTPUTS: An immutable value. [firstBar] is never after [lastBar] — the constructors swap a
 //          backwards pair rather than throwing, because a musician who dragged from bar 12 up to bar
 //          5 selected bars 5..12 and meant it; there is no reading of that gesture in which the
 //          answer is "you described it backwards". This is the OPPOSITE of [resolveBarRange], which
 //          refuses a reversed run: that door reads two figures a musician TYPED, where a backwards
 //          pair is a typing mistake to correct, and this one reads two bars they TOUCHED, where the
-//          order is a property of the gesture and not of the intention.
-// KEYWORDS: selection, bar-run, beat-window, normalised-order, immutable, derived-length
+//          order is a property of the gesture and not of the intention. A window's two x values are
+//          normalised the same way.
+// KEYWORDS: selection, bar-run, window, normalised-order, immutable, derived-length
 /// The music a musician selected, named in the model's own coordinates.
 class ChartSelection {
   /// Builds a normalised selection. Every public door funnels through here.
@@ -82,15 +83,15 @@ class ChartSelection {
     required this.sectionId,
     required this.firstBar,
     required this.lastBar,
-    required this.firstBeat,
-    required this.lastBeat,
+    required this.firstX,
+    required this.lastX,
   });
 
   /// Creates a selection of whole bars [firstBar]..[lastBar] of [sectionId], both ends inclusive.
   ///
   /// The two bar indices are SWAPPED when [lastBar] comes before [firstBar]; see the class contract
-  /// for why this door normalises where [resolveBarRange] refuses. No beat is named, so the whole of
-  /// each bar is selected.
+  /// for why this door normalises where [resolveBarRange] refuses. No window is named, so the whole
+  /// of each bar is selected.
   factory ChartSelection.bars({
     required String sectionId,
     required int firstBar,
@@ -102,54 +103,52 @@ class ChartSelection {
       sectionId: sectionId,
       firstBar: low,
       lastBar: high,
-      firstBeat: null,
-      lastBeat: null,
+      firstX: null,
+      lastX: null,
     );
   }
 
-  /// Creates a selection of the beats [firstBeat]..[lastBeat] inside one [barIndex].
+  /// Creates a selection of the x range [firstX]..[lastX] inside one [barIndex].
   ///
-  /// The two beat indices are swapped when [lastBeat] comes before [firstBeat], for the same reason
-  /// the bars are. A beat window always covers exactly one bar, which is what lets it be pasted into
-  /// a bar's own grid without reshaping it.
-  factory ChartSelection.beats({
+  /// The two values are swapped when [lastX] comes before [firstX], for the same reason the bars are.
+  /// A window always covers exactly one bar, which is what lets it be described without naming a
+  /// second bar's coordinates.
+  factory ChartSelection.window({
     required String sectionId,
     required int barIndex,
-    required int firstBeat,
-    required int lastBeat,
+    required double firstX,
+    required double lastX,
   }) {
-    final int low = firstBeat <= lastBeat ? firstBeat : lastBeat;
-    final int high = firstBeat <= lastBeat ? lastBeat : firstBeat;
+    final double low = firstX <= lastX ? firstX : lastX;
+    final double high = firstX <= lastX ? lastX : firstX;
     return ChartSelection._(
       sectionId: sectionId,
       firstBar: barIndex,
       lastBar: barIndex,
-      firstBeat: low,
-      lastBeat: high,
+      firstX: low,
+      lastX: high,
     );
   }
 
-  /// Creates the selection two touches describe: [firstBar] with its optional [firstBeat], and
-  /// [lastBar] with its optional [lastBeat], in either order.
+  /// Creates the selection two touches describe: [firstBar] with its optional [firstX], and
+  /// [lastBar] with its optional [lastX], in either order.
   ///
   /// THE RULE, IN ONE PLACE, because the interface's "extend to here" action must not re-derive it:
-  /// two beats inside ONE bar make a beat window; two touches on DIFFERENT bars make the run of bars
-  /// between them and DROP the beats, because a window cannot span bars (see the file header). A
-  /// touch that landed on a bar's padding names no beat at all, so one beat and one bar-level touch
-  /// also makes a bar run: a window needs BOTH ends to be cells.
+  /// two points inside ONE bar make a window; two touches on DIFFERENT bars make the run of bars
+  /// between them and DROP the x values, because a window cannot span bars (see the file header).
   factory ChartSelection.span({
     required String sectionId,
     required int firstBar,
-    int? firstBeat,
+    double? firstX,
     required int lastBar,
-    int? lastBeat,
+    double? lastX,
   }) {
-    if (firstBar == lastBar && firstBeat != null && lastBeat != null) {
-      return ChartSelection.beats(
+    if (firstBar == lastBar && firstX != null && lastX != null) {
+      return ChartSelection.window(
         sectionId: sectionId,
         barIndex: firstBar,
-        firstBeat: firstBeat,
-        lastBeat: lastBeat,
+        firstX: firstX,
+        lastX: lastX,
       );
     }
     return ChartSelection.bars(
@@ -168,27 +167,29 @@ class ChartSelection {
   /// Zero-based index of the last bar the selection covers, never before [firstBar].
   final int lastBar;
 
-  /// Zero-based first beat of the window, or null when the selection is bar-deep.
-  final int? firstBeat;
+  /// The window's left end in bar-local logical pixels, or null when the selection is bar-deep.
+  final double? firstX;
 
-  /// Zero-based last beat of the window, or null when the selection is bar-deep.
-  final int? lastBeat;
+  /// The window's right end in bar-local logical pixels, or null when the selection is bar-deep.
+  final double? lastX;
 
-  /// Whether this selection is a window of beats rather than whole bars.
-  bool get isBeatWindow => firstBeat != null && lastBeat != null;
+  /// Whether this selection is a window inside one bar rather than whole bars.
+  bool get isWindow => firstX != null && lastX != null;
 
   /// Which depth the selection goes to.
   SelectionDepth get depth =>
-      isBeatWindow ? SelectionDepth.beats : SelectionDepth.bars;
+      isWindow ? SelectionDepth.window : SelectionDepth.bars;
 
   /// How many bars the selection covers, at least one.
   int get barCount => lastBar - firstBar + 1;
 
-  /// How many beats the window covers, or one for a bar-deep selection.
+  /// How wide the window is, in bar-local logical pixels; zero for a bar-deep selection.
   ///
-  /// One rather than zero, because every consumer multiplies by it to ask "how much music is this"
-  /// and a zero would silently empty the answer.
-  int get beatCount => isBeatWindow ? lastBeat! - firstBeat! + 1 : 1;
+  /// A DISTANCE AND NOT A COUNT. It replaces the old "how many beats" for exactly one purpose — a
+  /// paste translates a clip by the distance between two windows' left ends — and its zero for a
+  /// bar-deep selection is the honest answer rather than the old `1`, because a bar-deep selection
+  /// has no width to speak of: it is the whole bar.
+  double get windowWidth => isWindow ? lastX! - firstX! : 0;
 
   /// The bars the selection covers, as the value the metre zone already uses.
   ///
@@ -201,8 +202,8 @@ class ChartSelection {
   /// Returns a copy of this selection covering nothing but whole bars.
   ///
   /// Used when a caller takes a bar-deep action from a selection that is finer than it: the bar a
-  /// beat window sits in is the bar that action acts on, and saying so with a value keeps the
-  /// decision visible instead of upcasting `firstBeat` to nothing at the call site.
+  /// window sits in is the bar that action acts on, and saying so with a value keeps the decision
+  /// visible instead of upcasting `firstX` to nothing at the call site.
   ChartSelection get asBars => ChartSelection.bars(
     sectionId: sectionId,
     firstBar: firstBar,
@@ -238,16 +239,17 @@ class ChartSelection {
       other.sectionId == sectionId &&
       other.firstBar == firstBar &&
       other.lastBar == lastBar &&
-      other.firstBeat == firstBeat &&
-      other.lastBeat == lastBeat;
+      other.firstX == firstX &&
+      other.lastX == lastX;
 
   @override
-  int get hashCode =>
-      Object.hash(sectionId, firstBar, lastBar, firstBeat, lastBeat);
+  int get hashCode => Object.hash(sectionId, firstBar, lastBar, firstX, lastX);
 
   @override
   String toString() {
     final String bars = '$sectionId#$firstBar..$lastBar';
-    return isBeatWindow ? '$bars beat $firstBeat..$lastBeat' : bars;
+    return isWindow
+        ? '$bars x ${firstX!.toStringAsFixed(1)}..${lastX!.toStringAsFixed(1)}'
+        : bars;
   }
 }

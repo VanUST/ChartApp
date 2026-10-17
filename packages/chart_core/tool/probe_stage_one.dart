@@ -15,6 +15,8 @@ import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 int _checks = 0;
 int _failures = 0;
 
@@ -61,24 +63,27 @@ void _roundTripThroughARealFile(Directory directory) {
     ),
   );
   for (int beat = 0; beat < 4; beat += 2) {
-    session.applyChordToCell(
+    fixtureChord(
+      session,
       sectionId: 'sec-A',
       barIndex: 1,
-      beat: beat,
+      slot: beat,
       chord: Chord(root: ChordRoot(beat + 2)),
     );
   }
-  session.insertNote(
+  fixtureInsertNote(
+    session,
     sectionId: 'sec-A',
     barIndex: 2,
-    beat: 1,
+    slot: 1,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.e, 0), octave: 4),
     value: NoteValue.plain(NoteBase.quarter),
   );
-  session.insertNote(
+  fixtureInsertNote(
+    session,
     sectionId: 'sec-A',
     barIndex: 2,
-    beat: 3,
+    slot: 3,
     pitch: const PitchedNote(note: WrittenNote(NoteLetter.g, 0), octave: 4),
     value: NoteValue.plain(NoteBase.eighth),
     tiedToNext: true,
@@ -86,8 +91,7 @@ void _roundTripThroughARealFile(Directory directory) {
   final String? firstCue = session.insertTextCue(
     sectionId: 'sec-A',
     barIndex: 1,
-    beat: 2,
-    offsetX: 3,
+    offsetX: fixtureX(2) + 3,
     offsetY: -1,
     text: 'To Coda',
   );
@@ -274,7 +278,7 @@ void _irealChart() {
     '3.0',
     <String>[
       for (final ChordMark mark in bars.first.chords)
-        '${mark.pseudoBeat}.${mark.pseudoStep}',
+        '${mark.offsetX.toStringAsFixed(1)}',
     ].last,
   );
 }
@@ -282,7 +286,7 @@ void _irealChart() {
 /// One chord's cell and stored x, as `root quality @ beat . step x offsetX`.
 String _cellToken(ChordMark mark) =>
     '${mark.chord.root.pitchClass}${mark.chord.quality.token}'
-    '@${mark.pseudoBeat}.${mark.pseudoStep}'
+    '@${mark.offsetX.toStringAsFixed(1)}'
     'x${mark.place.offsetX.toStringAsFixed(1)}';
 
 /// One engraved chord, as `root quality @ page x`.

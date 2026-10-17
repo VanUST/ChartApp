@@ -31,6 +31,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// Where the probe's PNGs are written. Outside the repository: a rendered image is evidence for one
 /// inspection, not an artefact to commit.
 const String textCueReservationDirectory =
@@ -141,14 +143,14 @@ Song _chart(int bars) => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
               ),
               ChordMark(
-                place: cellAt(2),
+                place: placeAt(2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,

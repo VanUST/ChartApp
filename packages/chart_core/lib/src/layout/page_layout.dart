@@ -11,6 +11,7 @@
 //          the view, so a pan is a new page value and a painter that compares pages repaints.
 // KEYWORDS: layout-result, placed-chord, hit-testing, value-equality, cache-key, anchor-address,
 //           view-transform, zoom, pan, single-bridge
+import '../anchored_place.dart';
 import '../chord.dart';
 import 'chart_header.dart';
 import 'geometry.dart';
@@ -18,75 +19,61 @@ import 'melody_staff.dart';
 
 /// A chord drawn at a position, with the address that identifies it in the song.
 class PlacedChord {
-  /// Creates a placed chord for [chord] at ([beat], [step]) with the given [bounds].
+  /// Creates a placed chord for [chord] at [place] with the given [bounds].
   const PlacedChord({
     required this.chord,
-    required this.beat,
-    required this.step,
+    required this.place,
     required this.bounds,
+    this.clampedIntoBand = false,
   });
 
   /// The chord that is drawn.
   final Chord chord;
 
-  /// The cell of the bar the chord sits on.
-  final int beat;
-
-  /// The order of this chord within its cell, matching the song model's step.
-  final int step;
+  /// Where the chord is written: its bar, and its own distance along the chord line.
+  ///
+  /// THE PLACE IS THE ADDRESS AND THE DRAWING BOTH. A mark's identity in the song is its place, so a
+  /// caller that holds a `ChordMark` matches it against a placed chord by comparing this value — no
+  /// beat index, no step, and nothing to convert. [bounds] is derived from it: its left edge is
+  /// `place.offsetX` along the bar and its centre follows `place.offsetY`.
+  final AnchoredPlace place;
 
   /// Where the chord is drawn, in page coordinates.
   final LayoutRect bounds;
+
+  /// Whether the stored place put this symbol outside the bar's own chord line, so it was pulled
+  /// back in.
+  ///
+  /// THE ONE THING THE LAYOUT REFUSES TO DO IS ENGRAVE A CHORD OUTSIDE THE CHORD BAND. The owner's
+  /// rule is that a chord is written above the staff and that below the bar there is neither a chord
+  /// nor a note («Аккорды надо запретить ниже такта»), and an application that drew a symbol under
+  /// the bar would be showing a place the rule says cannot hold one — a reader of the ink would then
+  /// find notes there. A chart written by a broken build is still opened rather than rejected, so the
+  /// symbol is clamped to the band's edge and this flag says so; a probe prints it, and the editor is
+  /// the organ that refuses such a place in the first place.
+  final bool clampedIntoBand;
 
   @override
   bool operator ==(Object other) =>
       other is PlacedChord &&
       other.chord == chord &&
-      other.beat == beat &&
-      other.step == step &&
-      other.bounds == bounds;
+      other.place == place &&
+      other.bounds == bounds &&
+      other.clampedIntoBand == clampedIntoBand;
 
   @override
-  int get hashCode => Object.hash(chord, beat, step, bounds);
+  int get hashCode => Object.hash(chord, place, bounds, clampedIntoBand);
 
   @override
-  String toString() => 'placed($chord) at $bounds';
+  String toString() =>
+      'placed($chord) at $bounds${clampedIntoBand ? ' (clamped into the chord band)' : ''}';
 }
 
-/// One cell of a bar: the slice of the bar's width that one beat occupies.
-///
-/// A cell is not a chord. An empty cell is where a chord written before it keeps sounding, and it
-/// still owns a column of the bar, so an answer to "what did the musician touch" must be able to
-/// say "this cell, no chord" as readily as "this cell, this chord". The engine already divides the
-/// bar into these columns in order to place its chords; publishing those columns as layout values
-/// is what lets a hit test read the geometry that was engraved instead of re-deriving it, which is
-/// the same reason [PlacedChord.bounds] exists rather than being recomputed by the painter.
-class PlacedCell {
-  /// Creates a cell for [beat] with the given [bounds].
-  const PlacedCell({required this.beat, required this.bounds});
-
-  /// The cell's index inside its bar, in the song model's beat numbering.
-  ///
-  /// It is the `beat` half of an annotation anchor, so a cell named by a touch and a cell named by
-  /// an annotation are the same value and can be compared without a conversion.
-  final int beat;
-
-  /// Where the cell is drawn, in page coordinates.
-  ///
-  /// The rectangle spans the bar's full stave height and the cell's own column of its width, so a
-  /// point anywhere in the column — above, on or below the chord symbol — hits the same cell.
-  final LayoutRect bounds;
-
-  @override
-  bool operator ==(Object other) =>
-      other is PlacedCell && other.beat == beat && other.bounds == bounds;
-
-  @override
-  int get hashCode => Object.hash(beat, bounds);
-
-  @override
-  String toString() => 'PlacedCell($beat) at $bounds';
-}
+// A bar's cells are GONE, and their absence is the point of this stage. A cell was the grid in the
+// layout: it divided a bar into as many columns as the meter said and named one of them for a touch.
+// The owner removed the metre as a divider («Просто надпись») and made a mark's place a coordinate,
+// so there is no column to publish and no column to hit: a tap on a bar names the bar and its own x,
+// and what is under it is decided by that number (see `hitTestPage` and `ChartHit.local`).
 
 /// One line of the words a bar carries, placed where it is drawn.
 ///
@@ -179,70 +166,23 @@ class PlacedTextCue {
   String toString() => 'PlacedTextCue($id, "$text") at $origin size $size';
 }
 
-/// One beat of a bar, named where the musician counts it: under the staff, in the beat's own
-/// column.
-///
-/// WHY THIS IS A LAYOUT VALUE AND NOT A PAINTER'S ARITHMETIC. The defect it exists against is that
-/// a musician could not tell WHICH BEAT he was choosing, so the mark has to land on the column the
-/// hit test will name — the same column the chord and the cell of that beat already occupy. Only
-/// the engine knows where a cell begins, so the engine publishes the mark's identity and box and
-/// the painter draws what it was handed; a painter that centred a number in a cell it re-derived
-/// would be the second arithmetic that drifts.
-///
-/// IT LIVES UNDER THE STAFF, in the space the staff's centring leaves above the next system. A
-/// marker carries the beat's ordinal as [label] when the engine decided the column is wide enough
-/// to print one, and an empty string when it is not — in which case the painter draws the tick
-/// alone. Both cases are drawn the same way: a short tick at the bottom of [bounds], so a crowded
-/// bar shows the beat GRID even when it cannot show the numbers.
-class PlacedBeatMarker {
-  /// Creates a marker naming [beat] with [label] in the given [bounds].
-  const PlacedBeatMarker({
-    required this.beat,
-    required this.label,
-    required this.bounds,
-  });
+// The beat markers are GONE with the cells that gave them their columns. They existed as a
+// reference aid — a digit and a tick under the staff — and the owner read them as noise and had them
+// switched off in the style (`LayoutStyle.showBeatCaptions`), which is also why the staff's hit test
+// could not be built on them. Beam grouping no longer reads the metre either, so the last thing in
+// the engraving that depended on the metre's division into columns has gone with it.
 
-  /// The cell index inside its bar, in the song model's zero-based numbering — the `beat` half of
-  /// an annotation anchor and of a [PlacedCell].
-  final int beat;
-
-  /// The beat numbered the way the musician counts it, or the empty string when the engine decided
-  /// the column is too narrow to print it. Never null: "no number here" is an ordinary state of a
-  /// crowded bar.
-  final String label;
-
-  /// The box the marker occupies, spanning its cell's column. Its bottom edge is where the tick is
-  /// drawn, so the marker reads against the column rather than against the bar.
-  final LayoutRect bounds;
-
-  @override
-  bool operator ==(Object other) =>
-      other is PlacedBeatMarker &&
-      other.beat == beat &&
-      other.label == label &&
-      other.bounds == bounds;
-
-  @override
-  int get hashCode => Object.hash(beat, label, bounds);
-
-  @override
-  String toString() =>
-      'PlacedBeatMarker($beat${label.isEmpty ? '' : ' "$label"'}) at $bounds';
-}
-
-/// A bar drawn at a position, together with its cells and the chords inside it.
+/// A bar drawn at a position, together with the chords and notes inside it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
   const PlacedBar({
     required this.sectionId,
     required this.barIndex,
     required this.bounds,
-    required this.cells,
     required this.chords,
     this.staffText = const <PlacedStaffText>[],
     this.textCues = const <PlacedTextCue>[],
     this.melody = PlacedMelodyStaff.empty,
-    this.beatMarkers = const <PlacedBeatMarker>[],
   });
 
   /// The section the bar belongs to.
@@ -251,21 +191,20 @@ class PlacedBar {
   /// The bar's index within its section, in written order.
   ///
   /// Together with [sectionId] this is the bar half of an annotation anchor, so a layout can be
-  /// matched to an annotation without either side knowing the other's coordinate system.
+  /// matched to an annotation without either side knowing the other's coordinate system. It is also
+  /// the whole of what a tap on the bar names: see [ChartHit].
   final int barIndex;
 
   /// Where the bar is drawn, in page coordinates.
+  ///
+  /// THIS RECTANGLE IS THE CHORD BAND AND THE HIT TARGET, and the two are the same rectangle on
+  /// purpose: a chord is written above the staff, so the bar's own chord line is the only place the
+  /// owner's rule allows one, and a touch that lands on it names this bar. The melody staff is
+  /// placed BELOW this rectangle rather than inside it, which is what keeps a tap on the chord line
+  /// and a tap on the staff two different questions with one answer each.
   final LayoutRect bounds;
 
-  /// The bar's cells, left to right, one per beat the bar has room for.
-  ///
-  /// The columns tile the bar's interior between its two paddings; a point inside the bar but in
-  /// one of those paddings therefore lies over the bar and over no cell, which is a state a hit
-  /// test reports rather than hides. There is always at least one cell: the meter declares at
-  /// least one, and the engine widens the count to include a chord written past the meter.
-  final List<PlacedCell> cells;
-
-  /// The chords inside the bar, ordered by cell and then by step.
+  /// The chords inside the bar, ordered by their place along it.
   final List<PlacedChord> chords;
 
   /// The staff-text lines the bar draws, stacked upward from its bottom edge in model order.
@@ -279,7 +218,7 @@ class PlacedBar {
   ///
   /// They sit in the rows the layout reserved ABOVE this bar's stave — so above [bounds], not
   /// inside it — stacked upward from the stave so the first cue stays closest to the bar it
-  /// remarks on. The bar's own [bounds], its [cells] and its [chords] are untouched by a cue: a
+  /// remarks on. The bar's own [bounds] and its [chords] are untouched by a cue: a
   /// remark reserves room from the page rather than moving the music. Empty for a bar no cue
   /// names, which is the common case, and for a cue whose text is empty — a cue with nothing to
   /// say gets no row.
@@ -288,28 +227,18 @@ class PlacedBar {
   /// The melody staff drawn under this bar, from `Bar.melody`.
   ///
   /// ONE STAFF PER BAR rather than one per system, so that the five lines and everything on them
-  /// are addressed exactly as a chord and a cell are: by the bar's own rectangle. The bounds of two
+  /// are addressed exactly as a chord is: by the bar's own rectangle. The bounds of two
   /// neighbouring bars on a system tile, so the lines read as one continuous staff.
   ///
   /// [PlacedMelodyStaff.empty] for a song whose bars carry no melody at all — every imported chart
-  /// — and in that state nothing is reserved, nothing is drawn, and this bar's [bounds], [cells]
-  /// and [chords] are exactly what they were before a melody staff existed.
+  /// — and in that state nothing is reserved, nothing is drawn, and this bar's [bounds] and
+  /// [chords] are exactly what they were before a melody staff existed.
   ///
   /// THE STAFF LIES BELOW [bounds], NOT INSIDE IT. A bar's rectangle is its chord-line stave, and
   /// that is what the hit test measures a tap against, so extending it over the staff would change
   /// what a tap on the chord line means. The melody has its own rectangle instead; a point in the
-  /// staff is over no bar until note entry gives it meaning.
+  /// staff is over no bar's chord line, and is answered by `hitTestMelodyStaff`.
   final PlacedMelodyStaff melody;
-
-  /// The beat markers under this bar's staff, one per cell, left to right.
-  ///
-  /// They name the beat a musician is choosing, in the column that beat owns, and they exist only
-  /// because the song declared a pitched staff: on a chords-only chart this is EMPTY and nothing
-  /// is drawn, which is what keeps such a chart's page exactly what it was. A marker carries the
-  /// beat's ordinal on the bar that OPENS a system — the beats of the bars after it are the same
-  /// numbers on the same columns, so printing them again would say nothing — and an empty label
-  /// elsewhere; the tick is drawn either way.
-  final List<PlacedBeatMarker> beatMarkers;
 
   @override
   bool operator ==(Object other) {
@@ -317,18 +246,11 @@ class PlacedBar {
         other.sectionId != sectionId ||
         other.barIndex != barIndex ||
         other.bounds != bounds ||
-        other.cells.length != cells.length ||
         other.chords.length != chords.length ||
         other.staffText.length != staffText.length ||
         other.textCues.length != textCues.length ||
-        other.melody != melody ||
-        other.beatMarkers.length != beatMarkers.length) {
+        other.melody != melody) {
       return false;
-    }
-    for (int index = 0; index < cells.length; index++) {
-      if (other.cells[index] != cells[index]) {
-        return false;
-      }
     }
     for (int index = 0; index < chords.length; index++) {
       if (other.chords[index] != chords[index]) {
@@ -345,11 +267,6 @@ class PlacedBar {
         return false;
       }
     }
-    for (int index = 0; index < beatMarkers.length; index++) {
-      if (other.beatMarkers[index] != beatMarkers[index]) {
-        return false;
-      }
-    }
     return true;
   }
 
@@ -358,12 +275,10 @@ class PlacedBar {
     sectionId,
     barIndex,
     bounds,
-    Object.hashAll(cells),
     Object.hashAll(chords),
     Object.hashAll(staffText),
     Object.hashAll(textCues),
     melody,
-    Object.hashAll(beatMarkers),
   );
 
   @override

@@ -17,6 +17,8 @@ import 'dart:math' as math;
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// A synthetic 16-bar song in one section, laid out wide enough that FIT must shrink it.
 Song twoSectionChart() => Song(
   id: 'ink-test',
@@ -35,7 +37,7 @@ Song twoSectionChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
@@ -204,7 +206,7 @@ void main() {
       // rectangle and once the bar's — because an anchor used to name a beat and the lookup preferred
       // the cell. An anchor names a bar now, so there is one answer, and the test states it in the
       // negative as well: the rectangle is the bar's, and NOT the rectangle of the cell that used to
-      // be preferred. The old assertion, quoted: `expect(cellPlacement!.bounds, cell.bounds)`.
+      // be preferred. The old assertion, quoted: `expect(cellPlacement!.bounds, cell)`.
       final List<PageLayout> pages = engine.layout(
         twoSectionChart(),
         pageWidth: 824,
@@ -212,7 +214,15 @@ void main() {
       );
       final PageLayout page = pages.first;
       final PlacedBar bar = page.bars[2];
-      final PlacedCell cell = bar.cells[1];
+      // THE BAND THE RULE WOULD HAVE EXCLUDED, stated without a grid: half the bar, which is the
+      // narrowest thing that used to be a target. The old assertion compared the resolved
+      // rectangle against a CELL, and the negative below keeps that shape.
+      final LayoutRect halfOfTheBar = LayoutRect.fromLTWH(
+        bar.bounds.left,
+        bar.bounds.top,
+        bar.bounds.size.width / 2,
+        bar.bounds.size.height,
+      );
 
       final InkPlacement? placement = resolveEventAnchor(
         page,
@@ -223,7 +233,7 @@ void main() {
       expect(placement.origin, bar.bounds.origin);
       expect(
         placement.bounds,
-        isNot(cell.bounds),
+        isNot(halfOfTheBar),
         reason: 'a stroke is anchored to its bar, not to the column it was drawn in',
       );
     });
@@ -358,12 +368,13 @@ void main() {
         // The cell the pen will land in — the last of the last bar, the furthest engraved point
         // from the origin and so the one a scale error moves the most.
         final PlacedBar bar = page.bars.last;
-        final PlacedCell cell = bar.cells.last;
+        // THE FURTHEST ENGRAVED POINT of the last bar: its own right edge, less a stroke, at the
+        // height of the chord line. That is where a scale error moves a point the most, and it
+        // used to be the centre of the bar's last CELL.
         final LayoutOffset centre = LayoutOffset(
-          cell.bounds.left + cell.bounds.size.width / 2,
-          cell.bounds.top + cell.bounds.size.height / 2,
+          bar.bounds.right - 4,
+          bar.bounds.top + bar.bounds.size.height / 2,
         );
-        // A small engraved offset from the cell's centre, so the nib is visibly inside the cell
         // and the stored point is not the centre by accident. It is scaled onto the surface, which
         // is the direction the painter goes.
         const LayoutOffset engravedNudge = LayoutOffset(4, 3);
@@ -376,12 +387,17 @@ void main() {
           centre.y * page.scale + nudge.y,
         );
 
+        // THE LOCAL X THE PEN SHOULD BE RECORDED AT: the aimed point less the bar own left edge,
+        // which is the frame a place is measured in. It used to be `eventX(cell)` — the index of
+        // the cell under the pen — and a cell is gone.
+        final double expectedLocalX =
+            page.pagePointOf(surface).x - bar.bounds.left;
         // What the pen is over, read through the SAME entry the capture path used.
         final ChartHit? hit = hitTestPage(page, page.pagePointOf(surface));
         expect(hit, isNotNull, reason: 'the fixture must offer a cell here');
         expect(hit!.barIndex, bar.barIndex);
         expect(hit.sectionId, bar.sectionId);
-        expect(hit.beat, cell.beat);
+        expect(hit.local.x, closeTo(expectedLocalX, 1e-9));
 
         // The whole capture path — begin, one move, end — with real surface coordinates.
         final InkStrokeAssembler assembler = InkStrokeAssembler(
@@ -409,7 +425,7 @@ void main() {
         // REWRITTEN, and the removed lines are quoted because they pinned a cell address the model no
         // longer has:
         //   final int recordedBeat = anchor.beat ?? -1;
-        //   final int aimedBeat = cell.beat;
+        //   final int aimedBeat = eventX(cell);
         // and, further down,
         //   expect(recordedBeat, aimedBeat,
         //       reason: 'the anchor cell must be the cell under the pen');
@@ -422,8 +438,8 @@ void main() {
         final InkPlacement? recorded = resolveEventAnchor(page, anchor);
         final LayoutOffset recordedOrigin =
             recorded?.origin ?? LayoutOffset.zero;
-        final double dx = recordedOrigin.x - cell.bounds.left;
-        final double dy = recordedOrigin.y - cell.bounds.top;
+        final double dx = recordedOrigin.x - bar.bounds.left;
+        final double dy = recordedOrigin.y - bar.bounds.top;
 
         stdout.writeln(
           'ink.capture_fit scale=${page.scale.toStringAsFixed(4)} '
@@ -431,7 +447,7 @@ void main() {
           '${surface.y.toStringAsFixed(2)}) '
           'pagePoint=(${page.pagePointOf(surface).x.toStringAsFixed(2)},'
           '${page.pagePointOf(surface).y.toStringAsFixed(2)}) '
-          'aimed=${anchor.sectionId}-${bar.barIndex} cell_x ${cell.bounds.left} '
+          'aimed=${anchor.sectionId}-${bar.barIndex} bar_x ${bar.bounds.left} '
           'anchored=${anchor.sectionId}-${anchor.bar} '
           'anchor_x ${recordedOrigin.x.toStringAsFixed(2)} '
           'cell_error_px=${_length(dx, dy).toStringAsFixed(4)}',
@@ -487,10 +503,10 @@ void main() {
         expect(stroke.points.first.w, 0.6);
         // REWRITTEN. These two expectations used to measure from the CELL's corner:
         //   expect(stroke.points.first.x,
-        //       closeTo((centre.x + engravedNudge.x) - cell.bounds.left, 1e-9),
+        //       closeTo((centre.x + engravedNudge.x) - cell.left, 1e-9),
         //       reason: 'the stored offset from the anchor corner is the pen, not its nudge');
         //   expect(stroke.points.first.y,
-        //       closeTo((centre.y + engravedNudge.y) - cell.bounds.top, 1e-9));
+        //       closeTo((centre.y + engravedNudge.y) - cell.top, 1e-9));
         // The origin the stored point is measured from is the BAR's corner now, so the same claim is
         // made against the bar: the number is the pen's own position in the music, computed from the
         // engraved point and nothing else, and it is the same number on a fitted page and an ordinary
@@ -514,8 +530,8 @@ void main() {
           'ink.capture_fit.local scale=${page.scale.toStringAsFixed(4)} '
           'first_local=(${stroke.points.first.x},${stroke.points.first.y}) '
           'anchor_origin=(${recordedOrigin.x},${recordedOrigin.y}) '
-          'cell=(${cell.bounds.left},${cell.bounds.top},'
-          '${cell.bounds.size.width},${cell.bounds.size.height}) '
+          'bar=(${bar.bounds.left},${bar.bounds.top},'
+          '${bar.bounds.size.width},${bar.bounds.size.height}) '
           'engraved_point=(${page.pagePointOf(surface).x},'
           '${page.pagePointOf(surface).y}) '
           'rendered_surface=(${renderedSurface.x},${renderedSurface.y}) '

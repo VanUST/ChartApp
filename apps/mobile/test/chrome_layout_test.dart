@@ -30,6 +30,8 @@ import 'package:chartapp/viewer_screen.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The owner's tablet, in logical pixels: 1752x2800 at 340 dpi, held in LANDSCAPE.
 const Size _tabletLandscape = Size(2800 / 2.125, 1752 / 2.125);
 
@@ -52,7 +54,7 @@ Song longChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index % 12),
                     quality: ChordQuality.majorSeventh,

@@ -137,6 +137,10 @@
 
   "selectionCopied": "{count, plural, one{скопирован {count} такт} few{скопировано {count} такта} many{скопировано {count} тактов} other{скопировано {count} такта}} с такта {bar}",
 
+  "selectionPastedIntoBar": "Вставлено в такт {bar}.",
+
+  "selectionRunWindowAt": "выбран: такт {bar}, с {fromX} до {toX} px",
+
   "selectionPastedAfter": "{count, plural, one{вставлен {count} такт} few{вставлено {count} такта} many{вставлено {count} тактов} other{вставлено {count} такта}} после такта {bar}",
 
   "selectionPastedInto": "доли вставлены в такт {bar}, начиная с доли {beat}",
@@ -341,6 +345,13 @@
 
   "metadataFooterFixTempo": "Исправьте темп перед сохранением.",
 
+  "palettePositionBar": "Такт {bar}",
+
+  "chordOutsideBand": "Аккорд пишется над станом: ниже такта он не читается.",
+
+  "markLineBreak": "Разрыв строки",
+
+  "cuePositionAt": "на {x} px",
   "palettePosition": "Такт {bar} · доля {cell}",
 
   "paletteChordsIn": "Аккорды в {key}",

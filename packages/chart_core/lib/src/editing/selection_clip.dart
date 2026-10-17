@@ -36,7 +36,7 @@
 // copying it is a copy and there is no list of fields to forget. The ink is copied too, and the ink
 // is the part that needs work, because a stroke is not inside the bar: it hangs on an
 // [EventAnchor]. The clip REBASES the anchor onto the fragment (bar 0 is the fragment's first bar, and
-// for a beat window beat 0 is the window's first beat), so a paste at another address is arithmetic
+// and a window's own x range travels with the selection), so a paste at another address is arithmetic
 // and not a search.
 //
 // A text cue is NOT copied, and that is a decision rather than an omission. A cue says something
@@ -372,9 +372,9 @@ class SelectionReport {
 //          bars again — which by then may have been edited, undone or deleted.
 // INPUTS: The selection that was copied, the bars it covered, and the ink that travelled.
 // OUTPUTS: An immutable value. Its strokes are addressed RELATIVE to the fragment: bar 0 is the
-//          fragment's first bar, and for a beat window beat 0 is the window's first beat. Nothing in
-//          it is a document address any more, which is what makes pasting into an arbitrary place
-//          arithmetic instead of a search for the source.
+//          fragment's first bar, and their points stay bar-local. Nothing in it is a document
+//          address any more, which is what makes pasting into an arbitrary place arithmetic instead
+//          of a search for the source.
 // KEYWORDS: clipboard, copy, fragment, relative-address, bars-and-ink, not-stored, not-undoable
 //
 // WHY THE CLIP IS NOT IN THE DOCUMENT, NOT IN THE FILE AND NOT IN THE LOG.
@@ -395,8 +395,8 @@ class ChartClip {
   /// The selection the clip was taken from, kept for the log and for the label.
   final ChartSelection source;
 
-  /// The bars the clip carries, in reading order. Whole bars: for a beat window this is the ONE bar
-  /// the window sits in, and the window is what decides which of its cells a paste writes.
+  /// The bars the clip carries, in reading order. Whole bars: for a window this is the ONE bar the
+  /// window sits in, and the window's x range is what decides which of its marks a paste writes.
   final List<Bar> bars;
 
   /// The strokes the clip carries, with their anchors rebased onto the fragment.
@@ -408,8 +408,13 @@ class ChartClip {
   /// How many bars the clip carries.
   int get barCount => bars.length;
 
-  /// How many beats the window covers; 1 for a clip of whole bars.
-  int get beatCount => source.beatCount;
+  /// How wide the window is, in bar-local logical pixels; zero for a clip of whole bars.
+  ///
+  /// It is a DISTANCE, and a paste uses it for one thing: nothing. The paste translates a clip by the
+  /// difference between the two windows' left ends (see EditSession._pasteWindow), so the width of
+  /// a window is a fact about the copied fragment rather than an operand, and it is published
+  /// because a report of a copy that could not say how wide it was would be a report of nothing.
+  double get windowWidth => source.windowWidth;
 
   @override
   String toString() =>
@@ -486,36 +491,32 @@ SelectionReport selectionReportOf({
 //          document and not of the page on screen.
 // INPUTS: selection — the address. strokes — the document's strokes.
 // OUTPUTS: The strokes whose anchor lies inside the selection, in document render order. A bar-deep
-//          selection carries every stroke anchored to those bars. A beat window carries only the
-//          strokes WRITTEN INSIDE ITS COLUMNS, decided from the stroke's own stored x — which is a
-//          coordinate in the document, not a measurement of the page.
+//          selection carries every stroke anchored to those bars. A WINDOW carries only the strokes
+//          WRITTEN INSIDE ITS X RANGE, decided from the stroke's own stored x — which is a coordinate
+//          in the document, not a measurement of the page.
 //
-//          WHY THE WINDOW RULE CHANGED, AND WHY IT IS STILL NOT A GEOMETRY GUESS. A beat window used
-//          to carry only strokes anchored TO A CELL inside it, and to refuse a bar-anchored stroke
+//          WHY THE WINDOW RULE CHANGED, AND WHY IT IS STILL NOT A GEOMETRY GUESS. A window used to
+//          carry only strokes anchored TO A CELL inside it, and to refuse a bar-anchored stroke
 //          because inventing a beat for it from its position would be a guess. Nothing is
 //          cell-anchored any more: a stroke is written beside its bar and its own points say where,
 //          which is exactly the fact the old rule refused to infer from the PAGE. The distinction
 //          that matters is preserved — a stored point does not move when the zoom or the page mode
 //          does, while a rectangle measured from the screen would — so the membership is still a
 //          property of the document. What is lost is the old ability to say "this stroke belongs to
-//          beat 2" as an ADDRESS; the shim's columns are used here to turn the window into a range of
-//          x, and that use dies with the shim.
+//          beat 2" as an ADDRESS; the window's own x range is now the window itself, so the question
+//          no longer arises.
 // KEYWORDS: stroke-membership, address-decides, stored-coordinate, order-preserving, total-function,
-//           pseudo-grid
+//           window-range
 /// Returns the strokes a selection carries, decided by their addresses alone.
 List<InkStroke> strokesOf(ChartSelection selection, List<InkStroke> strokes) {
   final List<InkStroke> carried = <InkStroke>[];
   // The window's own extent in bar-local pixels, so a stroke is judged by one comparison rather than
-  // by a cell index it no longer has. The window covers every column from its first beat to its last,
-  // which is a half-open interval: a stroke exactly on the next beat's column start belongs to that
-  // beat and not to this one.
-  final bool window = selection.isBeatWindow;
-  final double windowFromX = window
-      ? PseudoGrid.xOf(selection.firstBeat!, 0)
-      : 0;
-  final double windowToX = window
-      ? PseudoGrid.xOf(selection.lastBeat! + 1, 0)
-      : 0;
+  // by a cell index the model no longer has. It is the HALF-OPEN range [firstX, lastX): a stroke
+  // exactly on the window's right end belongs to whatever comes next, which is the same rule a bar's
+  // own rectangle follows at its right edge.
+  final bool window = selection.isWindow;
+  final double windowFromX = selection.firstX ?? 0;
+  final double windowToX = selection.lastX ?? 0;
   for (final InkStroke stroke in strokes) {
     if (stroke.anchor.sectionId != selection.sectionId) {
       continue;
@@ -526,8 +527,8 @@ List<InkStroke> strokesOf(ChartSelection selection, List<InkStroke> strokes) {
     }
     if (window) {
       // A stroke is in the window when it STARTS in it: a mark begun inside the window and finished
-      // in the next one belongs to the beat it was begun on, which is where the musician's hand was
-      // when he wrote it.
+      // past the end belongs to what comes after it, which is the half-open convention the whole
+      // engraving uses.
       final double first = stroke.points.first.x;
       if (first < windowFromX || first >= windowToX) {
         continue;
@@ -556,13 +557,16 @@ enum ClipPasteOutcome {
   /// The target names a bar the section does not have.
   noSuchBar,
 
-  /// A window of beats was pasted at a target that names no cell. A bar-level target does not say
-  /// which beat a window should land on, and picking beat 1 would be the application choosing.
+  /// A window was pasted at a target that names no point inside its bar. A bar-level target does not
+  /// say where a window should land, and picking the bar's left edge would be the application
+  /// choosing.
   needsCell,
 
-  /// The window does not fit inside the target bar's own METRE, so writing it would either spill
-  /// past the barline or widen the bar's grid. See the decision record for why the metre and not the
-  /// widened grid decides.
+  /// The paste would have written a window into a target bar whose own extent cannot hold it.
+  ///
+  /// NOT REACHED BY ORDINARY USE ANY MORE, and kept because it is part of the enum's history and of
+  /// the refusal vocabulary a caller may still branch on: a bar's width follows its content, so a
+  /// window written past the barline WIDENS the bar rather than being refused. See _pasteWindow.
   windowDoesNotFit,
 
   /// A bar-level paste was asked for at an address whose bar count changed under it.
@@ -574,7 +578,7 @@ enum ClipPasteOutcome {
 //          musician reads is built from numbers rather than from an assumption.
 // INPUTS: Returned by `EditSession.transposeSelection`.
 // OUTPUTS: An immutable value. [applied] is false when nothing was written (no structure to move, a
-//          beat window, or no such section), in which case no undo step was appended either.
+//          window, or no such section), in which case no undo step was appended either.
 // KEYWORDS: selection-transpose, report, counts, ink-left-alone, typed-refusal
 /// What a selection transposition did, and how much ink it deliberately left alone.
 class SelectionTransposition {
@@ -627,7 +631,9 @@ class SelectionTransposition {
 // INPUTS: Returned inside a [SelectionTransposition].
 // OUTPUTS: One token. [beatsOnly] is the refusal of a window: a bar is the smallest fragment that
 //          holds a key, and moving three notes inside a bar would leave one bar in two keys at once.
-// KEYWORDS: transpose-outcome, beats-refusal, nothing-to-move, no-section, typed-refusal
+//          Its TOKEN keeps the old name so a caller that branched on it keeps compiling; what it
+//          refuses is now any window, which is the same decision with a grid-free spelling.
+// KEYWORDS: transpose-outcome, window-refusal, nothing-to-move, no-section, typed-refusal
 /// Why a selection transposition did or did not happen.
 enum SelectionTransposeOutcome {
   /// The bars changed and exactly one undo step was appended.
@@ -637,7 +643,7 @@ enum SelectionTransposeOutcome {
   /// interval to move, and the ink that is there cannot be moved by one.
   nothingToTranspose,
 
-  /// The selection is a window of beats. See [SelectionTransposeOutcome.beatsOnly].
+  /// The selection is a window inside a bar. See [SelectionTransposeOutcome.beatsOnly].
   beatsOnly,
 
   /// The selection names a section the song does not have.
@@ -649,7 +655,7 @@ enum SelectionTransposeOutcome {
 //          nothing is not a clip of an empty fragment: it is a gesture with no target.
 //
 //          THE STROKES IN THE CLIP ARE REBASED. `anchor.bar` becomes the stroke's bar offset from the
-//          first bar of the fragment; a beat window additionally subtracts its own first beat. The
+//          first bar of the fragment. The
 //          section id is kept as it was, for the log, and is overwritten by the paste. Copying a
 //          second time from the same selection therefore produces an equal clip, and pasting at
 //          another address is arithmetic on two integers.

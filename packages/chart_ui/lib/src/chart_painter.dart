@@ -261,9 +261,11 @@ class ChartPainter extends CustomPainter {
         hit.barIndex != placed.barIndex) {
       return;
     }
-    final int? beat = hit.beat;
-    final PlacedCell? cell = beat == null ? null : _cellOf(placed, beat);
-    final LayoutRect region = cell?.bounds ?? placed.bounds;
+    // THE BAR IS THE REGION, and there is no cell to narrow it to any more. A hit names the bar and a
+    // point inside it; the visible mark is the bar, because a highlight drawn around the point would
+    // be a rectangle the layout never published, and one drawn from a beat column would vanish the
+    // day the columns did (which is exactly how the selection became unreachable once already).
+    final LayoutRect region = placed.bounds;
     final Rect rect = Rect.fromLTWH(
       region.left,
       region.top,
@@ -304,16 +306,30 @@ class ChartPainter extends CustomPainter {
         placed.barIndex > range.lastBar) {
       return;
     }
-    if (!range.isBeatWindow || range.firstBar != placed.barIndex) {
+    if (!range.isWindow || range.firstBar != placed.barIndex) {
       _paintSelectionRegion(canvas, placed.bounds);
       return;
     }
-    for (final PlacedCell cell in placed.cells) {
-      if (cell.beat < range.firstBeat! || cell.beat > range.lastBeat!) {
-        continue;
-      }
-      _paintSelectionRegion(canvas, cell.bounds);
-    }
+    // A WINDOW IS AN X RANGE AND THE MARK IS THE STRETCH OF BAR IT COVERS, drawn from the selection's
+    // own two numbers. It is clamped to the bar's rectangle so a window dragged past the barline marks
+    // the bar rather than the next one, which is the same containment the hit test applies.
+    final double left = placed.bounds.left + range.firstX!;
+    final double right = placed.bounds.left + range.lastX!;
+    final double clampedLeft = left < placed.bounds.left
+        ? placed.bounds.left
+        : (left > placed.bounds.right ? placed.bounds.right : left);
+    final double clampedRight = right < placed.bounds.left
+        ? placed.bounds.left
+        : (right > placed.bounds.right ? placed.bounds.right : right);
+    _paintSelectionRegion(
+      canvas,
+      LayoutRect.fromLTWH(
+        clampedLeft,
+        placed.bounds.top,
+        clampedRight - clampedLeft,
+        placed.bounds.size.height,
+      ),
+    );
   }
 
   // PURPOSE: Fill and outline one region as selected, so every place the selection covers is marked
@@ -338,21 +354,6 @@ class ChartPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = strokeWidth,
     );
-  }
-
-  // PURPOSE: Find the cell a selection names, so the highlight can be drawn on a cell that may have
-  //          been produced by a different layout instance than the one the hit came from.
-  // INPUTS: bar — the bar being drawn. beat — the cell index the selection carries.
-  // OUTPUTS: The matching cell, or null when the bar has no cell at that index; the caller then
-  //          falls back to marking the whole bar.
-  // KEYWORDS: cell-lookup, beat, fallback, value-match
-  PlacedCell? _cellOf(PlacedBar bar, int beat) {
-    for (final PlacedCell cell in bar.cells) {
-      if (cell.beat == beat) {
-        return cell;
-      }
-    }
-    return null;
   }
 
   // PURPOSE: Draw one bar: its bounding barlines, the signs the bar carries, and its chords.
@@ -385,7 +386,6 @@ class ChartPainter extends CustomPainter {
     // the notehead, so the music was covered by a number naming a column the musician had already
     // found. The music wins; where a digit is behind a notehead the tick beside it and the same
     // number on the bar that opens the system still give the grid.
-    _paintBeatMarkers(canvas, placed);
     _paintMelody(canvas, placed);
 
     // An interior barline is shared: the previous bar's closing line already draws it. So the
@@ -525,64 +525,6 @@ class ChartPainter extends CustomPainter {
     // buried under the note it joins.
     for (final MelodyGlyph glyph in staff.glyphs) {
       _paintMelodyGlyph(canvas, glyph, inkFloor: floor);
-    }
-  }
-
-  // PURPOSE: Name the beats of a bar under its staff, so a musician can see which beat he is about
-  //          to choose instead of counting columns of blank paper — the defect owner decision D28
-  //          records: «ориентироваться внутри такта трудно».
-  // INPUTS: canvas — the target. placed — the bar's layout, carrying the markers the engine placed.
-  // OUTPUTS: Nothing. For every marker, a short tick at the bottom of its column and — when the
-  //          engine decided the column is wide enough — the beat's ordinal centred over it. A bar
-  //          whose song carries no staff publishes no markers, so this returns before touching the
-  //          canvas and a chords-only chart prints exactly what it printed before beat captions
-  //          existed.
-  //
-  //          WHY THE TICK IS DRAWN EVEN WITH NO NUMBER. The captions are printed on the bar that
-  //          opens a system, and the beats of the bars after it are named by those same numbers on
-  //          the same columns. Without a tick there would be nothing on those bars at all and the
-  //          caption would look like it belonged to the first bar rather than to the line; the tick
-  //          is what says "this column is still beat n" without repeating the digit nine times.
-  // KEYWORDS: beat-marker, beat-orientation, caption, tick, centred-ordinal, no-staff-no-marker
-  void _paintBeatMarkers(Canvas canvas, PlacedBar placed) {
-    final List<PlacedBeatMarker> markers = placed.beatMarkers;
-    if (markers.isEmpty) {
-      return;
-    }
-    final PlacedMelodyStaff staff = placed.melody;
-    final double staffSpace = staff.isEmpty ? 0 : staff.bounds.size.height / 4;
-    // THE CAPTION IS SIZED FROM THE STAFF IT BELONGS TO, at nine tenths of a staff space, and set
-    // bold in the staff's own ink rather than in the caption grey it used to be. It names the beat a
-    // musician is choosing — the defect D28 records as «ориентироваться внутри такта трудно» — and
-    // a number that is two millimetres tall in pale grey is a number nobody reads at a stand.
-    final TextStyle style = metrics.staffTextStyle.copyWith(
-      color: melodyLineColor,
-      fontSize: staffSpace > 0 ? staffSpace * 0.9 : null,
-      fontWeight: FontWeight.w600,
-    );
-    final Paint tick = Paint()
-      ..color = melodyLineColor
-      ..strokeWidth = _inkFloor;
-    for (final PlacedBeatMarker marker in markers) {
-      final LayoutRect box = marker.bounds;
-      // The tick is a third of the marker's box, centred in its column, and it is what the eye
-      // follows down the staff when the digits are only on the bar that opens the system.
-      final double centre = box.left + box.size.width / 2;
-      canvas.drawLine(
-        Offset(centre, box.bottom - box.size.height / 3),
-        Offset(centre, box.bottom),
-        tick,
-      );
-      if (marker.label.isEmpty) {
-        continue;
-      }
-      final Size size = _measureText(marker.label, style);
-      _paintText(
-        canvas,
-        marker.label,
-        Offset(centre - size.width / 2, box.bottom - size.height),
-        style,
-      );
     }
   }
 
@@ -810,7 +752,16 @@ class ChartPainter extends CustomPainter {
       // compared, which is when it is hardest to explain.
       final List<BarMark> ordered = bar.marks.toList()
         ..sort((BarMark a, BarMark b) => a.index.compareTo(b.index));
-      final String text = ordered.map(_markGlyph).join(' ');
+      // A mark with no glyph is DROPPED BEFORE MEASURING, not drawn as an empty string: the musician's
+      // line break is an instruction to the page (see `_markGlyph`), and joining it in would leave a
+      // stray space in the row and shift every other sign left by one character's width.
+      final String text = ordered
+          .map(_markGlyph)
+          .where((String glyph) => glyph.isNotEmpty)
+          .join(' ');
+      if (text.isEmpty) {
+        return;
+      }
       final Size size = _measureText(text, metrics.staffTextStyle);
       _paintText(
         canvas,
@@ -890,6 +841,11 @@ class ChartPainter extends CustomPainter {
     BarMark.coda => 'C',
     BarMark.fermata => '^',
     BarMark.playerEnding => 'End',
+    // THE MUSICIAN'S LINE BREAK HAS NO GLYPH, and its empty string is a decision rather than an
+    // omission: a break is an instruction to the PAGE, so it is seen in the system that ends because
+    // of it and not in a sign standing on the bar. \_paintBarMarks\ drops an empty glyph before
+    // measuring, so nothing is drawn and no room is reserved.
+    BarMark.lineBreak => '',
   };
 
   // PURPOSE: Find the ChordMark that produced a placed chord, because the engraved size lives on
@@ -900,10 +856,9 @@ class ChartPainter extends CustomPainter {
   //          the song can disagree, and the caller falls back to normal size.
   // KEYWORDS: lookup, beat, step, identity, null-safe
   ChordMark? _beatChordOf(Bar bar, PlacedChord placed) {
-    for (final ChordMark beatChord in bar.chords) {
-      if (beatChord.pseudoBeat == placed.beat &&
-          beatChord.pseudoStep == placed.step) {
-        return beatChord;
+    for (final ChordMark mark in bar.chords) {
+      if (mark.place == placed.place) {
+        return mark;
       }
     }
     return null;

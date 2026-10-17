@@ -16,6 +16,8 @@ import 'package:chartapp/viewer_screen.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 // PURPOSE: Build a one-chord-per-bar chart long enough that FIT must shrink it, so the page scale
 //          under test is not 1 and a hit test that ignored the scale would answer differently.
 // INPUTS: bars — how many bars the single section holds.
@@ -35,7 +37,7 @@ Song longChart(int bars) => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(root: ChordRoot(0)),
               ),
             ],
@@ -129,14 +131,14 @@ void main() {
       // the tap as an earlier bar, so a bar near the end makes that mistake visible rather than
       // landing on the right bar by luck.
       final PlacedBar bar = page.bars[page.bars.length - 3];
-      final PlacedCell cell = bar.cells[1];
-      await tapEngraved(tester, centreOf(cell.bounds));
+      final LayoutRect cell = bar.bounds;
+      await tapEngraved(tester, centreOf(cell));
 
       final ChartPainter after = shownPainter(tester);
       expect(after.selection, isNotNull);
       expect(after.selection!.sectionId, bar.sectionId);
       expect(after.selection!.barIndex, bar.barIndex);
-      expect(after.selection!.beat, 1);
+      expect(after.selection!.local.x, 1);
       // Single section, so the global ordinal is the bar index plus one; the model's zero-based
       // beat 1 is the musician's cell 2.
       expect(
@@ -153,7 +155,7 @@ void main() {
     final PageLayout page = shownPainter(tester).page;
 
     // Select something first, so the clearing is observable rather than the initial state.
-    await tapEngraved(tester, centreOf(page.bars.first.cells.first.bounds));
+    await tapEngraved(tester, centreOf(page.bars.first.bounds));
     expect(find.textContaining('selected: bar 1 cell 1'), findsOneWidget);
 
     // Then tap the gap between the first two systems, where no bar is.
@@ -189,12 +191,12 @@ void main() {
     expect(painter.page.scale, 1);
 
     final PlacedBar bar = painter.page.bars[2];
-    final PlacedCell cell = bar.cells[3];
-    await tapEngraved(tester, centreOf(cell.bounds));
+    final LayoutRect cell = bar.bounds;
+    await tapEngraved(tester, centreOf(cell));
 
     final ChartPainter after = shownPainter(tester);
     expect(after.selection!.barIndex, bar.barIndex);
-    expect(after.selection!.beat, 3);
+    expect(after.selection!.local.x, 3);
     expect(
       find.text('selected: bar ${bar.barIndex + 1} cell 4'),
       findsOneWidget,

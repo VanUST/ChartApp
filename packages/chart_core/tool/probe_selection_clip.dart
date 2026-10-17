@@ -17,6 +17,8 @@ import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// The section id a `newChartSong` chart carries.
 const String _section = newChartFirstSectionId;
 
@@ -52,7 +54,7 @@ String _chord(Song song, int bar, int beat) => song
     .first
     .bars[bar]
     .chords
-    .firstWhere((ChordMark placed) => placed.pseudoBeat == beat)
+    .firstWhere((ChordMark placed) => placed.offsetX == fixtureX(beat))
     .chord
     .render(song.key, const SpellingTable());
 
@@ -84,16 +86,18 @@ void main() {
     ),
   );
   for (int bar = 0; bar < 16; bar++) {
-    session.applyChordToCell(
+    fixtureChord(
+      session,
       sectionId: _section,
       barIndex: bar,
-      beat: 0,
+      slot: 0,
       chord: cycle[bar % cycle.length],
     );
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: _section,
       barIndex: bar,
-      beat: 0,
+      slot: 0,
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.d, 0), octave: 4),
       value: const NoteValue.plain(NoteBase.quarter),
     );
@@ -238,28 +242,29 @@ void main() {
   final EditSession narrow = EditSession(
     document: DocumentState(song: _chart(bars: 2)),
   );
-  narrow.applyChordToCell(
+  fixtureChord(
+    narrow,
     sectionId: _section,
     barIndex: 0,
-    beat: 3,
+    slot: 3,
     chord: const Chord(root: ChordRoot(0)),
   );
   final ChartClip window = narrow.copySelection(
-    ChartSelection.beats(
+    ChartSelection.window(
       sectionId: _section,
       barIndex: 0,
-      firstBeat: 2,
-      lastBeat: 3,
+      firstX: 2,
+      lastX: 3,
     ),
   )!;
   print(
     'PROBE window_refused=${narrow.pasteClip(
-      at: ChartSelection.beats(sectionId: _section, barIndex: 1, firstBeat: 3, lastBeat: 3),
+      at: ChartSelection.window(sectionId: _section, barIndex: 1, firstX: 3, lastX: 3),
       clip: window,
     ).name}',
   );
   print(
-    'PROBE window_transpose_refused=${narrow.transposeSelection(selection: ChartSelection.beats(sectionId: _section, barIndex: 0, firstBeat: 0, lastBeat: 1), semitones: 1).outcome.name}',
+    'PROBE window_transpose_refused=${narrow.transposeSelection(selection: ChartSelection.window(sectionId: _section, barIndex: 0, firstX: 0, lastX: 1), semitones: 1).outcome.name}',
   );
 
   // 8. A MINIMAL FRAGMENT — PURE HANDWRITING, NOTHING RECOGNISED — COPIED ANYWAY.

@@ -16,6 +16,8 @@ import 'package:chartapp/viewer_screen.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// A chart of [bars] bars, one section labelled A, a chord on beat 0 of every bar and a second chord
 /// on beat 2 of every even bar — enough for a transposition to have something to move and for a cell
 /// to be a different address from its bar.
@@ -33,7 +35,7 @@ Song _chart(int bars) => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.minorSeventh,
@@ -41,7 +43,7 @@ Song _chart(int bars) => Song(
               ),
               if (index.isEven)
                 ChordMark(
-                  place: cellAt(2),
+                  place: placeAt(2),
                   chord: Chord(root: ChordRoot(index + 2)),
                 ),
             ],
@@ -107,7 +109,7 @@ Offset _centreOf(LayoutRect rect) =>
 
 /// Taps the chord-line centre of cell [beat] of [bar].
 Future<void> _tapCell(WidgetTester tester, PlacedBar bar, int beat) =>
-    _tapEngraved(tester, _centreOf(bar.cells[beat].bounds));
+    _tapEngraved(tester, _centreOf(bar.bounds));
 
 void main() {
   testWidgets('two touches select a run of bars and the page says how much of '
@@ -227,7 +229,7 @@ void main() {
     );
     expect(
       shown.sections.first.bars[8].chords
-          .firstWhere((ChordMark placed) => placed.pseudoBeat == 0)
+          .firstWhere((ChordMark placed) => placed.offsetX == fixtureX(0))
           .chord
           .root
           .pitchClass,
@@ -237,7 +239,7 @@ void main() {
     );
     expect(
       shown.sections.first.bars[0].chords
-          .firstWhere((ChordMark placed) => placed.pseudoBeat == 0)
+          .firstWhere((ChordMark placed) => placed.offsetX == fixtureX(0))
           .chord
           .root
           .pitchClass,

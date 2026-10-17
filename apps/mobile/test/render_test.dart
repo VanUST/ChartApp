@@ -330,7 +330,7 @@ void main() {
           final String chords = bar.chords
               .map(
                 (ChordMark placed) =>
-                    '${placed.pseudoBeat}.${placed.pseudoStep}'
+                    '${placed.offsetX.toStringAsFixed(1)}'
                     '=${placed.chord.render(shown.key, renderTable)}',
               )
               .join(' ');

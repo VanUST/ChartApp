@@ -140,16 +140,15 @@ class MelodyNoteWrite {
 //          bar already holds is SKIPPED rather than rewritten: see the file header for the three
 //          properties that buys and the one undo step it costs.
 //
-//          THE STEP IS THE HEAD'S ORDINAL INSIDE ITS BEAT, so the notes of one cell land left to
-//          right in the order the musician drew them (A75). An insertion before notes that are
-//          already there pushes them up, which is the reducer's own documented rule: an ordinary
-//          cell is filled left to right and no push happens, and a hand-edited cell keeps its notes
-//          rather than losing them.
-// KEYWORDS: recognised-note, write, insert, op-log, idempotent, non-destructive, explicit-step,
+//          THERE IS NO ORDINAL TO WRITE. A recognised note's address is the place the reader
+//          measured, so the notes of a bar land where they were drawn and the reading order is their
+//          x — the engraver sorts by it (see `placeMelodyStaff`), so the model's storage order cannot
+//          reverse a run.
+// KEYWORDS: recognised-note, write, insert, op-log, idempotent, non-destructive, coordinate,
 //           value-placeholder, refusal-not-throw
 /// Writes every note [reading] found into its bar, as one `note.insert` operation each.
 ///
-/// A note whose address the bar already holds is left exactly as it is, so recognising the same ink
+/// A note whose PLACE the bar already holds is left exactly as it is, so recognising the same ink
 /// twice writes nothing and a correction the musician made survives the next run. The written
 /// duration is [value], which defaults to [recognisedNoteValue] because a recognised note's rhythm
 /// is not known — see that constant for why a quarter and what it would take to read a real one.
@@ -165,19 +164,22 @@ MelodyNoteWrite writeRecognisedNotes({
   final List<NoteMark> written = <NoteMark>[];
   final List<NoteMark> present = <NoteMark>[];
   for (final MelodyNoteHead head in reading.heads) {
-    final NoteMark? existing = _noteAt(bar, head.beat, head.orderInBeat);
+    final NoteMark? existing = _noteAt(bar, head.offsetX);
     if (existing != null) {
       present.add(existing);
       continue;
     }
     final NoteMark note = NoteMark(
-      // The reader measures a head's column and its order within that column, which is the cell the
-      // musician drew in; the place says where that is on the page.
-      place: cellPlace(
-        reading.sectionId,
-        reading.barIndex,
-        head.beat,
-        head.orderInBeat,
+      // THE HEAD'S OWN PLACE, which is the number the reader measured: its x less the bar's left
+      // edge, in bar-local logical pixels. The note is written where the head was drawn, so drawing
+      // it back puts the notehead on the ink it came from — no cell, no ordinal and nothing between
+      // the measurement and the model.
+      place: AnchoredPlace(
+        anchor: EventAnchor(
+          sectionId: reading.sectionId,
+          bar: reading.barIndex,
+        ),
+        offsetX: head.offsetX,
       ),
       pitch: head.pitch,
       value: value,
@@ -194,15 +196,20 @@ MelodyNoteWrite writeRecognisedNotes({
   );
 }
 
-// PURPOSE: Find the note a bar already holds at one address, which is the only question the write
+// PURPOSE: Find the note a bar already holds at one place, which is the only question the write
 //          above asks of the model: "is this position spoken for".
-// INPUTS: bar — the bar; beat — the cell; step — the ordinal inside the cell.
-// OUTPUTS: The note at that address, or null when the address is free. A bar with no melody
-//          answers null for every address, which is the ordinary first-recognition case.
-// KEYWORDS: address-lookup, beat-step, occupied, dense-sequence
-NoteMark? _noteAt(Bar bar, int beat, int step) {
+// INPUTS: bar — the bar; offsetX — the place along it, in bar-local logical pixels.
+// OUTPUTS: The note written at exactly that x, or null when the place is free. A bar with no melody
+//          answers null for every place, which is the ordinary first-recognition case.
+//
+//          EXACT EQUALITY AND NOT A TOLERANCE, deliberately: this is the idempotence test of a
+//          reader that has just measured the place it is asking about, so "the same place" is the
+//          same double. A tolerance here would let a second run of the reader over slightly
+//          different ink decide that a note the musician kept is a note to add again.
+// KEYWORDS: place-lookup, coordinate, occupied, idempotence, exact-equality
+NoteMark? _noteAt(Bar bar, double offsetX) {
   for (final NoteMark note in bar.melody) {
-    if (note.pseudoBeat == beat && note.pseudoStep == step) {
+    if (note.offsetX == offsetX) {
       return note;
     }
   }

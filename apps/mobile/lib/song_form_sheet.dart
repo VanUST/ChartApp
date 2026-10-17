@@ -199,7 +199,7 @@ String voltaText(Volta? volta, AppLocalizations l10n) {
 // PURPOSE: Word one of the signs a bar can carry, so the sheet's button and the text a verification
 //          quotes name the same sign the same way — and so the four signs are labelled in one place
 //          rather than in a switch at each call site.
-// INPUTS: mark — the sign, one of [BarMark]'s four values. l10n — the message catalogue, which
+// INPUTS: mark — the sign, one of [BarMark]'s values. l10n — the message catalogue, which
 //         carries the four names.
 // OUTPUTS: The catalogue's name for that sign. Total over the enum: there is no null case, because
 //          a bar-level control only ever names a sign it can set, and "the bar does not carry it" is
@@ -214,6 +214,12 @@ String barMarkText(BarMark mark, AppLocalizations l10n) => switch (mark) {
   BarMark.coda => l10n.markCoda,
   BarMark.fermata => l10n.markFermata,
   BarMark.playerEnding => l10n.markPlayerEnding,
+  // THE FIFTH MARK IS NOT A MUSICAL SIGN. It is the musician's own LINE BREAK — the third of the
+  // four line-breaking rules the owner agreed to — and it lives in this row because a break is a
+  // decision about a bar: it saves, it reopens, it undoes, and it is reachable from the same
+  // control as the segno. Its label says what it does rather than naming a glyph, because the
+  // break draws no glyph: the system that ends because of it is the whole of how it is seen.
+  BarMark.lineBreak => l10n.markLineBreak,
 };
 
 // The glyph beside each mark button, in one switch rather than four literals at the call site, so
@@ -225,6 +231,7 @@ IconData _markIcon(BarMark mark) => switch (mark) {
   BarMark.coda => Icons.filter_center_focus,
   BarMark.fermata => Icons.pause_circle_outline,
   BarMark.playerEnding => Icons.stop_circle_outlined,
+  BarMark.lineBreak => Icons.wrap_text,
 };
 
 /// The form sheet itself: the bar group, the section group and the address both act on.

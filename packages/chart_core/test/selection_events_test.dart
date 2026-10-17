@@ -17,6 +17,8 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The chart's only section id, which [newChartSong] fixes.
 const String _section = newChartFirstSectionId;
 
@@ -66,16 +68,18 @@ void _fillWithMusic(EditSession session, int bars) {
     Chord(root: ChordRoot(9), quality: ChordQuality.dominantSeventh),
   ];
   for (int bar = 0; bar < bars; bar++) {
-    session.applyChordToCell(
+    fixtureChord(
+      session,
       sectionId: _section,
       barIndex: bar,
-      beat: 0,
+      slot: 0,
       chord: cycle[bar % cycle.length],
     );
-    session.insertNote(
+    fixtureInsertNote(
+      session,
       sectionId: _section,
       barIndex: bar,
-      beat: 0,
+      slot: 0,
       pitch: const PitchedNote(note: WrittenNote(NoteLetter.d, 0), octave: 4),
       value: const NoteValue.plain(NoteBase.quarter),
     );
@@ -88,7 +92,7 @@ String _chordText(Song song, int bar, int beat) => song
     .first
     .bars[bar]
     .chords
-    .firstWhere((ChordMark placed) => placed.pseudoBeat == beat)
+    .firstWhere((ChordMark placed) => placed.offsetX == fixtureX(beat))
     .chord
     .render(song.key, const SpellingTable());
 
@@ -475,10 +479,11 @@ void main() {
           ],
         ),
       );
-      session.applyChordToCell(
+      fixtureChord(
+        session,
         sectionId: _section,
         barIndex: 0,
-        beat: 0,
+        slot: 0,
         chord: const Chord(root: ChordRoot(2)),
       );
       final List<InkStroke> inkBefore = session.document.strokes;
@@ -522,40 +527,45 @@ void main() {
           document: _document(_chart(bars: 2)),
         );
         for (int beat = 0; beat < 4; beat++) {
-          session.applyChordToCell(
+          fixtureChord(
+            session,
             sectionId: _section,
             barIndex: 0,
-            beat: beat,
+            slot: beat,
             chord: Chord(root: ChordRoot(beat)),
           );
         }
-        final ChartSelection window = ChartSelection.beats(
+        final ChartSelection window = ChartSelection.window(
           sectionId: _section,
           barIndex: 0,
-          firstBeat: 1,
-          lastBeat: 2,
+          firstX: 1,
+          lastX: 2,
         );
         expect(window.barCount, 1);
-        expect(window.beatCount, 2);
+        expect(window.windowWidth, 2);
         final ChartClip clip = session.copySelection(window)!;
-        expect(clip.depth, SelectionDepth.beats);
+        expect(clip.depth, SelectionDepth.window);
 
         final Bar targetBefore = session.document.song.sections.first.bars[1];
         final ClipPasteOutcome outcome = session.pasteClip(
-          at: ChartSelection.beats(
+          at: ChartSelection.window(
             sectionId: _section,
             barIndex: 1,
-            firstBeat: 2,
-            lastBeat: 3,
+            firstX: 2,
+            lastX: 3,
           ),
           clip: clip,
         );
         expect(outcome, ClipPasteOutcome.pasted);
         final Bar target = session.document.song.sections.first.bars[1];
+        // THE WINDOW LANDED WHERE IT WAS PUT. The old assertion read the two chords' beats as
+        // `<int>[2, 3]` — the columns the metre gave them in the target bar. A paste is a
+        // TRANSLATION now, so what is asserted is the two places it produced: the source window's
+        // own x values moved by the distance between the windows.
         expect(
-          target.chords.map((ChordMark placed) => placed.pseudoBeat),
-          <int>[2, 3],
-          reason: 'the window landed at beat 2 of the target bar',
+          target.chords.map((ChordMark placed) => placed.offsetX),
+          <double>[fixtureX(2), fixtureX(3)],
+          reason: 'the window landed at slot 2 of the target bar',
         );
         expect(
           target.chords.first.chord.root.pitchClass,
@@ -581,28 +591,29 @@ void main() {
       final EditSession session = EditSession(
         document: _document(_chart(bars: 2)),
       );
-      session.applyChordToCell(
+      fixtureChord(
+        session,
         sectionId: _section,
         barIndex: 0,
-        beat: 3,
+        slot: 3,
         chord: const Chord(root: ChordRoot(0)),
       );
       final int undoBefore = session.undoDepth;
       final ChartClip clip = session.copySelection(
-        ChartSelection.beats(
+        ChartSelection.window(
           sectionId: _section,
           barIndex: 0,
-          firstBeat: 2,
-          lastBeat: 3,
+          firstX: 2,
+          lastX: 3,
         ),
       )!;
       expect(
         session.pasteClip(
-          at: ChartSelection.beats(
+          at: ChartSelection.window(
             sectionId: _section,
             barIndex: 1,
-            firstBeat: 3,
-            lastBeat: 3,
+            firstX: 3,
+            lastX: 3,
           ),
           clip: clip,
         ),
@@ -623,18 +634,19 @@ void main() {
       final EditSession session = EditSession(
         document: _document(_chart(bars: 1)),
       );
-      session.applyChordToCell(
+      fixtureChord(
+        session,
         sectionId: _section,
         barIndex: 0,
-        beat: 1,
+        slot: 1,
         chord: const Chord(root: ChordRoot(2)),
       );
       final SelectionTransposition refused = session.transposeSelection(
-        selection: ChartSelection.beats(
+        selection: ChartSelection.window(
           sectionId: _section,
           barIndex: 0,
-          firstBeat: 0,
-          lastBeat: 1,
+          firstX: 0,
+          lastX: 1,
         ),
         semitones: 1,
       );
@@ -672,10 +684,11 @@ void main() {
               strokes: <InkStroke>[_stroke(id: 'ink-a0', bar: 0)],
             ),
           );
-          session.applyChordToCell(
+          fixtureChord(
+            session,
             sectionId: _section,
             barIndex: 0,
-            beat: 0,
+            slot: 0,
             chord: const Chord(
               root: ChordRoot(2),
               quality: ChordQuality.minorSeventh,
@@ -768,29 +781,29 @@ void main() {
       expect(run.firstBar, 5);
       expect(run.lastBar, 12);
       expect(run.barCount, 8);
-      expect(run.isBeatWindow, isFalse);
+      expect(run.isWindow, isFalse);
 
       final ChartSelection window = ChartSelection.span(
         sectionId: 'A',
         firstBar: 4,
-        firstBeat: 3,
+        firstX: 3,
         lastBar: 4,
-        lastBeat: 1,
+        lastX: 1,
       );
-      expect(window.isBeatWindow, isTrue);
-      expect(window.firstBeat, 1);
-      expect(window.lastBeat, 3);
-      expect(window.beatCount, 3);
+      expect(window.isWindow, isTrue);
+      expect(window.firstX, 1);
+      expect(window.lastX, 3);
+      expect(window.windowWidth, 3);
 
       final ChartSelection flattened = ChartSelection.span(
         sectionId: 'A',
         firstBar: 4,
-        firstBeat: 3,
+        firstX: 3,
         lastBar: 6,
-        lastBeat: 1,
+        lastX: 1,
       );
       expect(
-        flattened.isBeatWindow,
+        flattened.isWindow,
         isFalse,
         reason:
             'a window cannot span bars, so extending onto another bar '
@@ -808,11 +821,11 @@ void main() {
         ChartSelection.span(
           sectionId: 'A',
           firstBar: 7,
-          firstBeat: 2,
+          firstX: 2,
           lastBar: 7,
-          lastBeat: 2,
+          lastX: 2,
         ).depth,
-        SelectionDepth.beats,
+        SelectionDepth.window,
       );
     });
   });

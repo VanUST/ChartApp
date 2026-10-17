@@ -13,6 +13,8 @@ import 'dart:convert';
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 // ---------------------------------------------------------------------------------------------
 // The document the events are applied to. Every value that a field could be confused with is
 // deliberately different from every other value in the same event.
@@ -39,24 +41,24 @@ const Chord _eMinorSeventh = Chord(
 // THE FIXTURE MARKS CARRY THEIR REAL ADDRESS. A mark's place names its bar, and the reducer keeps
 // that address truthful on every edit (see `DocumentReducer._anchoredBars`), so a fixture built with
 // a placeholder address would be rewritten the first time any event landed in its section and would
-// then differ from the very value an assertion compares it to. `cellPlace(section, bar, beat)` is the
+// then differ from the very value an assertion compares it to. `placeIn(section, bar, beat)` is the
 // shim's write direction and is what keeps these fixtures saying the same thing the document says.
 final ChordMark _cOnBeat0 = ChordMark(
-  place: cellPlace('s1', 0, 0),
+  place: placeIn('s1', 0, 0),
   chord: _cMajor,
 );
 final ChordMark _gOnBeat2 = ChordMark(
-  place: cellPlace('s1', 0, 2),
+  place: placeIn('s1', 0, 2),
   chord: _gSeventh,
 );
 
 final NoteMark _dQuarter = NoteMark(
-  place: cellPlace('s1', 0, 0),
+  place: placeIn('s1', 0, 0),
   pitch: PitchedNote(note: _d, octave: 4),
   value: NoteValue.plain(NoteBase.quarter),
 );
 final NoteMark _eFlatHalf = NoteMark(
-  place: cellPlace('s1', 0, 2),
+  place: placeIn('s1', 0, 2),
   pitch: PitchedNote(note: _eFlat, octave: 5),
   value: NoteValue.plain(NoteBase.half),
 );
@@ -192,14 +194,14 @@ List<ChartEvent> _chartEvents() => <ChartEvent>[
   ChordInsertEvent(
     docId: 'doc-1',
     seq: 1,
-    chord: ChordMark(place: cellPlace('s1', 0, 1, 0), chord: _dMinorSeventh),
+    chord: ChordMark(place: placeIn('s1', 0, 1, 0), chord: _dMinorSeventh),
   ),
   ChordUpdateEvent(
     docId: 'doc-1',
     seq: 2,
     from: _gOnBeat2,
     to: ChordMark(
-      place: cellPlace('s1', 0, 2, 0),
+      place: placeIn('s1', 0, 2, 0),
       chord: _eMinorSeventh,
       size: ChordSize.small,
     ),
@@ -211,7 +213,7 @@ List<ChartEvent> _chartEvents() => <ChartEvent>[
     seq: 5,
     from: _dQuarter,
     to: NoteMark(
-      place: cellPlace('s1', 0, 0),
+      place: placeIn('s1', 0, 0),
       pitch: PitchedNote(note: _a, octave: 3),
       value: NoteValue.plain(NoteBase.eighth),
       tiedToNext: true,
@@ -504,7 +506,7 @@ void main() {
         // the payload carried `"sectionId":"s1","bar":0` as well, and the mark itself was
         // `"beat":1,"step":0`. All three are gone: the mark's place names the bar AND the position
         // in it, so this payload has one address, and `26.0` is where beat 1 of a bar is written
-        // (the shim's `cellPlace('s1', 0, 1)`), not a new number the reader has to trust.
+        // (the shim's `placeIn('s1', 0, 1)`), not a new number the reader has to trust.
         '{"v":1,"docId":"doc-1","seq":1,"type":"chord.insert",'
             '"anchor":{"sectionId":"s1","bar":0},'
             '"payload":{"chord":{"place":{"anchor":{"sectionId":"s1","bar":0},'
@@ -515,7 +517,7 @@ void main() {
         ChordInsertEvent(
           docId: 'doc-1',
           seq: 1,
-          chord: ChordMark(place: cellPlace('s1', 0, 1), chord: _dMinorSeventh),
+          chord: ChordMark(place: placeIn('s1', 0, 1), chord: _dMinorSeventh),
         ),
       ),
       'note.insert': (
@@ -863,11 +865,8 @@ void main() {
               bars: <Bar>[
                 Bar(
                   chords: <ChordMark>[
-                    ChordMark(place: cellPlace('s1', 0, 0), chord: _cMajor),
-                    ChordMark(
-                      place: cellPlace('s1', 0, 0, 1),
-                      chord: _gSeventh,
-                    ),
+                    ChordMark(place: placeIn('s1', 0, 0), chord: _cMajor),
+                    ChordMark(place: placeIn('s1', 0, 0, 1), chord: _gSeventh),
                   ],
                 ),
               ],
@@ -878,7 +877,7 @@ void main() {
       final ChordInsertEvent event = ChordInsertEvent(
         docId: 'doc-step',
         seq: 1,
-        chord: ChordMark(place: cellPlace('s1', 0, 0), chord: _dMinorSeventh),
+        chord: ChordMark(place: placeIn('s1', 0, 0), chord: _dMinorSeventh),
       );
       final DocumentState after = DocumentReducer.apply(before, event);
       final List<ChordMark> chords = after.song.barAt('s1', 0)!.chords;
@@ -888,17 +887,15 @@ void main() {
       expect(chords.length, 3);
       expect(
         chords,
-        contains(
-          ChordMark(place: cellPlace('s1', 0, 0), chord: _dMinorSeventh),
-        ),
+        contains(ChordMark(place: placeIn('s1', 0, 0), chord: _dMinorSeventh)),
       );
       expect(
         chords,
-        contains(ChordMark(place: cellPlace('s1', 0, 0), chord: _cMajor)),
+        contains(ChordMark(place: placeIn('s1', 0, 0), chord: _cMajor)),
       );
       expect(
         chords,
-        contains(ChordMark(place: cellPlace('s1', 0, 0, 1), chord: _gSeventh)),
+        contains(ChordMark(place: placeIn('s1', 0, 0, 1), chord: _gSeventh)),
       );
       expect(DocumentReducer.apply(after, event.inverse()), before);
     });
@@ -1108,7 +1105,7 @@ void main() {
       final ChordInsertEvent event = ChordInsertEvent(
         docId: 'doc-1',
         seq: 1,
-        chord: ChordMark(place: cellPlace('nope', 0, 0), chord: _cMajor),
+        chord: ChordMark(place: placeIn('nope', 0, 0), chord: _cMajor),
       );
       expect(
         () => DocumentReducer.apply(_document(), event),

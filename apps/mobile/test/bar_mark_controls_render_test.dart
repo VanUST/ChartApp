@@ -39,6 +39,8 @@ import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page the instrument engraves at.
 const double markPageWidth = 640;
 const double markPageHeight = 420;
@@ -91,7 +93,7 @@ Song barMarkChart() => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellPlace(_sectionId, index, 0),
+                place: placeIn(_sectionId, index, 0),
                 chord: Chord(
                   root: ChordRoot(index * 2),
                   quality: ChordQuality.majorSeventh,

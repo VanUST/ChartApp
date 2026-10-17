@@ -14,6 +14,8 @@ import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// Semitone names for the chord roots this probe uses.
 const List<String> _rootNames = <String>[
   'C',
@@ -157,7 +159,7 @@ void main() {
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(root: ChordRoot(0)),
                 ),
               ],
@@ -190,7 +192,7 @@ Bar _bar(
   volta: volta,
   chords: <ChordMark>[
     ChordMark(
-      place: cellAt(0),
+      place: placeAt(0),
       chord: Chord(root: ChordRoot(root)),
     ),
   ],

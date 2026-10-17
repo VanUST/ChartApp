@@ -9,11 +9,13 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// A 4/4 bar holding one major triad on beat 0 and nothing else.
 Bar oneChordBar(int rootPitchClass) => Bar(
   chords: <ChordMark>[
     ChordMark(
-      place: cellAt(0),
+      place: placeAt(0),
       chord: Chord(root: ChordRoot(rootPitchClass)),
     ),
   ],
@@ -23,7 +25,7 @@ Bar oneChordBar(int rootPitchClass) => Bar(
 Bar chordOnBeat(int rootPitchClass, int beat) => Bar(
   chords: <ChordMark>[
     ChordMark(
-      place: cellAt(beat),
+      place: placeAt(beat),
       chord: Chord(root: ChordRoot(rootPitchClass)),
     ),
   ],
@@ -73,7 +75,7 @@ void main() {
       final Bar bar = Bar(
         chords: <ChordMark>[
           ChordMark(
-            place: cellAt(0),
+            place: placeAt(0),
             chord: Chord(
               root: ChordRoot(2),
               quality: ChordQuality.minorSeventh,
@@ -91,7 +93,7 @@ void main() {
         timeSignature: TimeSignature.threeFour,
         chords: <ChordMark>[
           ChordMark(
-            place: cellAt(0),
+            place: placeAt(0),
             chord: Chord(root: ChordRoot(0)),
           ),
         ],
@@ -105,7 +107,7 @@ void main() {
         timeSignature: TimeSignature.twoFour,
         chords: <ChordMark>[
           ChordMark(
-            place: cellAt(0),
+            place: placeAt(0),
             chord: Chord(root: ChordRoot(0)),
           ),
         ],
@@ -122,7 +124,7 @@ void main() {
         final Bar inMeter = Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(0)),
             ),
           ],
@@ -130,11 +132,11 @@ void main() {
         final Bar beyond = Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(0)),
             ),
             ChordMark(
-              place: cellAt(7),
+              place: placeAt(7),
               chord: Chord(root: ChordRoot(7)),
             ),
           ],
@@ -154,11 +156,11 @@ void main() {
       final Bar bar = Bar(
         chords: <ChordMark>[
           ChordMark(
-            place: cellAt(0),
+            place: placeAt(0),
             chord: Chord(root: ChordRoot(0)),
           ),
           ChordMark(
-            place: cellAt(-3),
+            place: placeAt(-3),
             chord: Chord(root: ChordRoot(7)),
           ),
         ],
@@ -299,7 +301,7 @@ void main() {
         chords: <ChordMark>[
           for (int beat = 0; beat < 4; beat++)
             ChordMark(
-              place: cellAt(beat),
+              place: placeAt(beat),
               chord: Chord(
                 root: ChordRoot(0),
                 quality: ChordQuality.majorSeventh,
@@ -383,8 +385,12 @@ void main() {
           .chords
           .single;
 
-      expect(chord.beat, 2);
-      expect(chord.bounds.left, 68);
+      // THE CHORD IS WHERE IT WAS WRITTEN. This used to read `expect(chord.beat, 2)` and check the
+      // column the metre gave the third beat. A chord has no beat; its place is its x, so the
+      // assertion is that the engraved box starts at the bar's left edge plus the place the fixture
+      // wrote — a number the model chose rather than one the engraver invented.
+      expect(chord.place.offsetX, fixtureX(2));
+      expect(chord.bounds.left, 24 + fixtureX(2));
     });
 
     test('two chords packed onto one beat are laid out side by side', () {
@@ -393,11 +399,11 @@ void main() {
       final Bar packed = Bar(
         chords: <ChordMark>[
           ChordMark(
-            place: cellAt(0),
+            place: placeAt(0),
             chord: Chord(root: ChordRoot(0)),
           ),
           ChordMark(
-            place: cellAt(0, 1),
+            place: placeAt(0, 1),
             chord: Chord(root: ChordRoot(7)),
           ),
         ],
@@ -420,11 +426,14 @@ void main() {
           .chords;
 
       expect(chords.length, 2);
-      expect(chords[0].step, 0);
-      expect(chords[1].step, 1);
-      // First at 32 with width 8; the second starts 8 + 10 later, at 50.
-      expect(chords[0].bounds.left, 32);
-      expect(chords[1].bounds.left, 50);
+      // THE TWO MARKS KEEP THE PLACES THEY WERE WRITTEN AT, and the old assertion that they were
+      // steps 0 and 1 of one cell is now the two x values themselves: the engraver no longer lays a
+      // packed pair out side by side, because it does not own the second position — the musician's
+      // pen does. They stand one sub-slot apart, which is what the fixture asked for.
+      expect(chords[0].place.offsetX, fixtureX(0));
+      expect(chords[1].place.offsetX, fixtureX(0, 1));
+      expect(chords[0].bounds.left, 24 + fixtureX(0));
+      expect(chords[1].bounds.left, 24 + fixtureX(0, 1));
     });
 
     test(
@@ -535,7 +544,7 @@ void main() {
         final Bar flatChord = Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(
                 root: ChordRoot(10),
                 quality: ChordQuality.majorSeventh,

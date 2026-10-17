@@ -26,6 +26,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page width and height: the tablet viewport the other render instruments use.
 const double cuePageWidth = 824;
 const double cuePageHeight = 600;
@@ -85,14 +87,14 @@ Song textCueChart() => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
               ),
               ChordMark(
-                place: cellAt(2),
+                place: placeAt(2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,
@@ -355,7 +357,7 @@ Future<File> _renderCase({
       'anchor=${cue.place.anchor.sectionId}[${cue.place.anchor.bar}] '
       // The cell the cue names is read from its own x through the shim, because an anchor is a bar
       // and the position inside it is the offset printed on the next line.
-      'cell=${cue.place.pseudoBeat} '
+      'cell=${cue.place.offsetX} '
       'offset=(${cue.place.offsetX},${cue.place.offsetY}) '
       'origin_engraved=(${placed.origin.x.toStringAsFixed(2)},'
       '${placed.origin.y.toStringAsFixed(2)}) '

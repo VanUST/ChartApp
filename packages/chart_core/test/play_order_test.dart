@@ -11,6 +11,8 @@
 import 'package:chart_core/chart_core.dart';
 import 'package:test/test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The address of bar [index] in the single section every hand-built fixture here uses.
 WrittenBarAddress _a(int index) =>
     WrittenBarAddress(sectionId: 'sec-A-0', barIndex: index);
@@ -27,7 +29,7 @@ Bar _bar(
   volta: volta,
   chords: <ChordMark>[
     ChordMark(
-      place: cellAt(0),
+      place: placeAt(0),
       chord: Chord(root: ChordRoot(root)),
     ),
   ],

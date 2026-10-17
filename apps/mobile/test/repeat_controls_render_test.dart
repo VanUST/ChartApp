@@ -38,6 +38,8 @@ import 'package:flutter/material.dart' hide Key;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The logical page the instrument engraves at.
 const double repeatPageWidth = 640;
 const double repeatPageHeight = 420;
@@ -99,14 +101,14 @@ Song repeatChart() => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellPlace(_sectionId, index, 0),
+                place: placeIn(_sectionId, index, 0),
                 chord: Chord(
                   root: ChordRoot(index),
                   quality: ChordQuality.majorSeventh,
                 ),
               ),
               ChordMark(
-                place: cellPlace(_sectionId, index, 2),
+                place: placeIn(_sectionId, index, 2),
                 chord: Chord(
                   root: ChordRoot(index + 2),
                   quality: ChordQuality.minorSeventh,
@@ -235,7 +237,7 @@ String _barSigns(Song song, String sectionId, int barIndex) {
             .map(
               (ChordMark placed) =>
                   '${placed.chord.render(song.key, const SpellingTable())}'
-                  '@${placed.pseudoBeat}',
+                  '@${placed.offsetX.toStringAsFixed(1)}',
             )
             .join(',');
   return '$sectionId[$barIndex] open=${bar.openingBarline.name} '
@@ -669,16 +671,16 @@ void main() {
         (PlacedBar bar) =>
             bar.sectionId == _sectionId && bar.barIndex == _repeatEndBar,
       );
-      final PlacedCell cell = placed.cells.first;
+      final LayoutRect cell = placed.bounds;
       stdout.writeln(
         'repeat.wrote fitted_after=${fitPng.path} '
         'fit_scale=${fitted.scale} fitted_bars=${fitted.bars.length} '
-        'engraved_cell=(${cell.bounds.left},${cell.bounds.top},'
-        '${cell.bounds.size.width},${cell.bounds.size.height}) '
-        'surface_cell=(${cell.bounds.left * fitted.scale},'
-        '${cell.bounds.top * fitted.scale},'
-        '${cell.bounds.size.width * fitted.scale},'
-        '${cell.bounds.size.height * fitted.scale})',
+        'engraved_cell=(${cell.left},${cell.top},'
+        '${cell.size.width},${cell.size.height}) '
+        'surface_cell=(${cell.left * fitted.scale},'
+        '${cell.top * fitted.scale},'
+        '${cell.size.width * fitted.scale},'
+        '${cell.size.height * fitted.scale})',
       );
     });
 

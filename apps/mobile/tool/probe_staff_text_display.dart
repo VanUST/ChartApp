@@ -31,6 +31,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The owner's export, the same file the viewer opens by default.
 const String iRealProbePath = r'C:\Users\1\Downloads\Ракета Русское.html';
 
@@ -257,7 +259,7 @@ void main() {
                 timeSignature: TimeSignature.fourFour,
                 chords: <ChordMark>[
                   ChordMark(
-                    place: cellAt(0),
+                    place: placeAt(0),
                     chord: const Chord(root: ChordRoot(0)),
                   ),
                 ],

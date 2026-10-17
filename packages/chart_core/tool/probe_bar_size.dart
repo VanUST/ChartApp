@@ -18,6 +18,8 @@ import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 /// The section every bar of the fixture sits in, so an address can be written without a lookup.
 const String _section = 'A';
 
@@ -113,14 +115,16 @@ void _report(String label, EditSession session, double pageWidth) {
       'probe.bar $label ${bar.sectionId}#${bar.barIndex} '
       'x=${_n(bar.bounds.left)} y=${_n(bar.bounds.top)} '
       'w=${_n(bar.bounds.size.width)} h=${_n(bar.bounds.size.height)} '
-      'size=${model?.size.factor} cells=${bar.cells.length} '
+      'size=${model?.size.factor} cells=${bar.chords.length} '
       'chords=${bar.chords.length}',
     );
     final StringBuffer columns = StringBuffer();
-    for (final PlacedCell cell in bar.cells) {
+    // THE BAR IS ONE RECTANGLE NOW, so there is a single column to report: the bar itself. This
+    // loop used to walk the bar cells and print each column left edge relative to the bar.
+    for (final LayoutRect cell in <LayoutRect>[bar.bounds]) {
       columns.write(
-        ' ${cell.beat}:${_n(cell.bounds.left - bar.bounds.left)}'
-        '+${_n(cell.bounds.size.width)}',
+        ' ${cell.left}:${_n(cell.left - bar.bounds.left)}'
+        '+${_n(cell.size.width)}',
       );
     }
     stdout.writeln(
@@ -129,7 +133,7 @@ void _report(String label, EditSession session, double pageWidth) {
     final StringBuffer chords = StringBuffer();
     for (final PlacedChord chord in bar.chords) {
       chords.write(
-        ' ${chord.beat}.${chord.step}@${_n(chord.bounds.left - bar.bounds.left)}'
+        ' ${chord.place.offsetX}.${chord.place.offsetY}@${_n(chord.bounds.left - bar.bounds.left)}'
         '(${chord.bounds.size.width.toStringAsFixed(1)})',
       );
     }
@@ -178,12 +182,11 @@ void _reportAnchors(EditSession session, double pageWidth) {
       resized.bounds.top + resized.bounds.size.height / 2,
     ),
     LayoutOffset(
-      resized.cells.first.bounds.left +
-          resized.cells.first.bounds.size.width / 2,
+      resized.bounds.left + resized.bounds.size.width / 2,
       resized.bounds.top + resized.bounds.size.height / 2,
     ),
     LayoutOffset(
-      resized.cells.last.bounds.left + resized.cells.last.bounds.size.width / 2,
+      resized.bounds.left + resized.bounds.size.width / 2,
       resized.bounds.top + resized.bounds.size.height / 2,
     ),
   ];
@@ -193,7 +196,7 @@ void _reportAnchors(EditSession session, double pageWidth) {
     stdout.writeln(
       'probe.tap aim=(${_n(aim.x)},${_n(aim.y)}) '
       'hit=${hit == null ? 'none' : '${hit.sectionId}#${hit.barIndex}'} '
-      'beat=${hit?.beat} '
+      'x=${hit?.local.x.toStringAsFixed(1)} '
       'ink=${choice == null ? 'none' : '${choice.placement.anchor.sectionId}'
                 '#${choice.placement.anchor.bar}/${choice.basis.name}'}',
     );
@@ -203,9 +206,9 @@ void _reportAnchors(EditSession session, double pageWidth) {
   // not on the staff would put a note in a different beat from the chord above it.
   final LayoutRect staff = resized.melody.bounds;
   if (!resized.melody.isEmpty) {
-    for (final PlacedCell cell in resized.cells) {
+    for (final LayoutRect cell in <LayoutRect>[resized.bounds]) {
       final LayoutOffset aim = LayoutOffset(
-        cell.bounds.left + cell.bounds.size.width / 2,
+        cell.left + cell.size.width / 2,
         staff.top + staff.size.height / 2,
       );
       final ChartHit? staffHit = hitTestMelodyStaff(page, aim);
@@ -213,7 +216,7 @@ void _reportAnchors(EditSession session, double pageWidth) {
         'probe.staff aim=(${_n(aim.x)},${_n(aim.y)}) '
         'hit=${staffHit == null ? 'none' : '${staffHit.sectionId}'
                   '#${staffHit.barIndex}'} '
-        'beat=${staffHit?.beat}',
+        'x=${staffHit?.local.x.toStringAsFixed(1)}',
       );
     }
   }
@@ -307,7 +310,7 @@ Song _unequalChart() {
   Bar chord(String token, int rootSemitones, int beat, {int step = 0}) => Bar(
     chords: <ChordMark>[
       ChordMark(
-        place: cellAt(beat, step),
+        place: placeAt(beat, step),
         chord: Chord(
           root: ChordRoot(rootSemitones),
           quality: ChordQuality(token),
@@ -332,58 +335,58 @@ Song _unequalChart() {
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(root: ChordRoot(0), quality: ChordQuality('maj7')),
               ),
               ChordMark(
-                place: cellAt(0, 1),
+                place: placeAt(0, 1),
                 chord: Chord(root: ChordRoot(9), quality: ChordQuality('m7')),
               ),
               ChordMark(
-                place: cellAt(1),
+                place: placeAt(1),
                 chord: Chord(root: ChordRoot(2), quality: ChordQuality('m7b5')),
               ),
               ChordMark(
-                place: cellAt(2),
+                place: placeAt(2),
                 chord: Chord(root: ChordRoot(7), quality: ChordQuality('7')),
               ),
               ChordMark(
-                place: cellAt(3),
+                place: placeAt(3),
                 chord: Chord(root: ChordRoot(5), quality: ChordQuality('maj7')),
               ),
               ChordMark(
-                place: cellAt(3, 1),
+                place: placeAt(3, 1),
                 chord: Chord(root: ChordRoot(10), quality: ChordQuality('7')),
               ),
             ],
             melody: <NoteMark>[
               NoteMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 pitch: PitchedNote(note: eFlat, octave: 4),
                 value: eighth,
               ),
               NoteMark(
-                place: cellAt(0, 1),
+                place: placeAt(0, 1),
                 pitch: PitchedNote(note: g, octave: 4),
                 value: eighth,
               ),
               NoteMark(
-                place: cellAt(1),
+                place: placeAt(1),
                 pitch: PitchedNote(note: bFlat, octave: 4),
                 value: eighth,
               ),
               NoteMark(
-                place: cellAt(1, 1),
+                place: placeAt(1, 1),
                 pitch: PitchedNote(note: d, octave: 5),
                 value: eighth,
               ),
               NoteMark(
-                place: cellAt(2),
+                place: placeAt(2),
                 pitch: PitchedNote(note: fSharp, octave: 5),
                 value: quarter,
               ),
               NoteMark(
-                place: cellAt(3),
+                place: placeAt(3),
                 pitch: PitchedNote(note: a, octave: 5),
                 value: quarter,
               ),

@@ -21,16 +21,25 @@
 //      every machine and every run. That is what makes a layout assertion exact, and it is why the
 //      engine takes text metrics as an input rather than reaching for a font.
 //   2. It is ADDRESSABLE. Every placed bar carries the (sectionId, barIndex) that names it in the
-//      song, and every placed chord carries its (beat, step). An annotation anchored in the song
-//      model can therefore be drawn at the right place without either side knowing the other's
-//      coordinates.
+//      song, and every placed chord carries the [AnchoredPlace] it was drawn from. An annotation
+//      anchored in the song model can therefore be drawn at the right place without either side
+//      knowing the other's coordinates — and a chord's place IS the drawing's own address, because
+//      the owner removed the grid and a mark's position is a coordinate rather than a cell index.
 //
 // What it deliberately does not do: rasterisation, glyph shaping, and play-order expansion. The
 // first two belong to the renderer, and the third is not yet written (see the song model notes in
 // docs/sdd.md). The engine lays out the bars as WRITTEN, which is the edit view.
+//
+// THE METRE IS A LABEL AND THIS FILE PLACES NOTHING BY IT. `Bar.timeSignature` is read for exactly
+// two things now: the opening statement in the page header (`chartOpeningText`) and the meter-change
+// sign a bar draws (`meter_sign.dart`). It does not divide a bar, it does not decide how wide a bar
+// is, and it does not group beams. A bar's width follows its CONTENT: the furthest mark written in
+// it, plus the bar's own padding. That is the owner's decision («Просто надпись») taken as far as the
+// engraving can take it.
 import '../key.dart';
 import '../oplog/oplog.dart';
 import '../song/bar.dart';
+import '../song/note.dart';
 import '../song/section.dart';
 import '../song/song.dart';
 import '../spelling_table.dart';
@@ -150,7 +159,7 @@ class LayoutEngine {
   //          page whose first bar is not the first bar of a section — a continuation of a section
   //          that began on the previous page — still carries the header on the only page it is
   //          printed on, because it is the PAGE's statement and not the first bar's. Nothing about
-  //          the bar's own rectangle, cells or chords is touched by it.
+  //          the bar's own rectangle or chords is touched by it.
   //
   //          THE METER IT STATES IS THE FIRST BAR'S, and that is the definition rather than a
   //          simplification: a chart's meter is whatever its first bar is counted in, and a bar that
@@ -381,35 +390,66 @@ class LayoutEngine {
   // INPUTS: bar — the bar, whose own [Bar.size] decides how many times its natural width it takes.
   //         key — the key its chords are spelled in. staffLines — the bar's staff text in display
   //         form with its measured sizes, from [_measureStaffText].
-  // OUTPUTS: The bar's width: the larger of its cell content plus padding, and its widest staff
-  //          line plus the line's left inset and the bar's right padding, floored at the style's
-  //          minimum bar width, and then multiplied by [Bar.size]'s factor. A bar at
+  // OUTPUTS: The bar's width: the furthest piece of content plus the bar's own right padding, or
+  //          the width its widest staff line needs, whichever is larger, floored at the style's
+  //          minimum bar width and then multiplied by [Bar.size]'s factor. A bar at
   //          [BarSize.natural] is returned as the very same double as before the factor existed, so
   //          every chart that never resized a bar engraves the page it always did.
   //
+  //          THE WIDTH FOLLOWS THE CONTENT, and that is the visible consequence of removing the
+  //          grid: a bar's width used to be "one minimum column per beat of the meter, widened by
+  //          any chord written past it", so a 4/4 bar was four columns wide whether it held one
+  //          chord or six. Now it is exactly as wide as the furthest thing written in it, which
+  //          means a bar holding one chord is a THIRD narrower than it was and the page reads as
+  //          music rather than as a form with blanks in it.
+  //
+  //          WHAT COUNTS AS CONTENT, and why each thing is here. A CHORD contributes its own right
+  //          edge: `place.offsetX` plus the width its symbol measures. A NOTE contributes the same,
+  //          less half a notehead, because a note's `offsetX` is its notehead's CENTRE while a
+  //          chord's is its symbol's left edge — the two anchors their glyphs are naturally drawn
+  //          from, stated here because a bar that reserved the wrong one would clip the last mark
+  //          on the line. Staff text contributes its own line, as it always did. NOTHING ELSE DOES:
+  //          a text cue hangs ABOVE the bar in a row the page gives up, a document remark is not
+  //          part of the music, and handwriting has its own coordinate space and never widened a
+  //          bar. The metre contributes NOTHING — it is not read here at all.
+  //
   //          THIS FUNCTION IS THE ONLY PLACE A BAR'S WIDTH IS DECIDED, and the factor is applied
   //          HERE and nowhere else on purpose. Everything the width feeds already derives from the
-  //          rectangle this number becomes: the cell columns ([_cellOffsets] takes the drawn width
-  //          as an argument), the chord x positions, the melody staff's beat x positions, the beat
-  //          markers, the text cues' cell anchors, the hit test's cells and the bar rectangle an ink
-  //          stroke is anchored against. A second place that knew about the factor — a painter
-  //          multiplying a bar it drew, or a hit test adjusting for a resized bar — would be the
-  //          second source of truth for the coordinate system's one load-bearing number, which is
-  //          the defect A33 and A47 already paid for once here.
+  //          rectangle this number becomes: the chord x positions, the melody staff's own extent,
+  //          the text cues, the hit test's rectangle and the bar rectangle an ink stroke is anchored
+  //          against. A second place that knew about the factor — a painter multiplying a bar it
+  //          drew, or a hit test adjusting for a resized bar — would be the second source of truth
+  //          for the coordinate system's one load-bearing number, which is the defect A33 and A47
+  //          already paid for once here.
   //
-  //          WHY THE FACTOR MULTIPLIES THE FLOORED WIDTH rather than being folded into the cell
-  //          minimums: the surplus a wider bar gets is then distributed over its cells by
-  //          [_cellOffsets], which is what actually gives a bar holding six chords more room
-  //          between them. Scaling only the minimum cell width would widen an EMPTY bar and leave a
-  //          crowded one exactly as it was, which is the opposite of what the musician asked for.
-  // KEYWORDS: bar-width, staff-text-room, single-measurement, minimum-width, bar-size,
-  //           width-multiplier, single-source-of-truth
+  //          WHY THE FACTOR MULTIPLIES THE FLOORED WIDTH rather than being folded into the paddings:
+  //          the surplus a wider bar gets then widens the whole bar, which is what gives a musician
+  //          who asked for more room somewhere to write. Scaling only the padding would widen the
+  //          gap beside the first mark and leave the middle of the bar exactly as it was.
+  // KEYWORDS: bar-width, content-driven, follow-the-content, staff-text-room, single-measurement,
+  //           minimum-width, bar-size, width-multiplier, single-source-of-truth, metre-not-read
   double _barWidth(Bar bar, Key key, List<_MeasuredStaffText> staffLines) {
+    // Half a notehead, because a note's offsetX is its head's centre: the ink of the last note on a
+    // bar's line reaches this far past its own place.
+    final double noteHalfWidth =
+        const MelodyMetrics().noteheadWidth * style.melodyStaffSpace / 2;
     double content = 0;
-    for (final double cellWidth in _cellWidths(bar, key)) {
-      content += cellWidth;
+    for (final ChordMark mark in bar.chords) {
+      final String text = mark.chord.render(key, spellingTable);
+      final double right =
+          mark.offsetX +
+          style.textMetrics.measure(text, ChartTextRole.chord).width;
+      if (right > content) {
+        content = right;
+      }
     }
-    final double natural = content + 2 * style.barPadding;
+    for (final NoteMark note in bar.melody) {
+      final double right = note.offsetX + noteHalfWidth;
+      if (right > content) {
+        content = right;
+      }
+    }
+    final double natural = content + style.barPadding;
     double widest = 0;
     for (final _MeasuredStaffText line in staffLines) {
       if (line.size.width > widest) {
@@ -457,23 +497,29 @@ class LayoutEngine {
     return lines;
   }
 
-  // PURPOSE: Place a bar's melody notes on the staff band beneath its chord line, so that a note
-  //          and the chord of the same beat share one x and the five staff lines run unbroken
-  //          across the whole system.
+  // PURPOSE: Place a bar's melody notes on the staff band beneath its chord line, each notehead at
+  //          the x its own place names, so that the five staff lines run unbroken across the whole
+  //          system and every note is drawn where the musician wrote it.
   // INPUTS: measured — the bar with its model, key and the clef its staff is written in.
   //         barBounds — the bar's CHORD-LINE rectangle; the staff is placed below it, never inside
-  //         it, so the cells the hit test reads are untouched by a staff existing. offsets — the
-  //         left edge of each cell relative to the bar's left edge, from [_cellOffsets]. melodyTop
-  //         — the y where the system's melody band begins. melodyBand — the band's height; zero for
-  //         a chords-only song, which is the case that yields an empty staff and an unchanged page.
+  //         it, so the bar's own rectangle — and therefore every tap on the chord line — is
+  //         untouched by a staff existing. melodyTop — the y where the system's melody band begins.
+  //         melodyBand — the band's height; zero for a chords-only song, which is the case that
+  //         yields an empty staff and an unchanged page. opensSystem — whether this bar prints the
+  //         clef, which only the bar that opens a system does.
   // OUTPUTS: The placed staff, or [PlacedMelodyStaff.empty] when the system reserved no band at all.
   //          A bar that carries no note still gets its staff, because the five lines are drawn
   //          across every bar of a system; only a system with no melody anywhere gets none.
-  // KEYWORDS: melody-placement, shared-cell-offsets, staff-lines, empty-when-no-band
+  //
+  //          THE NOTES ARE POSITIONED BY THEIR OWN PLACES AND BY NOTHING ELSE. There is no cell
+  //          list to hand the staff any more, no stride for a beat's run and no fitting of a run
+  //          into a column: a note's x is `bar.left + place.offsetX` and its y comes from its pitch.
+  //          This is the property the whole change exists for — one answer to "where is this note",
+  //          and it is the same number the model stores and the reader measured.
+  // KEYWORDS: melody-placement, coordinate-driven, staff-lines, empty-when-no-band, no-cells
   PlacedMelodyStaff _placeMelody(
     _MeasuredBar measured,
     LayoutRect barBounds,
-    List<double> offsets,
     double melodyTop,
     double melodyBand, {
     required bool opensSystem,
@@ -492,7 +538,6 @@ class LayoutEngine {
       staffMiddleLineY: middleLine,
       staffSpace: style.melodyStaffSpace,
       clef: measured.clef,
-      cellX: offsets,
       // The clef is printed on the bar that opens a system and on no other: it names the staff, and
       // one staff does not need naming nine times on a line of nine bars.
       includeClef: opensSystem,
@@ -531,87 +576,20 @@ class LayoutEngine {
     return placed;
   }
 
-  // PURPOSE: Give each cell of a bar an extent, so that measuring a bar and placing chords inside
-  //          it agree on where a cell begins. Having one function decide both is what prevents the
-  //          chord positions from drifting away from the width they were measured into.
-  // INPUTS: bar — the bar. key — the key its chords are spelled in.
-  // OUTPUTS: One width per cell. A bar has at least its meter's cells, and MORE when a chord is
-  //          placed beyond the meter: the count widens to include the furthest chord. A cell
-  //          holding no chord takes the minimum cell width. A cell holding one or more chords
-  //          takes their total width plus a trailing gap, or the minimum if that is larger.
+  // THE CELL DIVISION IS GONE, AND ITS REMOVAL ATE FOUR FUNCTIONS AT ONCE. `_cellWidths` decided
+  // how wide each beat's column had to be, `_cellOffsets` turned those columns into x positions
+  // inside the bar, `_placeCells` published them as hit targets and `_placeBeatMarkers` drew them.
+  // All four existed because the layout divided a bar by its metre. The owner removed that division
+  // («Просто надпись»), so there is no column to widen, no offset to distribute, no target to
+  // publish and no number to print: a mark is at its own x (see [_placeChords] and [_placeMelody])
+  // and a touch names the bar and its own coordinate (see `hitTest.dart`).
   //
-  //          A chord at a NEGATIVE beat is still skipped, because there is no cell to the left of
-  //          the bar to widen into.
-  //
-  // KEYWORDS: cell-extent, chord-width, meter-cells, overfull-bar, widening
-  //
-  // WHY WIDEN INSTEAD OF SKIP. This function used to skip any chord whose beat lay outside the
-  // meter. That is defensible for a hand-built chart and wrong for an imported one: another
-  // format's cell model can legitimately place a chord past the last beat this project expected,
-  // and skipping it engraves a bar that is silently missing a chord the musician wrote, with
-  // nothing on the page to say so. Widening keeps the content and lets the bar overflow the page
-  // if it must, which is a visible symptom rather than an invisible loss.
-  //
-  // WHY A MELODY DOES NOT APPEAR HERE AT ALL, although an earlier version of the melody staff made
-  // it. A cell's width decides where a CHORD is drawn and which column a tap on the chord line
-  // names, so letting a note widen a cell moves every chord after it and changes what a tap on the
-  // chord line means — the one thing the staff was required not to do. The melody is therefore
-  // placed into the columns the chords already have, and a note that is wider than its column
-  // overhangs it (see [MelodyMetrics.accidentalGap] and `_placeMelody`), which is a blemish on the
-  // staff rather than a change of address on the chord line.
-  List<double> _cellWidths(Bar bar, Key key) {
-    final int declared = bar.timeSignature.cellsPerBar;
-    final int meterCells = declared < 1 ? 1 : declared;
-    int cells = meterCells;
-    for (final ChordMark placement in bar.chords) {
-      if (placement.pseudoBeat >= cells) {
-        cells = placement.pseudoBeat + 1;
-      }
-    }
-    final List<double> totals = List<double>.filled(cells, 0);
-    for (final ChordMark placement in bar.chords) {
-      if (placement.pseudoBeat < 0) {
-        continue;
-      }
-      final String text = placement.chord.render(key, spellingTable);
-      final double chordWidth = style.textMetrics
-          .measure(text, ChartTextRole.chord)
-          .width;
-      totals[placement.pseudoBeat] += chordWidth + style.chordSpacing;
-    }
-    return <double>[
-      for (final double total in totals)
-        total < style.minCellWidth ? style.minCellWidth : total,
-    ];
-  }
-
-  // PURPOSE: Convert cell extents into the x offset of each cell inside a bar of a given drawn
-  //          width, spreading any surplus — the room the minimum bar width added — evenly so that
-  //          a short bar's single chord does not huddle against the left barline.
-  // INPUTS: bar and key as above. barWidth — the width the bar will actually be drawn at, which
-  //         may exceed its natural width.
-  // OUTPUTS: One offset per cell, relative to the bar's left edge. An empty meter yields an empty
-  //          list rather than a division by zero.
-  // KEYWORDS: cell-offset, surplus-distribution, even-spacing, placement-agreement
-  List<double> _cellOffsets(Bar bar, Key key, double barWidth) {
-    final List<double> widths = _cellWidths(bar, key);
-    if (widths.isEmpty) {
-      return const <double>[];
-    }
-    double natural = 0;
-    for (final double width in widths) {
-      natural += width;
-    }
-    final double available = barWidth - 2 * style.barPadding;
-    final double perCell = (available - natural) / widths.length;
-    final List<double> offsets = <double>[];
-    double x = style.barPadding;
-    for (final double width in widths) {
-      offsets.add(x);
-      x += width + perCell;
-    }
-    return offsets;
-  }
+  // WHAT WAS LOST WITH THEM, said rather than discovered later. A bar used to reserve at least one
+  // minimum column per beat, which is what gave a musician blank room to write into; a bar's width
+  // now follows only what is already written in it, so an empty bar is exactly `barMinWidth` and a
+  // bar with one chord is barely wider. `barMinWidth` is therefore the number that decides how much
+  // empty room a bar gives, and raising it is the honest way to give more — not the return of
+  // columns.
 
   List<_MeasuredBar> _measureBars(Song song, List<TextCue> cues) {
     final Map<String, List<TextCue>> cuesByBar = _cuesByBar(cues);
@@ -637,6 +615,10 @@ class LayoutEngine {
             ),
             startsSection: index == 0,
             sectionLabel: index == 0 ? section.label.toString() : null,
+            // Rule 3 of the line-breaking rules, read from the bar's own marks: the sign that says
+            // the line ends after this bar. Read once while measuring so the system builder does not
+            // have to know what a mark is.
+            breaksLine: bar.marks.contains(BarMark.lineBreak),
           ),
         );
       }
@@ -684,20 +666,39 @@ class LayoutEngine {
         for (final TextCue cue in cues)
           _MeasuredTextCue(
             id: cue.id,
-            beat: cue.place.pseudoBeat,
+            offsetX: cue.place.offsetX,
             text: cue.text,
             size: style.textMetrics.measure(cue.text, ChartTextRole.textCue),
           ),
       ];
 
-  // PURPOSE: Pack bars into systems, starting a new system at every section boundary and
-  //          otherwise breaking only when the next bar would not fit.
-  // INPUTS: measured — the bars in reading order with their widths. availableWidth — the width a
-  //         system may occupy.
-  // OUTPUTS: One plan per system. A section always begins a system, so a section heading is never
-  //          separated from the music it names, and a section is never split by a heading that
-  //          belongs to a later one.
-  // KEYWORDS: system-building, greedy-packing, section-break, line-breaking
+  // PURPOSE: Pack bars into systems, honouring the owner's four line-breaking rules in one place.
+  // INPUTS: measured — the bars in reading order with their widths and their own break flags.
+  //         availableWidth — the width a system may occupy, which is the page's content width.
+  // OUTPUTS: One plan per system. THE FOUR RULES, AND WHERE EACH IS APPLIED:
+  //
+  //            1. THE RIGHT EDGE OF THE PAGE IS THE HARD LIMIT. doesNotFit below breaks the line as
+  //               soon as the next bar would take the system past vailableWidth. It is the one
+  //               rule that is a MEASUREMENT rather than a decision, and it is reached after the two
+  //               deliberate ones so a bar that follows a break is not pulled back onto a full line.
+  //            2. A SECTION ALWAYS STARTS A NEW SYSTEM, even when the previous one is not full. A
+  //               section heading names the music under it, and a heading sharing a line with the
+  //               end of the previous section would be read as belonging to it. startsSection is
+  //               set while measuring, on the first bar of every section.
+  //            3. THE MUSICIAN MAY BREAK A LINE HIMSELF, through a bar mark — BarMark.lineBreak on
+  //               the bar the line ends on (see that value for why the break is a mark rather than a
+  //               layout setting). It breaks even when the line is half full, which is the whole of
+  //               what asking for one means.
+  //            4. HANDWRITING TRAVELS WITH ITS BAR (owner decision D32), which is NOT ENFORCED HERE
+  //               because it cannot be broken here: a stroke is anchored to a bar and its points are
+  //               bar-local, so re-flowing the page moves it with the music it was written over. This
+  //               function moves bars between systems, and the ink follows by construction. A rule
+  //               that had to be checked would be a rule the coordinate system had stopped giving.
+  //
+  //          A bar wider than the page still forms a system of its own and overflows rather than
+  //          being dropped or shrunk; that is the documented failure mode of [layout].
+  // KEYWORDS: system-building, greedy-packing, section-break, line-break, bar-mark, hard-right-edge,
+  //           ink-travels-with-its-bar, d32, four-rules
   List<_SystemPlan> _buildSystems(
     List<_MeasuredBar> measured,
     double availableWidth,
@@ -724,10 +725,14 @@ class LayoutEngine {
     }
 
     for (final _MeasuredBar bar in measured) {
-      final bool mustBreak = current.isNotEmpty && bar.startsSection;
+      // Rule 2 and rule 3 are DELIBERATE breaks and are tested before the measurement, so a line the
+      // musician ended stays ended however much room is left on it.
+      final bool sectionStarts = current.isNotEmpty && bar.startsSection;
+      final bool musicianBroke = current.isNotEmpty && current.last.breaksLine;
+      // Rule 1, and only when no deliberate break already applies.
       final bool doesNotFit =
           current.isNotEmpty && currentWidth + bar.width > availableWidth;
-      if (mustBreak || doesNotFit) {
+      if (sectionStarts || musicianBroke || doesNotFit) {
         flush();
       }
       current.add(bar);
@@ -911,14 +916,6 @@ class LayoutEngine {
     final double cueBand = _cueBandHeight(plan, drawScale);
     final double staveTop = top + labelHeight + cueBand;
     final double melodyTop = staveTop + style.barHeight;
-    // The staff's bottom line, from which the beat markers hang. It is the same expression
-    // `_placeMelody` uses for the staff's middle line — the band's centre plus half the staff
-    // height — so the caption sits under the lines the notes are drawn on and not under a
-    // re-derived edge. It is computed once per system and handed to every bar, because a bar's
-    // own staff cannot sit at a different height from its neighbours'.
-    final double melodyBottom = melodyBand <= 0
-        ? melodyTop
-        : melodyTop + melodyBand / 2 + style.melodyStaffHeight / 2;
     final List<PlacedBar> bars = <PlacedBar>[];
     double x = style.pageMargin;
     bool firstInSystem = true;
@@ -929,60 +926,28 @@ class LayoutEngine {
         measured.width,
         style.barHeight,
       );
-      // The cell columns are computed once here and handed to both the cells the hit test reads
-      // and the chords drawn inside them. Recomputing them for the hit test would put the two on
-      // separate code paths that can drift, and a chord that moved by a pixel while its cell did
-      // not is exactly the kind of wrongness that looks right on screen. The melody staff reads the
-      // SAME offsets, so a note and the chord of its beat start at one x.
-      final List<double> offsets = _cellOffsets(
-        measured.bar,
-        measured.key,
-        bounds.size.width,
-      );
       bars.add(
         PlacedBar(
           sectionId: measured.sectionId,
           barIndex: measured.barIndex,
           bounds: bounds,
-          cells: _placeCells(offsets, bounds),
-          chords: _placeChords(measured, bounds, offsets),
+          chords: _placeChords(measured, bounds),
           staffText: _placeStaffText(measured.staffText, bounds),
-          // The melody staff is placed from the same offsets the chords and the cells are, so a
-          // note on beat 2 begins exactly where beat 2's chord does. It sits BELOW the bar's own
-          // bounds, which is what keeps every cell rectangle — and therefore every tap — where it
-          // was on a chart that has no melody.
+          // The melody staff sits BELOW the bar's own rectangle, which is what keeps the chord band
+          // — and therefore every tap on the chord line — exactly where it was on a chart that has
+          // no melody. Its notes are placed from their own places, so a note is at the x the model
+          // stores and nowhere else.
           melody: _placeMelody(
             measured,
             bounds,
-            offsets,
             melodyTop,
             melodyBand,
             opensSystem: firstInSystem,
           ),
-          // The beat captions hang under the staff and exist only with one, so a chords-only chart
-          // computes an empty list and its page is untouched. Only the bar that opens a system
-          // carries the ordinals: the beats of the bars after it are the same numbers on the same
-          // columns, and repeating them would put nine copies of `1234` on one line of music.
-          // OFF UNLESS THE STYLE ASKS, and the style's own note says why in the owner's words: he read
-          // the digits and ticks as noise and asked for them to go. The engine keeps the arithmetic
-          // because it is what a redesigned aid would use, and publishes nothing while it is off.
-          beatMarkers: melodyBand <= 0 || !style.showBeatCaptions
-              ? const <PlacedBeatMarker>[]
-              : _placeBeatMarkers(
-                  bounds: bounds,
-                  width: measured.width,
-                  offsets: offsets,
-                  staffBottom: melodyBottom,
-                  label: firstInSystem,
-                  style: style,
-                ),
-          // A cell-anchored cue needs the cell's own left edge, which only exists once the offsets
-          // above are known, which is why the cues are placed here and not while the bars were
-          // being measured.
+          // A cue carries its own x, so placing it needs the bar's left edge and nothing else.
           textCues: _placeTextCues(
             measured.textCues,
             bounds,
-            offsets,
             staveTop,
             drawScale,
           ),
@@ -1020,25 +985,25 @@ class LayoutEngine {
   //          first cue stays closest to the bar it remarks on and none of them falls onto the
   //          chord below. The painter draws these rows and nothing else, which is what makes the
   //          room the page gave up and the plate the reader sees the same value.
-  // INPUTS: cues — this bar's cues in document order, with the size each measured to. bounds —
-  //         where the bar sits. offsets — the left edge of each cell relative to the bar's left
-  //         edge, from [_cellOffsets]. staveTop — the top of the stave, which is also the bottom
-  //         of the band. drawScale — the page scale the rows are engraved for.
+  // INPUTS: cues — this bar's cues in document order, with the size each measured to and the x each
+  //         was written at. bounds — where the bar sits, which supplies the origin its own offsetX
+  //         is measured from. staveTop — the top of the stave, which is also the bottom of the band.
+  //         drawScale — the page scale the rows are engraved for.
   // OUTPUTS: One placed cue per measured cue, in the same order, each carrying the words and the
   //          box it occupies. The first sits directly above the stave and each later one above
-  //          that. A cue anchored to a cell of the bar starts at that cell's left edge; one
-  //          anchored to the bar itself starts at the bar's left edge; one whose beat the bar has
-  //          no cell for falls back to the bar's left edge rather than being dropped, matching the
-  //          anchor resolver the ink layer uses. An empty input yields an empty list.
+  //          that. A cue starts at `bounds.left + place.offsetX` — ITS OWN NUMBER — and the layout
+  //          neither rounds it to a column nor falls back to the bar's edge when that number is
+  //          unusual. A remark the musician dragged to the far end of a bar therefore stays there,
+  //          which is the whole of what "the cue is at its own place" means; a cue that overhangs
+  //          its neighbour is a remark written over the barline and is drawn as one.
   //
-  //          The stored offset is NOT applied here. It stays the painter's, exactly as it was, so
-  //          a nudge up or down still moves the cue by the number the musician stored and the
-  //          layout does not have to interpret a value it does not own.
-  // KEYWORDS: cue-placement, stacking, cell-anchor, bar-anchor, origin-only, painter-contract
+  //          The stored vertical offset is NOT applied here. It stays the painter's, exactly as it
+  //          was, so a nudge up or down still moves the cue by the number the musician stored and
+  //          the layout does not have to interpret a value it does not own.
+  // KEYWORDS: cue-placement, stacking, own-offset, origin, painter-contract, no-column
   List<PlacedTextCue> _placeTextCues(
     List<_MeasuredTextCue> cues,
     LayoutRect bounds,
-    List<double> offsets,
     double staveTop,
     double drawScale,
   ) {
@@ -1051,10 +1016,7 @@ class LayoutEngine {
     for (final _MeasuredTextCue cue in cues) {
       final double height = _cueRowHeight(cue, drawScale);
       y -= height;
-      final int beat = cue.beat;
-      final double left = beat >= 0 && beat < offsets.length
-          ? bounds.left + offsets[beat]
-          : bounds.left;
+      final double left = bounds.left + cue.offsetX;
       placed.add(
         PlacedTextCue(
           id: cue.id,
@@ -1070,154 +1032,78 @@ class LayoutEngine {
     return placed;
   }
 
-  // PURPOSE: Turn the cell offsets of a bar into the columns a hit test needs, so that a touch can
-  //          be named as a cell without the hit test re-deriving the bar's division. A cell is
-  //          wider than its chord: it owns the gap that follows the chord too, because that gap is
-  //          still part of the time the chord is held.
-  // INPUTS: offsets — the left edge of each cell relative to the bar's left edge, from
-  //         [_cellOffsets]. bounds — where the bar is drawn.
-  // OUTPUTS: One cell per offset, in beat order, each spanning the bar's full height and its own
-  //          column. The columns tile the bar's interior exactly: the first begins after the left
-  //          padding, each later one begins where the previous ended, and the last ends before the
-  //          right padding — so the paddings themselves are bar and not cell, which is the state
-  //          that makes "a bar with no cell at this point" expressible. An empty offset list
-  //          yields no cells, which the engine's minimum cell width makes unreachable in practice.
-  // KEYWORDS: cell-column, hit-target, tiling, padding-gap, geometry-single-source
-  List<PlacedCell> _placeCells(List<double> offsets, LayoutRect bounds) {
-    if (offsets.isEmpty) {
-      return const <PlacedCell>[];
-    }
-    final List<PlacedCell> cells = <PlacedCell>[];
-    for (int beat = 0; beat < offsets.length; beat++) {
-      final double left = bounds.left + offsets[beat];
-      // The last cell ends at the interior's right edge rather than at the next offset, because
-      // there is no next offset to read it from.
-      final double right = beat + 1 < offsets.length
-          ? bounds.left + offsets[beat + 1]
-          : bounds.right - style.barPadding;
-      cells.add(
-        PlacedCell(
-          beat: beat,
-          bounds: LayoutRect.fromLTWH(
-            left,
-            bounds.top,
-            right - left,
-            bounds.size.height,
-          ),
-        ),
-      );
-    }
-    return cells;
-  }
-
-  List<PlacedChord> _placeChords(
-    _MeasuredBar measured,
-    LayoutRect barBounds,
-    List<double> offsets,
-  ) {
+  // PURPOSE: Place each of a bar's chords at the coordinate the model stores, so that a symbol is
+  //          engraved where the musician wrote it and nowhere the engraving chose.
+  // INPUTS: measured вЂ” the bar with its model, key and address. barBounds вЂ” the bar's rectangle,
+  //         which is also its chord band.
+  // OUTPUTS: One placed chord per mark, ordered by its place along the bar, each carrying the mark's
+  //          own [AnchoredPlace] so a caller can match a placement to the model value it came from
+  //          by comparing places rather than by counting indexes.
+  //
+  //          THE VERTICAL PLACE, AND WHY ZERO MEANS THE MIDDLE. A chord's `offsetY` is its own place
+  //          on the chord line, added to the line's centre. Zero therefore means "on the line", which
+  //          is where every chord written before this stage sits вЂ” so a chart engraved today draws
+  //          its symbols at exactly the height it drew them at yesterday, and a musician who put one
+  //          higher wrote a different number. The band is the bar's own rectangle: the symbol may not
+  //          escape it, because the owner ruled that above the staff is a chord and below the bar is
+  //          neither (В«РђРєРєРѕСЂРґС‹ РЅР°РґРѕ Р·Р°РїСЂРµС‚РёС‚СЊ РЅРёР¶Рµ С‚Р°РєС‚Р°В»).
+  //
+  //          WHAT HAPPENS TO A CHORD FROM A FILE THAT SAYS OTHERWISE. It is CLAMPED into the band
+  //          rather than dropped, and [PlacedChord.clampedIntoBand] says so. Dropping it would make a
+  //          chart silently lose a chord; drawing it below the bar would show a place the rule says
+  //          cannot hold one, and the ink reader would then find notes there. Clamping keeps the
+  //          symbol visible, keeps it inside the band, and leaves a fact a probe can print.
+  //
+  //          NO PACKING ANY MORE. Two marks may legitimately stand at the same x вЂ” the reducer no
+  //          longer separates them, because a place is a coordinate and the musician's pen made it вЂ”
+  //          so the engine draws them where they say and lets them overlap. The layout does not
+  //          arbitrate a position the musician chose.
+  // KEYWORDS: chord-placement, coordinate-driven, chord-band, clamping, clampedIntoBand,
+  //           no-packing, drawn-where-written
+  List<PlacedChord> _placeChords(_MeasuredBar measured, LayoutRect barBounds) {
     final Bar bar = measured.bar;
-    if (offsets.isEmpty) {
+    if (bar.chords.isEmpty) {
       return const <PlacedChord>[];
     }
-    final Map<int, double> consumedInCell = <int, double>{};
+    final List<ChordMark> ordered = bar.chords.toList()
+      ..sort((ChordMark a, ChordMark b) => a.offsetX.compareTo(b.offsetX));
     final List<PlacedChord> placed = <PlacedChord>[];
-
-    // Chords are visited in the order the model stores them, which is by cell and then by step,
-    // so a comma-packed pair is drawn left to right in the order it is read.
-    for (final ChordMark placement in bar.chords) {
-      if (placement.pseudoBeat < 0 || placement.pseudoBeat >= offsets.length) {
-        continue;
-      }
-      final String text = placement.chord.render(measured.key, spellingTable);
+    for (final ChordMark mark in ordered) {
+      final String text = mark.chord.render(measured.key, spellingTable);
       final LayoutSize textSize = style.textMetrics.measure(
         text,
         ChartTextRole.chord,
       );
-      final double used = consumedInCell[placement.pseudoBeat] ?? 0;
-      final double chordX =
-          barBounds.left + offsets[placement.pseudoBeat] + used;
-      // Chords sit in the middle of the stave's vertical extent. That extent is now the CHORD LINE
-      // of a two-staff system — the melody staff is placed below it, never inside it — so the symbol
-      // keeps the position it had before a melody existed and reads above the notes, which is the
-      // order owner decision D23 requires. The placement is unchanged from the chord-only chart on
-      // purpose: a chord symbol that moved because a melody appeared would break the anchor a tap
-      // on the chord line resolves to.
-      final double chordY =
-          barBounds.top + (barBounds.size.height - textSize.height) / 2;
+      // The band a chord may occupy, expressed as the travel its own box has inside the bar: half
+      // of the bar's height less half of the symbol is how far the CENTRE may move either way.
+      final double boxTop = barBounds.top;
+      final double boxBottom = barBounds.bottom - textSize.height;
+      final double centre = barBounds.top + barBounds.size.height / 2;
+      double chordY = centre - textSize.height / 2 + mark.place.offsetY;
+      bool clamped = false;
+      if (chordY < boxTop) {
+        chordY = boxTop;
+        clamped = true;
+      } else if (chordY > boxBottom) {
+        chordY = boxBottom > boxTop ? boxBottom : boxTop;
+        clamped = true;
+      }
       placed.add(
         PlacedChord(
-          chord: placement.chord,
-          beat: placement.pseudoBeat,
-          step: placement.pseudoStep,
+          chord: mark.chord,
+          place: mark.place,
           bounds: LayoutRect.fromLTWH(
-            chordX,
+            barBounds.left + mark.offsetX,
             chordY,
             textSize.width,
             textSize.height,
           ),
+          clampedIntoBand: clamped,
         ),
       );
-      consumedInCell[placement.pseudoBeat] =
-          used + textSize.width + style.chordSpacing;
     }
     return placed;
   }
-}
-
-// PURPOSE: Name the beat a musician is choosing in the column that beat owns, so that "which cell
-//          is under my finger" is answered on the chart and not only in the selection line after
-//          the tap. Owner decision D28 records the symptom directly: «ориентироваться внутри такта
-//          трудно» — he could not tell which beat he was picking, and until that is fixed any
-//          input, fast or slow, lands in the wrong place.
-// INPUTS: bounds — the BAR's chord-stave rectangle, which the markers do not enter. width — the
-//         bar's drawn width. offsets — the left edge of each cell relative to the bar's left edge,
-//         from [_cellOffsets]. staffBottom — the y of the melody staff's bottom line, below which
-//         the markers sit. label — whether this bar carries the beat ORDINALS; only the bar that
-//         opens a system does, because the beats of the bars after it are the same numbers on the
-//         same columns and printing them again would say nothing.
-// OUTPUTS: One marker per cell, left to right, each spanning its own column and lying entirely
-//          below [staffBottom]. A column narrower than [LayoutStyle.beatMarkMinCellWidth] gets an
-//          empty label, so a crowded bar shows the beat grid without printing numbers that would
-//          touch. An empty offset list yields no markers, which the minimum cell width makes
-//          unreachable in practice.
-// KEYWORDS: beat-marker, beat-orientation, cell-column, single-arithmetic, caption-under-staff,
-//           d28
-List<PlacedBeatMarker> _placeBeatMarkers({
-  required LayoutRect bounds,
-  required double width,
-  required List<double> offsets,
-  required double staffBottom,
-  required bool label,
-  required LayoutStyle style,
-}) {
-  if (offsets.isEmpty) {
-    return const <PlacedBeatMarker>[];
-  }
-  final double top = staffBottom + style.beatMarkGap;
-  final List<PlacedBeatMarker> markers = <PlacedBeatMarker>[];
-  for (int beat = 0; beat < offsets.length; beat++) {
-    final double left = bounds.left + offsets[beat];
-    final double cellWidth = beat + 1 < offsets.length
-        ? offsets[beat + 1] - offsets[beat]
-        : bounds.right - style.barPadding - left;
-    final bool numbered =
-        label && cellWidth >= style.beatMarkMinCellWidth && cellWidth > 0;
-    markers.add(
-      PlacedBeatMarker(
-        beat: beat,
-        label: numbered ? '${beat + 1}' : '',
-        // The marker spans the whole column rather than the digits' own box, so the painter can
-        // centre a number of any width in it and the tick lands in the same place either way.
-        bounds: LayoutRect.fromLTWH(
-          left,
-          top,
-          cellWidth > 0 ? cellWidth : width,
-          style.beatMarkHeight,
-        ),
-      ),
-    );
-  }
-  return markers;
 }
 
 /// The result of asking the engine to put a whole song on one page.
@@ -1261,6 +1147,7 @@ class _MeasuredBar {
     required this.textCues,
     required this.startsSection,
     required this.sectionLabel,
+    required this.breaksLine,
   });
 
   final String sectionId;
@@ -1291,6 +1178,13 @@ class _MeasuredBar {
   final List<_MeasuredTextCue> textCues;
   final bool startsSection;
   final String? sectionLabel;
+
+  /// Whether the musician ended the line after this bar, from BarMark.lineBreak.
+  ///
+  /// Carried with the measurement rather than read again by the system builder so that the rule and
+  /// the bar it belongs to are decided once: a layout that read the marks later would be a second
+  /// place that had to agree with this one about what a break is.
+  final bool breaksLine;
 }
 
 /// One line of a bar's staff text in display form, with the size it measured to.
@@ -1308,7 +1202,7 @@ class _MeasuredStaffText {
 class _MeasuredTextCue {
   const _MeasuredTextCue({
     required this.id,
-    required this.beat,
+    required this.offsetX,
     required this.text,
     required this.size,
   });
@@ -1317,10 +1211,9 @@ class _MeasuredTextCue {
   /// pair a placement with the cue it came from even when two cues share one anchor.
   final String id;
 
-  /// The column the cue starts at inside its bar, read from the cue's place through the temporary
-  /// pseudo-grid. SHIM: the layout still divides a bar into columns, so it asks which column a cue's
-  /// x falls in; the day the layout draws the cue at its own offset, this field goes.
-  final int beat;
+  /// The x the cue starts at inside its bar: the cue's own place, carried through so that measuring
+  /// the row and drawing it in it use one number. It is not rounded to anything.
+  final double offsetX;
 
   /// The words to draw, exactly as the document stores them.
   final String text;

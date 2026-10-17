@@ -33,6 +33,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// Where the probe's PNGs are written. Outside the repository: a rendered image is evidence for one
 /// inspection, not an artefact to commit. Overridden by `METER_PROBE_OUT`.
 const String meterProbeDirectory =
@@ -150,7 +152,7 @@ Song _chart(List<TimeSignature> meters) => Song(
             chords: <ChordMark>[
               for (int cell = 0; cell < meters[index].cellsPerBar; cell++)
                 ChordMark(
-                  place: cellAt(cell),
+                  place: placeAt(cell),
                   chord: Chord(
                     root: ChordRoot((index + cell) % 12),
                     quality: cell.isEven
@@ -253,13 +255,12 @@ void _reportCells(Song song, PageLayout page, String sectionId, int barIndex) {
     return;
   }
   final List<String> hits = <String>[];
-  for (final PlacedCell cell in bar.cells) {
-    final double x = cell.bounds.left + cell.bounds.size.width / 2;
-    final double y = cell.bounds.top + cell.bounds.size.height / 2;
+  for (final LayoutRect cell in <LayoutRect>[bar.bounds]) {
+    final double x = cell.left + cell.size.width / 2;
+    final double y = cell.top + cell.size.height / 2;
     final ChartHit? hit = hitTestPage(page, LayoutOffset(x, y));
     hits.add(
-      'cell${cell.beat}:${hit == null ? 'null' : '${hit.barIndex}'
-                '/${hit.beat ?? 'none'}'}',
+      'cell${cell.left}:${hit == null ? 'null' : '${hit.barIndex}/${hit.local.x.toStringAsFixed(1)}'}',
     );
   }
   final double padX = bar.bounds.left + 1;
@@ -275,10 +276,10 @@ void _reportCells(Song song, PageLayout page, String sectionId, int barIndex) {
   stdout.writeln(
     'probe.cells bar=$sectionId#$barIndex meter=${model.timeSignature} '
     'cellsPerBar=${model.timeSignature.cellsPerBar} '
-    'placed_cells=${bar.cells.length} '
+    'placed_cells=${bar.chords.length} '
     'bar_width=${bar.bounds.size.width.toStringAsFixed(2)} hits=${hits.join(' ')} '
     'padding_hit=${padding == null ? 'null' : 'bar${padding.barIndex}'
-              '/${padding.beat ?? 'none'}'} '
+              '/${padding.local.x}'} '
     'below_hit=${below == null ? 'null' : 'bar${below.barIndex}'}',
   );
 }

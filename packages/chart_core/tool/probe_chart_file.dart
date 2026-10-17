@@ -17,6 +17,8 @@ import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 int _failures = 0;
 int _checks = 0;
 
@@ -59,7 +61,7 @@ void _roundTripOneOperation() {
     docId: 'doc-one',
     seq: 1,
     chord: ChordMark(
-      place: cellPlace('s1', 0, 0),
+      place: placeIn('s1', 0, 0),
       chord: Chord(root: ChordRoot(0)),
     ),
   );
@@ -98,7 +100,7 @@ void _roundTripManyOperations() {
       bar: Bar(
         chords: <ChordMark>[
           ChordMark(
-            place: cellAt(0),
+            place: placeAt(0),
             chord: Chord(root: ChordRoot(7)),
           ),
         ],
@@ -118,7 +120,7 @@ void _roundTripManyOperations() {
       docId: 'doc-many',
       seq: 3,
       chord: ChordMark(
-        place: cellPlace('s1', 0, 0),
+        place: placeIn('s1', 0, 0),
         chord: Chord(root: ChordRoot(0)),
       ),
     ),
@@ -126,7 +128,7 @@ void _roundTripManyOperations() {
       docId: 'doc-many',
       seq: 4,
       chord: ChordMark(
-        place: cellPlace('s1', 0, 2),
+        place: placeIn('s1', 0, 2),
         chord: Chord(root: ChordRoot(7), quality: ChordQuality.dominantSeventh),
       ),
     ),
@@ -134,7 +136,7 @@ void _roundTripManyOperations() {
       docId: 'doc-many',
       seq: 5,
       note: NoteMark(
-        place: cellPlace('s1', 0, 0),
+        place: placeIn('s1', 0, 0),
         pitch: PitchedNote(note: WrittenNote(NoteLetter.d, 0), octave: 4),
         value: NoteValue.plain(NoteBase.quarter),
       ),
@@ -295,7 +297,7 @@ void _corruptionFailures() {
         docId: 'doc-many',
         seq: 1,
         chord: ChordMark(
-          place: cellPlace('s1', 0, 0),
+          place: placeIn('s1', 0, 0),
           chord: Chord(root: ChordRoot(0)),
         ),
       ),
@@ -370,7 +372,7 @@ void _newerWriter() {
         docId: 'doc-many',
         seq: 1,
         chord: ChordMark(
-          place: cellPlace('s1', 0, 0),
+          place: placeIn('s1', 0, 0),
           chord: Chord(root: ChordRoot(0)),
         ),
       ),

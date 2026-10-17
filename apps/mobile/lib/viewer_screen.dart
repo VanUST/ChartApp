@@ -1027,42 +1027,40 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       'pan': <double>[page.pan.x, page.pan.y],
       'drawn_scale': drawn,
       'surface': <double>[page.size.width * drawn, page.size.height * drawn],
-      'cells': <Object?>[
+      // THE BARS, NOT THE CELLS. A driver that aims at the music needs a rectangle it can hit,
+      // and a bar is what a tap names now: the grid published one entry per beat and a beat is no
+      // longer a target. The rect and the centre are in both coordinate systems, through the page
+      // bridge, so a driver can aim through the pen's own arithmetic rather than a second copy.
+      'bars': <Object?>[
         for (final PlacedBar bar in page.bars)
-          for (final PlacedCell cell in bar.cells)
-            <String, Object?>{
-              'sec': bar.sectionId,
-              'bar': bar.barIndex,
-              'beat': cell.beat,
-              // WHERE THE CELL LANDED ON THE SURFACE, through the page's own forward transform —
-              // the same function [PageLayout.pagePointOf] inverts, so a driver that aims at these
-              // numbers is aiming through the pen's own arithmetic rather than through a second
-              // copy of it.
-              'x': page
-                  .surfacePointOf(
-                    LayoutOffset(
-                      cell.bounds.left + cell.bounds.size.width / 2,
-                      cell.bounds.top + cell.bounds.size.height / 2,
-                    ),
-                  )
-                  .x,
-              'y': page
-                  .surfacePointOf(
-                    LayoutOffset(
-                      cell.bounds.left + cell.bounds.size.width / 2,
-                      cell.bounds.top + cell.bounds.size.height / 2,
-                    ),
-                  )
-                  .y,
-              // The cell's rectangle in the page's engraved coordinates, so a driver can also ask
-              // what the hit test should answer for a point rather than only where to put a finger.
-              'page_rect': <double>[
-                cell.bounds.left,
-                cell.bounds.top,
-                cell.bounds.size.width,
-                cell.bounds.size.height,
-              ],
-            },
+          <String, Object?>{
+            'sec': bar.sectionId,
+            'bar': bar.barIndex,
+            // The centre of the CHORD LINE, which is the point to touch to select the bar and to
+            // open the chord palette at it.
+            'x': page
+                .surfacePointOf(
+                  LayoutOffset(
+                    bar.bounds.left + bar.bounds.size.width / 2,
+                    bar.bounds.top + bar.bounds.size.height / 2,
+                  ),
+                )
+                .x,
+            'y': page
+                .surfacePointOf(
+                  LayoutOffset(
+                    bar.bounds.left + bar.bounds.size.width / 2,
+                    bar.bounds.top + bar.bounds.size.height / 2,
+                  ),
+                )
+                .y,
+            'page_rect': <double>[
+              bar.bounds.left,
+              bar.bounds.top,
+              bar.bounds.size.width,
+              bar.bounds.size.height,
+            ],
+          },
       ],
     };
   }
@@ -4075,7 +4073,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         'surface=(${surface.x.toStringAsFixed(1)},${surface.y.toStringAsFixed(1)}) '
         'page_point=(${pagePoint.x.toStringAsFixed(1)},'
         '${pagePoint.y.toStringAsFixed(1)}) '
-        'hit=${staffHit.sectionId}#${staffHit.barIndex} beat=${staffHit.beat}',
+        'hit=${staffHit.sectionId}#${staffHit.barIndex} '
+        'x=${staffHit.local.x.toStringAsFixed(1)} '
+        'y=${staffHit.local.y.toStringAsFixed(1)}',
       );
       _editNoteSelection(context);
       return;
@@ -4092,7 +4092,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       'page_point=(${pagePoint.x.toStringAsFixed(1)},'
       '${pagePoint.y.toStringAsFixed(1)}) '
       'hit=${hit == null ? 'none' : '${hit.sectionId}#${hit.barIndex} '
-                'beat=${hit.beat}'}',
+                'x=${hit.local.x.toStringAsFixed(1)}'}',
     );
   }
 
@@ -4119,26 +4119,26 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     }
     final ChartHit? focus = _selectionEnd;
     if (focus == null) {
-      final int? beat = anchor.beat;
-      return beat == null
-          ? ChartSelection.bars(
-              sectionId: anchor.sectionId,
-              firstBar: anchor.barIndex,
-              lastBar: anchor.barIndex,
-            )
-          : ChartSelection.beats(
-              sectionId: anchor.sectionId,
-              barIndex: anchor.barIndex,
-              firstBeat: beat,
-              lastBeat: beat,
-            );
+      // A SINGLE TAP NAMES THE BAR. It used to name a beat when it landed on one, and a beat was a
+      // column the layout published; with the grid gone the tap's own point is a coordinate rather
+      // than a cell, so the smallest fragment one touch can mean is the bar it landed in. A run
+      // INSIDE one bar is made by the second tap (see below), which is the gesture that can say
+      // "from here to there".
+      return ChartSelection.bars(
+        sectionId: anchor.sectionId,
+        firstBar: anchor.barIndex,
+        lastBar: anchor.barIndex,
+      );
     }
+    // TWO TOUCHES IN ONE BAR NAME A WINDOW, and the two ends are their own x values — the numbers
+    // the model stores. Two touches in different bars name the run of bars between them and drop
+    // the x values, which `ChartSelection.span` decides in one place.
     return ChartSelection.span(
       sectionId: anchor.sectionId,
       firstBar: anchor.barIndex,
-      firstBeat: anchor.beat,
+      firstX: anchor.local.x,
       lastBar: focus.barIndex,
-      lastBeat: focus.beat,
+      lastX: focus.local.x,
     );
   }
 
@@ -4178,10 +4178,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final ChartSelection? range = _selectionRange;
     debugPrint(
       'viewer.selection.extend page=${page.index} '
-      'anchor=${anchor.sectionId}#${anchor.barIndex} beat=${anchor.beat} '
-      'focus=${hit.sectionId}#${hit.barIndex} beat=${hit.beat} '
+      'anchor=${anchor.sectionId}#${anchor.barIndex} '
+      'x=${anchor.local.x.toStringAsFixed(1)} '
+      'focus=${hit.sectionId}#${hit.barIndex} '
+      'x=${hit.local.x.toStringAsFixed(1)} '
       'range=${range?.toString() ?? 'none'} bars=${range?.barCount ?? 0} '
-      'beats=${range?.beatCount ?? 0}',
+      'window=${range?.windowWidth.toStringAsFixed(1) ?? '0'}',
     );
   }
 
@@ -4242,7 +4244,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     });
     debugPrint(
       'viewer.selection.copy range=$range depth=${range.depth.name} '
-      'bars=${clip.barCount} beats=${clip.beatCount} '
+      'bars=${clip.barCount} window=${clip.windowWidth.toStringAsFixed(1)} '
       'strokes=${clip.strokes.length} '
       'structured=${report.structuredBars} minimal=${report.minimalBars} '
       'ink_area=${report.inkArea.toStringAsFixed(1)}',
@@ -4292,10 +4294,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ClipPasteOutcome.pasted =>
           clip.depth == SelectionDepth.bars
               ? l10n.selectionPastedAfter(targetOrdinal, clip.barCount)
-              : l10n.selectionPastedInto(
-                  cellBarOrdinal,
-                  (range.firstBeat ?? 0) + 1,
-                ),
+              // A WINDOW IS PASTED INTO A BAR and the sentence names that bar. It used to name the
+              // cell the window began at, which was a number the model no longer has.
+              : l10n.selectionPastedIntoBar(cellBarOrdinal),
         ClipPasteOutcome.needsCell => l10n.selectionPasteNeedsCell,
         ClipPasteOutcome.windowDoesNotFit => l10n.selectionPasteDoesNotFit,
         ClipPasteOutcome.noSuchSection ||
@@ -4381,11 +4382,8 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final ChartHit? hit = _selection;
     final IRealLibrary? library = _library;
     final EditSession? session = _currentSession;
-    if (hit == null || hit.cell == null || library == null || session == null) {
-      debugPrint(
-        'viewer.edit.skipped hit=${hit ?? 'none'} '
-        'cell=${hit?.beat ?? 'none'}',
-      );
+    if (hit == null || library == null || session == null) {
+      debugPrint('viewer.edit.skipped hit=${hit ?? 'none'}');
       return;
     }
     final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
@@ -4404,7 +4402,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         session: session,
         sectionId: hit.sectionId,
         barIndex: hit.barIndex,
-        beat: hit.beat!,
+        // THE TAP'S OWN PLACE, which is where the chord will be written: a chord is placed where
+        // the musician pointed, and `hit.local` is that number in the bar's own frame. The height
+        // is the distance from the chord line's centre, which is what `offsetY` means.
+        offsetX: hit.local.x,
+        offsetY: hit.local.y - hit.bar.bounds.size.height / 2,
         shownKey: shownKey,
         semitoneShift: semitones,
         // The page is drawn from the session, so a rebuild after each applied chord is the whole of
@@ -4437,15 +4439,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   void _editNoteSelection(BuildContext context) {
     final ChartHit? hit = _selection;
     final EditSession? session = _currentSession;
-    if (hit == null || hit.cell == null || session == null) {
-      debugPrint(
-        'viewer.note.skipped hit=${hit ?? 'none'} cell=${hit?.beat ?? 'none'}',
-      );
+    if (hit == null || session == null) {
+      debugPrint('viewer.note.skipped hit=${hit ?? 'none'}');
       return;
     }
     debugPrint(
       'viewer.note.open section=${hit.sectionId} bar=${hit.barIndex} '
-      'beat=${hit.beat} written_key=${session.song.key}',
+      'x=${hit.local.x.toStringAsFixed(1)} written_key=${session.song.key}',
     );
     unawaited(
       showNotePalette(
@@ -4453,7 +4453,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         session: session,
         sectionId: hit.sectionId,
         barIndex: hit.barIndex,
-        beat: hit.beat!,
+        // THE TAP'S OWN PLACE: a new note is written where the musician pointed, and the sheet
+        // opens listing the bar's notes with the nearest one chosen.
+        offsetX: hit.local.x,
         writtenKey: session.song.key,
         onChanged: () => setState(() {}),
       ),
@@ -4522,10 +4524,9 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       );
       return;
     }
-    final int? beat = hit.beat;
     debugPrint(
       'viewer.form.open section=${hit.sectionId} bar=${hit.barIndex} '
-      'beat=$beat',
+      'x=${hit.local.x.toStringAsFixed(1)}',
     );
     unawaited(
       showSongForm(
@@ -4569,10 +4570,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       );
       return;
     }
-    final int? beat = hit.beat;
     debugPrint(
       'viewer.textcue.open section=${hit.sectionId} bar=${hit.barIndex} '
-      'beat=${beat ?? 'bar'} cues=${session.document.textCues.length}',
+      'x=${hit.local.x.toStringAsFixed(1)} '
+      'cues=${session.document.textCues.length}',
     );
     unawaited(
       showTextCueSheet(
@@ -4580,7 +4581,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         session: session,
         sectionId: hit.sectionId,
         barIndex: hit.barIndex,
-        beat: beat,
+        offsetX: hit.local.x,
         onChanged: () => setState(() {}),
       ),
     );
@@ -4636,7 +4637,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final ChartHit? hit = _selection;
     final EditSession? session = _currentSession;
-    final bool editable = hit != null && hit.cell != null;
+    // EVERY HIT IS EDITABLE NOW. It used to need a cell, because a chord was written into a cell;
+    // a hit already carries the place a chord or a note would be written at, so the only thing a
+    // hit can lack is the hit itself.
+    final bool editable = hit != null;
     // A bar-level selection names no cell to write a chord or a note into, but it names exactly what
     // the form sheet acts on — a section and a bar — so the line is a control in both cases instead
     // of being dead text whenever the touch landed on a bar's padding rather than on one of its
@@ -4857,11 +4861,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     if (_selectionEnd == null || range == null) {
       return _selectionLabel(song, hit, l10n);
     }
-    if (range.isBeatWindow) {
-      return l10n.selectionRunWindow(
+    if (range.isWindow) {
+      return l10n.selectionRunWindowAt(
         _writtenBarOrdinal(song, range.sectionId, range.firstBar),
-        range.firstBeat! + 1,
-        range.lastBeat! + 1,
+        range.firstX!.round(),
+        range.lastX!.round(),
       );
     }
     return l10n.selectionRunRange(
@@ -4881,10 +4885,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // KEYWORDS: label-format, one-based, global-bar-ordinal, model-address
   String _selectionLabel(Song song, ChartHit hit, AppLocalizations l10n) {
     final int bar = _writtenBarOrdinal(song, hit.sectionId, hit.barIndex);
-    final int? beat = hit.beat;
-    return beat == null
-        ? l10n.selectionBar(bar)
-        : l10n.selectionBarCell(bar, beat + 1);
+    // THE BAR IS THE WHOLE OF WHAT ONE TOUCH NAMES. It used to add "cell N" when the touch landed
+    // on one; a place inside a bar is a distance now, and printing a distance as the name of the
+    // selection would be a number the musician never counted.
+    return l10n.selectionBar(bar);
   }
 
   // PURPOSE: Number a bar the way a musician counts, across sections from the top, because the model

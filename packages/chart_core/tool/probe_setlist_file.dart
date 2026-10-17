@@ -19,6 +19,8 @@ import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
 
+import '../support/place_fixture.dart';
+
 int _failures = 0;
 int _checks = 0;
 
@@ -53,7 +55,7 @@ Song _song({String title = 'Test Tune'}) => Song(
         Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(2)),
             ),
           ],
@@ -61,7 +63,7 @@ Song _song({String title = 'Test Tune'}) => Song(
         Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(0),
+              place: placeAt(0),
               chord: Chord(root: ChordRoot(9)),
             ),
           ],
@@ -268,7 +270,7 @@ Song _songEdited() {
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(root: ChordRoot(4)),
               ),
             ],

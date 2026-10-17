@@ -28,6 +28,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The pane width the viewer is pumped at for the interaction cases, chosen so the default page mode
 /// is PAGES: those cases want a page whose scale is 1, and FIT is switched to explicitly where it is
 /// being tested.
@@ -55,7 +57,7 @@ Song inkChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
@@ -93,7 +95,7 @@ Song longInkChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index % 12),
                     quality: ChordQuality.majorSeventh,
@@ -240,10 +242,10 @@ void main() {
     // Ink off first: the pen selects, and nothing is drawn. That is the state the mode starts in.
     expect(inkToggleIsOn(tester), isFalse);
     final PlacedBar bar = painter.page.bars[3];
-    final PlacedCell cell = bar.cells.first;
+    final LayoutRect cell = bar.bounds;
     final Offset cellCentre = Offset(
-      cell.bounds.left + cell.bounds.size.width / 2,
-      cell.bounds.top + cell.bounds.size.height / 2,
+      cell.left + cell.size.width / 2,
+      cell.top + cell.size.height / 2,
     );
     await drawStroke(
       tester,
@@ -309,8 +311,8 @@ void main() {
     stdout.writeln(
       'ink.test.drawn page_scale=${painter.page.scale} '
       'anchor=${drawn.stroke.anchor} '
-      'cell=${bar.sectionId}#${bar.barIndex} rect=(${cell.bounds.left},'
-      '${cell.bounds.top},${cell.bounds.size.width},${cell.bounds.size.height}) '
+      'cell=${bar.sectionId}#${bar.barIndex} rect=(${cell.left},'
+      '${cell.top},${cell.size.width},${cell.size.height}) '
       'surface_first=(${startPage.dx},${startPage.dy}) '
       'local_first=(${first.x.toStringAsFixed(3)},${first.y.toStringAsFixed(3)}) '
       'points=${drawn.stroke.points.length} '
@@ -325,10 +327,10 @@ void main() {
     await setInkMode(tester, true);
     final ChartPainter painter = chartPainter(tester);
     final PlacedBar bar = painter.page.bars[6];
-    final PlacedCell cell = bar.cells.first;
+    final LayoutRect cell = bar.bounds;
     final Offset cellCentre = Offset(
-      cell.bounds.left + cell.bounds.size.width / 2,
-      cell.bounds.top + cell.bounds.size.height / 2,
+      cell.left + cell.size.width / 2,
+      cell.top + cell.size.height / 2,
     );
 
     // **THE ASSERTION THIS REPLACES WAS THE CONTRACT, AND THE OWNER'S OWN TABLET FALSIFIED IT. It is
@@ -397,10 +399,10 @@ void main() {
     await pumpViewer(tester, inkChart());
     await setInkMode(tester, true);
     final ChartPainter painter = chartPainter(tester);
-    final PlacedCell cell = painter.page.bars[0].cells.first;
+    final LayoutRect cell = painter.page.bars.first.bounds;
     final Offset centre = Offset(
-      cell.bounds.left + cell.bounds.size.width / 2,
-      cell.bounds.top + cell.bounds.size.height / 2,
+      cell.left + cell.size.width / 2,
+      cell.top + cell.size.height / 2,
     );
     await drawStroke(
       tester,
@@ -444,10 +446,10 @@ void main() {
       reason: 'the narrow pane must still open in PAGES, or the two cases cannot be compared',
     );
     final PlacedBar plainBar = plainPainter.page.bars[0];
-    final PlacedCell plainCell = plainBar.cells.first;
+    final LayoutRect plainCell = plainBar.bounds;
     final Offset plainCentre = Offset(
-      plainCell.bounds.left + plainCell.bounds.size.width / 2,
-      plainCell.bounds.top + plainCell.bounds.size.height / 2,
+      plainCell.left + plainCell.size.width / 2,
+      plainCell.top + plainCell.size.height / 2,
     );
     // The stroke starts five pixels up and to the left of the cell centre, so in PAGES at scale 1 the
     // stored point is exactly the surface offset from the cell's own corner: half the cell minus five.
@@ -466,8 +468,8 @@ void main() {
     );
     final Offset plainOrigin = Offset(onPlain.origin.x, onPlain.origin.y);
     // REWRITTEN, and the two expectations below used to read
-    //   expect(plainOffset.dx, closeTo(plainCell.bounds.size.width / 2 - aim, 1e-6));
-    //   expect(plainOffset.dy, closeTo(plainCell.bounds.size.height / 2 - aim, 1e-6));
+    //   expect(plainOffset.dx, closeTo(plainCell.size.width / 2 - aim, 1e-6));
+    //   expect(plainOffset.dy, closeTo(plainCell.size.height / 2 - aim, 1e-6));
     // — the stored point measured from the CELL's corner. A stroke is anchored to its BAR now, so the
     // origin is the bar's corner and the same quantity is the pen's own position in the bar. The claim
     // is unchanged: the stored point is where the pen went, expressed in the music's own pixels.
@@ -518,8 +520,8 @@ void main() {
       'ink.test.fit plain_scale=${plainPainter.page.scale} '
       'plain_origin=(${plainOrigin.dx},${plainOrigin.dy}) '
       'plain_systems=${plainPainter.page.systems.length} '
-      'plain_cell=(${plainCell.bounds.left},${plainCell.bounds.top},'
-      '${plainCell.bounds.size.width},${plainCell.bounds.size.height}) '
+      'plain_cell=(${plainCell.left},${plainCell.top},'
+      '${plainCell.size.width},${plainCell.size.height}) '
       'plain_stored=(${plainOffset.dx.toStringAsFixed(3)},'
       '${plainOffset.dy.toStringAsFixed(3)}) '
       'fit_scale=${fitted.page.scale.toStringAsFixed(4)} '
@@ -537,10 +539,10 @@ void main() {
     await setInkMode(tester, true);
     final ChartPainter painter = chartPainter(tester);
     final PlacedBar bar = painter.page.bars[5];
-    final PlacedCell cell = bar.cells.first;
+    final LayoutRect cell = bar.bounds;
     final Offset centre = Offset(
-      cell.bounds.left + cell.bounds.size.width / 2,
-      cell.bounds.top + cell.bounds.size.height / 2,
+      cell.left + cell.size.width / 2,
+      cell.top + cell.size.height / 2,
     );
     await drawStroke(
       tester,

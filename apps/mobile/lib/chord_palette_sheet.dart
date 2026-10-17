@@ -68,31 +68,32 @@ import 'sheet_surface.dart';
 //          edits the session as choices are made, so its result is not the chosen chord but nothing:
 //          by the time it closes the document has already changed, and a caller that wanted the
 //          chord would be asking a second time for what the session already holds.
-// INPUTS: context — where to open the sheet. session — the document being edited. sectionId,
-//         barIndex and beat — the address of the cell, in the model's own zero-based numbering.
-//         shownKey — the key to render the preview in. semitoneShift — how far the shown chart is
-//         from the written one. onChanged — called after every applied edit so the caller can
-//         rebuild; the sheet does not know how the caller draws its page.
+// INPUTS: context — where to open the sheet. session — the document being edited. sectionId and
+//         barIndex — the bar, in the model's own zero-based numbering. offsetX and offsetY — the
+//         place inside it, in bar-local logical pixels, exactly as the tap reported them. shownKey —
+//         the key to render the preview in. semitoneShift — how far the shown chart is from the
+//         written one. onChanged — called after every applied edit so the caller can rebuild; the
+//         sheet does not know how the caller draws its page.
 // OUTPUTS: A future that completes when the sheet is dismissed, whether anything was edited or not.
-//          A cell whose address names no bar in the session opens nothing and completes at once,
-//          because there is nothing to edit and an empty sheet would be a lie about what is
-//          selectable.
-// KEYWORDS: show, bottom-sheet, session-edit, callback, guard
-/// Opens the chord palette for one cell.
+//          A bar the session does not hold opens nothing and completes at once, because there is
+//          nothing to edit and an empty sheet would be a lie about what is selectable.
+// KEYWORDS: show, bottom-sheet, session-edit, callback, guard, coordinate
+/// Opens the chord palette for one place in one bar.
 Future<void> showChordPalette(
   BuildContext context, {
   required EditSession session,
   required String sectionId,
   required int barIndex,
-  required int beat,
+  required double offsetX,
+  required double offsetY,
   required Key shownKey,
   int semitoneShift = 0,
   VoidCallback? onChanged,
 }) async {
-  final ChordMark? existing = session.existingChordAt(
+  final ChordMark? existing = session.existingChordNear(
     sectionId: sectionId,
     barIndex: barIndex,
-    beat: beat,
+    offsetX: offsetX,
   );
   final Bar? bar = session.song.barAt(sectionId, barIndex);
   if (bar == null) {
@@ -106,7 +107,8 @@ Future<void> showChordPalette(
       session: session,
       sectionId: sectionId,
       barIndex: barIndex,
-      beat: beat,
+      offsetX: offsetX,
+      offsetY: offsetY,
       initialChord: existing,
       shownKey: shownKey,
       semitoneShift: semitoneShift,
@@ -117,9 +119,9 @@ Future<void> showChordPalette(
 
 /// The palette itself: a root grid, a quality row and a preview.
 class ChordPaletteSheet extends StatefulWidget {
-  /// Creates a palette over one cell of [session].
+  /// Creates a palette over one place in one bar of [session].
   ///
-  /// [initialChord] is what the cell holds, or null when it is empty; it decides the quality the
+  /// [initialChord] is what that place holds, or null when it is empty; it decides the quality the
   /// sheet opens with, so a musician editing an existing chord is offered the tension they already
   /// wrote rather than a plain triad.
   const ChordPaletteSheet({
@@ -127,7 +129,8 @@ class ChordPaletteSheet extends StatefulWidget {
     required this.session,
     required this.sectionId,
     required this.barIndex,
-    required this.beat,
+    required this.offsetX,
+    required this.offsetY,
     required this.shownKey,
     this.initialChord,
     this.semitoneShift = 0,
@@ -143,8 +146,15 @@ class ChordPaletteSheet extends StatefulWidget {
   /// The bar's index inside its section.
   final int barIndex;
 
-  /// The cell's index inside its bar.
-  final int beat;
+  /// The place the chord is written at along its bar, in bar-local logical pixels.
+  ///
+  /// It is the tap's own x, which is the model's own coordinate: the palette does not convert a column
+  /// into a position, and the chord it writes lands where the musician pointed.
+  final double offsetX;
+
+  /// The place the chord sits at across the chord line, in bar-local logical pixels, where 0 is the
+  /// middle of the line. The editor refuses a value outside the chord band — see pplyChordAt.
+  final double offsetY;
 
   /// What the cell held when the sheet opened, or null when it was empty.
   final ChordMark? initialChord;
@@ -198,6 +208,11 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   /// A message rather than a boolean because the refusal names the character that stopped it, and
   /// the musician is looking at what he typed: "«X» is not a note" tells him where the typo is,
   /// while "invalid" does not.
+  /// Why the last typed symbol was refused, or why the last tap was refused by the chord band.
+  ///
+  /// ONE FIELD FOR BOTH, because both are shown on the same line of the same sheet: a musician who
+  /// tapped and got nothing needs one sentence saying what the rule is, and which organ said it is
+  /// not a distinction he should have to learn.
   String? _symbolError;
 
   @override
@@ -233,10 +248,11 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   //          musician tapping a button that does nothing.
   // KEYWORDS: typed-chord, apply, refusal-message, clear-and-refocus, no-silent-write
   void _applySymbol() {
-    final ChordSymbolParse parse = widget.session.applyChordSymbolToCell(
+    final ChordSymbolParse parse = widget.session.applyChordSymbolAt(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
-      beat: widget.beat,
+      offsetX: widget.offsetX,
+      offsetY: widget.offsetY,
       symbol: _symbol.text,
       size: _current?.size ?? ChordSize.normal,
     );
@@ -290,10 +306,10 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   // INPUTS: None.
   // OUTPUTS: The cell's chord, or null when it holds none.
   // KEYWORDS: read-back, live-state, undo-aware
-  ChordMark? get _current => widget.session.existingChordAt(
+  ChordMark? get _current => widget.session.existingChordNear(
     sectionId: widget.sectionId,
     barIndex: widget.barIndex,
-    beat: widget.beat,
+    offsetX: widget.offsetX,
   );
 
   // PURPOSE: Apply one chord to the cell, which is the sheet's only way of changing the document.
@@ -305,18 +321,27 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   // KEYWORDS: apply, haptic, session-append, one-tap-per-root, stay-open
   void _apply(Chord chord) {
     final ChordMark? existing = _current;
-    final bool applied = widget.session.applyChordToCell(
+    final ChordEntry entry = widget.session.applyChordAt(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
-      beat: widget.beat,
+      offsetX: widget.offsetX,
+      offsetY: widget.offsetY,
       chord: chord,
       size: existing?.size ?? ChordSize.normal,
     );
-    if (!applied) {
+    if (!entry.applied) {
+      // THE REFUSAL IS SAID, NOT SWALLOWED. The one refusal reachable from this sheet is the chord
+      // band's — a chord may not be written below the bar — and a tap that wrote nothing must explain
+      // itself rather than look like a broken button. The message is the catalogue's, in both
+      // languages, and it states the rule instead of scolding.
+      setState(
+        () => _symbolError = AppLocalizations.of(context).chordOutsideBand,
+      );
+      HapticFeedback.vibrate();
       return;
     }
     HapticFeedback.selectionClick();
-    setState(() {});
+    setState(() => _symbolError = null);
     widget.onChanged?.call();
   }
 
@@ -327,10 +352,10 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
   //          clears the draft so the grid stops marking a chord that is no longer there.
   // KEYWORDS: delete, chord-remove, same-sheet, no-mode-switch
   void _remove() {
-    final bool removed = widget.session.removeChordAt(
+    final bool removed = widget.session.removeChordNear(
       sectionId: widget.sectionId,
       barIndex: widget.barIndex,
-      beat: widget.beat,
+      offsetX: widget.offsetX,
     );
     if (!removed) {
       return;
@@ -364,7 +389,10 @@ class _ChordPaletteSheetState extends State<ChordPaletteSheet> {
       }
       ordinal += section.bars.length;
     }
-    return l10n.palettePosition(ordinal, widget.beat + 1);
+    // THE BAR AND NOT A CELL. A chord's place inside its bar is a coordinate now, and printing it as
+    // "cell 2" would name a division the model does not have; the header names the bar, and where in it
+    // the chord goes is the place the musician touched, which the page already shows selected.
+    return l10n.palettePositionBar(ordinal);
   }
 
   // PURPOSE: Render the chord a tap would write, in the key the chart is SHOWN in, using the same

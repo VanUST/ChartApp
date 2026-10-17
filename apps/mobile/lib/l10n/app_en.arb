@@ -253,6 +253,18 @@
     "placeholders": { "count": { "type": "int" }, "bar": { "type": "int" } }
   },
 
+  "selectionPastedIntoBar": "Pasted into bar {bar}.",
+  "@selectionPastedIntoBar": {
+    "description": "Said after a window of one bar was pasted. The window is a stretch of the bar in pixels and no longer a number of cells, so the sentence names the bar it landed in.",
+    "placeholders": { "bar": { "type": "int" } }
+  },
+
+  "selectionRunWindowAt": "selected: bar {bar}, from {fromX} to {toX} px",
+  "@selectionRunWindowAt": {
+    "description": "The selection line when the musician has named a run INSIDE one bar. The two ends are distances along the bar in logical pixels, because a place inside a bar is a coordinate and no longer a cell number.",
+    "placeholders": { "bar": { "type": "int" }, "fromX": { "type": "int" }, "toX": { "type": "int" } }
+  },
+
   "selectionPastedAfter": "{count, plural, one{{count} bar pasted} other{{count} bars pasted}} after bar {bar}",
   "@selectionPastedAfter": {
     "description": "The result of a paste of bars, saying exactly where they went.",
@@ -652,6 +664,28 @@
 
   "metadataFooterFixTempo": "Fix the tempo before saving.",
   "@metadataFooterFixTempo": { "description": "The song-info sheet's footer, in the removal colour, while the tempo cannot be read and Save is disabled." },
+
+  "palettePositionBar": "Bar {bar}",
+  "@palettePositionBar": {
+    "description": "The chord palette's header when the edited place is a coordinate rather than a beat: only the bar is named, because a place inside it is a distance and not a cell number.",
+    "placeholders": { "bar": { "type": "int" } }
+  },
+
+  "chordOutsideBand": "A chord goes above the staff: below the bar it is not read.",
+  "@chordOutsideBand": {
+    "description": "Said when a chord is refused because its place is not on the bar's chord line. It states the rule rather than scolding: above the staff is a chord, on the staff is a note and below the bar is neither."
+  },
+
+  "markLineBreak": "Line break",
+  "@markLineBreak": {
+    "description": "The bar-mark control that ends the line after this bar: the musician's own line break."
+  },
+
+  "cuePositionAt": "at {x} px",
+  "@cuePositionAt": {
+    "description": "How the text-cue sheet names where on its bar a remark sits, now that a place inside a bar is a distance in pixels and no longer a cell number.",
+    "placeholders": { "x": { "type": "int" } }
+  },
 
   "palettePosition": "Bar {bar} · cell {cell}",
   "@palettePosition": {

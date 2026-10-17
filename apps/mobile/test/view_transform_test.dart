@@ -51,6 +51,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide Key;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// The pane the viewer is pumped at for the view cases.
 ///
 /// It is the size `ink_mode_test.dart` already uses for the interaction cases, so the page mode, the
@@ -76,7 +78,7 @@ Song viewChart() => Song(
             Bar(
               chords: <ChordMark>[
                 ChordMark(
-                  place: cellAt(0),
+                  place: placeAt(0),
                   chord: Chord(
                     root: ChordRoot(index),
                     quality: ChordQuality.majorSeventh,
@@ -117,7 +119,7 @@ Song longViewChart(int bars) => Song(
           Bar(
             chords: <ChordMark>[
               ChordMark(
-                place: cellAt(0),
+                place: placeAt(0),
                 chord: Chord(
                   root: ChordRoot(index % 12),
                   quality: ChordQuality.majorSeventh,
@@ -479,10 +481,10 @@ void main() {
       LayoutOffset(pageCentreOf(plain).dx, pageCentreOf(plain).dy),
     )!;
     final PlacedBar bar = aimed.bar;
-    final PlacedCell cell = aimed.cell!;
+    final LayoutRect cell = bar.bounds;
     final Offset target = pageCentreOf(plain);
     // REWRITTEN. This offset used to be measured from the CELL's corner —
-    //   Offset(target.dx - cell.bounds.left, target.dy - cell.bounds.top)
+    //   Offset(target.dx - cell.left, target.dy - cell.top)
     // — because a stroke was anchored to the column it was drawn in. A stroke is anchored to its BAR
     // now, so the origin every stored point is measured from is the bar's corner, and the pen's own
     // position in the music is that much further along. `cell` is still read above, by the hit test
@@ -541,7 +543,7 @@ void main() {
       );
       expect(stroke.anchor.bar, bar.barIndex);
       // REWRITTEN. The old assertion was
-      //   expect(stroke.anchor.beat, cell.beat,
+      //   expect(stroke.anchor.beat, cell.left,
       //       reason: 'the stroke began inside the cell, so it is anchored to it');
       // and it pinned the CELL a stroke was anchored to. An anchor names the bar now — the position
       // inside the bar is in the stroke's own points — so the same fact is checked as the one that
@@ -565,7 +567,7 @@ void main() {
       expect(stored.dy, closeTo(fromCorner.dy, 1e-6));
       stdout.writeln(
         'view.test.pen ${viewOf(page)} '
-        'aimed=${bar.sectionId}#${bar.barIndex} beat=${cell.beat} '
+        'aimed=${bar.sectionId}#${bar.barIndex} beat=${cell.left} '
         'anchor=${stroke.anchor} '
         'surface=(${surface.dx.toStringAsFixed(2)},'
         '${surface.dy.toStringAsFixed(2)}) '
@@ -604,17 +606,17 @@ void main() {
       expect(hit, isNotNull, reason: 'a tap on a cell must select');
       expect(hit!.sectionId, aimed.bar.sectionId);
       expect(hit.barIndex, aimed.bar.barIndex);
-      expect(hit.beat, aimed.beat);
-      named ??= '${hit.sectionId}#${hit.barIndex} beat=${hit.beat}';
+      expect(hit.local.x, aimed.local.x);
+      named ??= '${hit.sectionId}#${hit.barIndex} beat=${hit.local.x}';
       expect(
-        '${hit.sectionId}#${hit.barIndex} beat=${hit.beat}',
+        '${hit.sectionId}#${hit.barIndex} beat=${hit.local.x}',
         named,
         reason: 'the same surface aim must name the same cell at every zoom',
       );
       stdout.writeln(
         'view.test.hit ${viewOf(page)} '
-        'aimed=${aimed.bar.sectionId}#${aimed.bar.barIndex} beat=${aimed.beat} '
-        'named=${hit.sectionId}#${hit.barIndex} beat=${hit.beat}',
+        'aimed=${aimed.bar.sectionId}#${aimed.bar.barIndex} x=${aimed.local.x} '
+        'named=${hit.sectionId}#${hit.barIndex} beat=${hit.local.x}',
       );
     }
   });

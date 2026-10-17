@@ -37,6 +37,8 @@ import 'package:flutter/rendering.dart' hide Key;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/place_fixture.dart';
+
 /// Where the PNGs are written. Outside the repository: an image is evidence for one inspection, not
 /// an artefact to commit.
 const String inputSurfaceDirectory =
@@ -83,7 +85,7 @@ Song _surfaceChart() => Song(
         Bar(
           melody: <NoteMark>[
             NoteMark(
-              place: cellAt(0),
+              place: placeAt(0),
               pitch: const PitchedNote(
                 note: WrittenNote(NoteLetter.g, 0),
                 octave: 4,
@@ -160,7 +162,7 @@ List<String> _chords(Song song, int barIndex) => <String>[
 /// literals inside a list and this line is longer than one.
 String _readableChord(Song song, ChordMark placed) {
   final String text = placed.chord.render(song.key, const SpellingTable());
-  return '${placed.pseudoBeat}.${placed.pseudoStep}:$text';
+  return '${placed.offsetX.toStringAsFixed(1)}:$text';
 }
 
 /// The key of the [RepaintBoundary] the harness wraps itself in, which is what a capture reads:
@@ -201,7 +203,10 @@ class _SurfaceHarnessState extends State<_SurfaceHarness> {
               session: widget.session,
               sectionId: _sectionId,
               barIndex: 0,
-              beat: 0,
+              // THE PLACE, not a cell: the palette writes where the musician pointed, so a probe
+              // that pumps it inline names an x and a height on the chord line.
+              offsetX: fixtureX(0),
+              offsetY: 0,
               shownKey: Key.cMajor,
               onChanged: () => setState(() => _rebuilds++),
             )

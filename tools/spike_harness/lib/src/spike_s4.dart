@@ -44,7 +44,10 @@ Song buildBenchmarkSong() {
         Bar(
           chords: <ChordMark>[
             ChordMark(
-              place: cellAt(index % 4),
+              place: AnchoredPlace(
+                anchor: const EventAnchor(sectionId: '', bar: 0),
+                offsetX: 8 + (index % 4) * 18,
+              ),
               chord: Chord(
                 root: ChordRoot((index + section * 3) % 12),
                 quality: index.isEven
