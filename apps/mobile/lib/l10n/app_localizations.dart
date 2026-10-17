@@ -278,10 +278,10 @@ abstract class AppLocalizations {
   /// **'Create'**
   String get create;
 
-  /// The pen toggle's tooltip while drawing is on.
+  /// The pen toggle's tooltip while drawing is on. The sentence used to say 'a finger still selects', and the application's own log shows that a finger DRAWS with ink on (`ink.contact.down ... ink reason=width-not-reported kind=finger`): the tooltip was describing a rule that the ink layer had already replaced. The owner's report — 'it only draws, with the stylus and with the finger' — is that discrepancy seen from the glass.
   ///
   /// In en, this message translates to:
-  /// **'Drawing: the pen draws, a finger still selects'**
+  /// **'Drawing: the pen and a finger both write, and two fingers move the sheet'**
   String get tooltipInkOn;
 
   /// The pen toggle's tooltip while drawing is off and the eraser is on.
@@ -290,10 +290,10 @@ abstract class AppLocalizations {
   /// **'Pen off: the eraser is on'**
   String get tooltipInkOffEraserOn;
 
-  /// The pen toggle's tooltip while drawing is off.
+  /// The pen toggle's tooltip while drawing is off — i.e. the button that puts the SELECT tool in force. It names both the tap and the drag because that is the whole of what the tool does.
   ///
   /// In en, this message translates to:
-  /// **'Selecting: the pen and a finger both select'**
+  /// **'Selecting: a tap selects a bar, a drag moves the sheet'**
   String get tooltipInkOff;
 
   /// The eraser toggle's tooltip while erasing is on.
@@ -380,35 +380,41 @@ abstract class AppLocalizations {
   /// **'Settings'**
   String get menuSettings;
 
-  /// The overflow menu row that turns barline recognition OFF; the label states the state in force, so a switched-off feature cannot be discovered only by its absence.
+  /// The overflow menu row that turns RECOGNITION off. It names recognition AS A WHOLE and not bar lines, because the owner said the switch governs everything the application recognises and that bar lines are only the first thing that does: a control whose name is narrower than its meaning is how a musician turns on the wrong thing. The label states the state in force, so a switched-off feature cannot be discovered only by its absence.
   ///
   /// In en, this message translates to:
-  /// **'Recognise my barlines: ON'**
+  /// **'Recognition: ON'**
   String get menuRecognitionOn;
 
-  /// The overflow menu row that turns barline recognition ON; the label states the state in force.
+  /// The overflow menu row that turns RECOGNITION on — recognition as a whole, not bar lines alone. The label states the state in force.
   ///
   /// In en, this message translates to:
-  /// **'Recognise my barlines: OFF'**
+  /// **'Recognition: OFF'**
   String get menuRecognitionOff;
 
-  /// The recognition toggle's tooltip while recognition is on.
+  /// The recognition toggle's tooltip while recognition is on. It says 'what it recognises' rather than naming a bar line, so the same switch keeps its meaning when notes and chords are recognised too.
   ///
   /// In en, this message translates to:
-  /// **'Recognition is on: a barline you draw is drawn as an ideal line'**
+  /// **'Recognition is on: what it recognises is drawn in place of your handwriting'**
   String get tooltipRecognitionOn;
 
-  /// The recognition toggle's tooltip while recognition is off, which is the state every chart starts in.
+  /// The recognition toggle's tooltip while recognition is off, which is the state every chart starts in and the state in which nothing but ink is drawn.
   ///
   /// In en, this message translates to:
   /// **'Recognition is off: your handwriting is drawn exactly as you wrote it'**
   String get tooltipRecognitionOff;
 
-  /// The selection line before anything is selected.
+  /// The selection line before anything is selected, while the Select tool is in force. It names BOTH things the tool does, because the owner reported that he could not find selection at all and a prompt that named only the tap would leave the drag to be discovered.
   ///
   /// In en, this message translates to:
-  /// **'Tap a bar to select it.'**
+  /// **'Tap a bar to select it. A drag moves the sheet.'**
   String get selectionPrompt;
+
+  /// The selection line while the pen is the active tool and nothing is selected. It says in words what the tool the musician just pressed will do with his next contact, which is what the eraser has always been given (eraserActiveHint) and what the pen was never given — the owner wrote that the interface 'only draws, with the stylus and with the finger' and could not tell how to select.
+  ///
+  /// In en, this message translates to:
+  /// **'Drawing is on: a touch writes. Two fingers move the sheet and a pinch zooms. To choose bars, press Select.'**
+  String get penActiveHint;
 
   /// The selection line when the touch landed on a bar and not on a cell.
   ///

@@ -61,6 +61,8 @@ export 'src/editing/selection.dart';
 export 'src/identity/chart_identity.dart';
 export 'src/ink/barline_detector.dart';
 export 'src/ink/ink_hit.dart';
+export 'src/ink/melody_note_reader.dart';
+export 'src/ink/melody_note_writer.dart';
 export 'src/ink/page_anchor.dart';
 export 'src/ink/palm_rule.dart';
 export 'src/ireal/chord_parser.dart';

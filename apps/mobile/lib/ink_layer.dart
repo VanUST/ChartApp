@@ -907,12 +907,20 @@ class InkCaptureLayer {
   /// kind=stylus width=0.0` — and this is the token that fires when a palm lands while he writes.
   static const String viewRefusalInkContactOpen = 'ink-contact-open';
 
-  /// Stable token: a contact was refused the view gesture because a stylus is inside its window.
+  /// Stable token: the reason a contact was refused the view gesture BECAUSE A PEN WAS RECENTLY SEEN.
   ///
-  /// It names the weaker form, which covers the gaps a hand makes while writing: a palm that lands
-  /// between two pen strokes sees no open stroke and no pen on the glass, and is refused because the
-  /// pen was seen — as a contact or as a hover — a moment ago. It is only consulted while the ink
-  /// mode is on; see [refuseViewGestureTouch].
+  /// **KEPT AS A NAME AND NO LONGER PRODUCED, and the correction it records is the point of keeping
+  /// it.** Until the tablet run that froze the owner's document, [refuseViewGestureTouch] answered
+  /// this token for every touch that arrived while [stylusInPlay] was true — that is, for one second
+  /// after any pen contact OR pen hover, whenever the ink mode was on. On his tablet the pen is in
+  /// his hand for the whole session, so the window was effectively always open and the two-finger pan
+  /// of owner decision D34 was refused for the entire session: a gate that never opens is a document
+  /// that cannot be moved, and that is exactly what he reported. The window was written to catch a
+  /// palm landing between two strokes; a palm is ONE contact, and D34's gesture needs TWO, so the
+  /// refusal was buying protection it could not deliver while costing the only pan there was.
+  ///
+  /// Nothing produces this token now; a stored record that carries it was written by a build before
+  /// this correction, which is why the name stays rather than being deleted.
   static const String viewRefusalStylusInPlay = 'stylus-in-play';
 
   /// Stable token: a contact of a kind that is not a touch was offered to the view gesture.
@@ -946,22 +954,31 @@ class InkCaptureLayer {
   //          the one the pen and the eraser are routed by.
   // INPUTS: kind — the engine's pointer kind. width — the contact width in logical pixels, as the
   //         framework reports it. time — the contact's own timestamp, in the same base the strokes
-  //         use, because the stylus window is measured in that base.
+  //         use. It is carried for the width arbitration and for the refusal record; it no longer
+  //         gates anything, see below.
   // OUTPUTS: Null when the contact may join the gesture, otherwise a stable reason token: the palm
-  //          rule's own [InkPalmRule.reasonPalmLikeWidth], [viewRefusalInkContactOpen],
-  //          [viewRefusalStylusInPlay] or [viewRefusalNotATouch].
+  //          rule's own [InkPalmRule.reasonPalmLikeWidth], [viewRefusalInkContactOpen] or
+  //          [viewRefusalNotATouch].
   //
   //          THE ORDER OF THE TESTS IS THE ORDER OF THE REASONS, and the palm first: a palm that
   //          lands while a pen is writing is refused FOR BEING A PALM, which is the fact the musician
   //          can act on, rather than as a side effect of the pen being down.
   //
-  //          WHAT "A PEN IS IN PLAY" MEANS HERE, AND WHAT IT CANNOT MEAN. Two facts about a pen are
-  //          observable in this application, and this rule uses both: the pen is a contact whose KIND
-  //          the platform calls a stylus, and the pen is something that was SEEN recently — a hover or
-  //          a contact, either of which sets the same window the palm rule already reads. The first
-  //          is the strongest and is asked first, because a pen that is on the glass drawing is a pen
-  //          in play by any reading. The second covers the gaps a hand makes while writing: a palm
-  //          that lands between two strokes sees no open contact, and is refused on the window.
+  //          WHAT "A PEN IS IN PLAY" MEANS HERE, AND WHY THE WEAKER HALF OF IT WAS REMOVED. A pen is
+  //          observable in this application in two strengths: it is a contact whose KIND the platform
+  //          calls a stylus and it is on the glass right now — the strongest — or it was SEEN within
+  //          the last second, as a contact or as a hover. The first is still a refusal. **The second
+  //          is not, and its removal is a measured correction rather than a preference.** The rule
+  //          used to refuse every touch that arrived inside that one-second window while the ink mode
+  //          was on, on the theory that a palm landing between two pen strokes would be caught by it.
+  //          The owner's own report is what falsified it: he holds the pen for the whole session, so
+  //          the window is effectively always open on his tablet, and the two-finger pan that owner
+  //          decision D34 gave him was refused for the whole session — a gate that never opens is a
+  //          document that cannot be moved. A palm is ONE contact and this gesture needs TWO, so the
+  //          window was paying for the only pan he had with protection it could not actually deliver.
+  //          The pen-on-the-glass test below still covers the case A64 reported, because a hand
+  //          resting on the glass does so WHILE the pen is writing, and while the pen is writing
+  //          there is an open stylus contact.
   //
   //          The rule deliberately does NOT refuse merely because SOME stroke is open, and the
   //          first version of it did. With the ink mode on, a touch draws (A61's decision for this
@@ -971,19 +988,21 @@ class InkCaptureLayer {
   //          test caught it. A STYLUS contact is different in kind, not in degree: the recogniser
   //          never counts a stylus, so refusing on it can never forbid the gesture to its own finger.
   //
-  //          WHAT REMAINS UNPROTECTED, AND WHY IT IS NAMED RATHER THAN HIDDEN. On a platform whose
+  //          WHAT REMAINS UNPROTECTED, AND WHY IT IS NAMED RATHER THAN HIDDEN. (a) A palm that rests
+  //          on the glass while the pen is LIFTED is no longer refused by the proximity window, so a
+  //          palm the panel reports as two contacts can now pan the page. It moves the view and
+  //          nothing else, and the scene bar's reset returns it. That is the price of the removal,
+  //          and it was paid because the alternative was a frozen document. (b) On a platform whose
   //          stylus fusion reports the pen's contacts as touches AND reports no contact width, none
-  //          of these three signals separates a pen from a finger: the pen sets no window, opens a
-  //          stroke that looks like a finger's, and the palm's width arrives as zero. That is the
-  //          same limitation `docs/sdd.md` A61 recorded, and it is not something this rule can close
-  //          from here. On the owner's own tablet it is not the situation: his pen arrives as a
-  //          stylus and is refused by the first two tests below.
+  //          of these signals separates a pen from a finger: the pen opens no stylus contact and the
+  //          palm's width arrives as zero. That is the same limitation `docs/sdd.md` A61 recorded,
+  //          and it is not something this rule can close from here.
   //
   //          THE WIDTH IS ARBITRATED BY THE SAME FUNCTION THE INK RULE USES, framework value first
   //          and the raw browser's only when the framework reported none, so the pixels a palm is
   //          judged by here are the pixels it is judged by there.
-  // KEYWORDS: view-gesture-admission, palm-rule-reuse, pen-in-play, stylus-contact, proximity-window,
-  //           single-authority, instrumented-refusal, measured-limit
+  // KEYWORDS: view-gesture-admission, palm-rule-reuse, pen-on-glass, stylus-contact, window-removed,
+  //           single-authority, instrumented-refusal, measured-limit, d34
   /// Returns the reason [kind]/[width] may not join the view gesture, or null when it may.
   String? refuseViewGestureTouch({
     required PointerDeviceKind kind,
@@ -1005,10 +1024,6 @@ class InkCaptureLayer {
     if (_openStylusPointers.isNotEmpty) {
       _viewGestureRefused++;
       return viewRefusalInkContactOpen;
-    }
-    if (_mode != InkMode.off && stylusInPlay(time)) {
-      _viewGestureRefused++;
-      return viewRefusalStylusInPlay;
     }
     return null;
   }
@@ -1213,7 +1228,7 @@ class InkCaptureLayer {
       return _lastRecognised;
     }
     final List<PlacedInkStroke> placed = placeInkStrokes(page, strokes);
-    final Map<String, LayoutRect> rows = barRowsOfPage(page);
+    final Map<String, BarlineFrame> frames = barlineFramesOfPage(page);
     List<PlacedBarlineCandidate> found = const <PlacedBarlineCandidate>[];
     for (final PlacedInkStroke one in placed) {
       if (onlyStrokeId != null && one.stroke.id != onlyStrokeId) {
@@ -1222,7 +1237,7 @@ class InkCaptureLayer {
       final BarlineVerdict verdict = measureBarlineStroke(
         stroke: one,
         strokes: placed,
-        barRows: rows,
+        barFrames: frames,
       );
       final BarlineCandidate? candidate = verdict.candidate;
       if (candidate == null) {
@@ -1234,16 +1249,15 @@ class InkCaptureLayer {
       }
       debugPrint(
         'barline.found id=${one.stroke.id} '
+        'band=${verdict.measurement.band?.kind.token ?? 'none'} '
         'x=${candidate.centreX.toStringAsFixed(1)} '
-        'h=${candidate.height.toStringAsFixed(1)} ${verdict.measurement}',
+        'ink_height=${verdict.measurement.height.toStringAsFixed(1)} '
+        'line_height=${candidate.height.toStringAsFixed(1)} '
+        '${verdict.measurement}',
       );
       found = <PlacedBarlineCandidate>[
         ...found,
-        PlacedBarlineCandidate(
-          candidate: candidate,
-          row:
-              rows['${one.stroke.anchor.sectionId}\u0000${one.stroke.anchor.bar}']!,
-        ),
+        PlacedBarlineCandidate(candidate: candidate, origin: one.origin),
       ];
     }
     if (found.isEmpty) {

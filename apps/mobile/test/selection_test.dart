@@ -160,7 +160,16 @@ void main() {
     await tapEngraved(tester, Offset(page.bars.first.bounds.left + 5, gapY));
 
     expect(shownPainter(tester).selection, isNull);
-    expect(find.text('Tap a bar to select it.'), findsOneWidget);
+    // WAS: expect(find.text('Tap a bar to select it.'), findsOneWidget);
+    // CHANGED BECAUSE THE SENTENCE CHANGED, NOT THE BEHAVIOUR. The line now names BOTH things the
+    // Select tool does, because the owner reported that he could not find selection at all: with the
+    // pen tool in force this same line promised "tap a bar to select it" while a touch drew, so the
+    // one sentence a musician reads was describing a tool that was not the one under his hand. What
+    // this test pins — a miss between two systems clears the selection — is untouched.
+    expect(
+      find.text('Tap a bar to select it. A drag moves the sheet.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('PAGES selects on a page whose scale is 1', (

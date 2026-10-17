@@ -222,6 +222,33 @@ class TwoFingerViewGestureRecognizer extends ScaleGestureRecognizer {
     super.dispose();
   }
 
+  // PURPOSE: Refuse to win the gesture arena on ONE touch, whatever the base class's scale machinery
+  //          decides, so that a single contact is left to the tap and to the one-contact pan.
+  // INPUTS: disposition — what the base class is about to tell the arena.
+  // OUTPUTS: Nothing. An `accepted` disposition is dropped while fewer than two touches are counted;
+  //          every other disposition is passed through unchanged.
+  //
+  //          WHY THIS OVERRIDE EXISTS, AND IT IS A DEFECT FOUND BY A TEST THAT OWED NOTHING TO THE
+  //          OLD CODE. `ScaleGestureRecognizer` accepts a drag of its own once its slop is crossed,
+  //          and it counts pointers the framework gave it rather than the touches this class
+  //          admitted. In a pumped test the base class declared itself the ARENA WINNER on the very
+  //          first `PointerDownEvent` — the arena log printed `Accepting:
+  //          TwoFingerViewGestureRecognizer` on a single touch — which rejected the page's
+  //          `TapGestureRecognizer` and the one-contact pan before either could look at the pointer.
+  //          The symptom was not a wrong picture but an unreachable gesture: the page's tap and the
+  //          Select tool's pan both stopped arriving, and nothing in the old tests could see it
+  //          because they only ever asserted what the two-finger gesture EMITS, never what it takes
+  //          away. It is dropped here rather than by not calling `super`, because the base class's
+  //          own bookkeeping (velocity, pointer queue) must still happen.
+  // KEYWORDS: gesture-arena, single-touch-refusal, tap-preserved, pan-preserved, base-class-guard
+  @override
+  void resolve(GestureDisposition disposition) {
+    if (disposition == GestureDisposition.accepted && _touches.length < 2) {
+      return;
+    }
+    super.resolve(disposition);
+  }
+
   /// Emits the start sample once, when the second touch has been counted.
   void _emitStartIfNeeded() {
     if (_started) {

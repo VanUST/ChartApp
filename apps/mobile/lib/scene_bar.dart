@@ -131,7 +131,6 @@ class SceneBar extends StatelessWidget {
     this.compact = false,
     this.zoom = 1,
     this.zoomLocked = false,
-    this.onToggleZoomLock,
     this.onZoomIn,
     this.onZoomOut,
     this.onZoomReset,
@@ -180,19 +179,11 @@ class SceneBar extends StatelessWidget {
 
   /// Whether the scale is FIXED, which greys the two step controls and the reset.
   ///
-  /// The lock itself is the caller's state; this bar only reports it and stops answering for what it
-  /// covers. A control that is refused without saying so is the defect the whole application avoids —
-  /// the three buttons stay exactly where they are and stop answering, which is what a fixed scale
-  /// means when it is drawn.
+  /// The lock itself is the caller's state and its BUTTON lives in the shell's always-visible bars;
+  /// this bar only reports the state and stops answering for what it covers. A control that is
+  /// refused without saying so is the defect the whole application avoids — the three buttons stay
+  /// exactly where they are and stop answering, which is what a fixed scale means when it is drawn.
   final bool zoomLocked;
-
-  /// Called to fix the scale or release it, or null on a bar that draws no zoom control.
-  ///
-  /// The lock stands beside the scale it locks, because that is where a musician looks when he wants
-  /// the number to stop moving. It is ALSO drawn in the always-visible bars of the shell: the scene
-  /// bar is what the chrome hides, and a lock whose state is only visible while everything else is
-  /// visible is a lock he cannot tell is on.
-  final VoidCallback? onToggleZoomLock;
 
   /// Called to magnify the chart one step, or null on a bar that draws no zoom control.
   ///
@@ -274,7 +265,6 @@ class SceneBar extends StatelessWidget {
       _ZoomControl(
         zoom: zoom,
         locked: zoomLocked,
-        onToggleLock: onToggleZoomLock,
         onZoomIn: onZoomIn,
         onZoomOut: onZoomOut,
         onReset: onZoomReset!,
@@ -324,7 +314,6 @@ class SceneBar extends StatelessWidget {
       _ZoomControl(
         zoom: zoom,
         locked: zoomLocked,
-        onToggleLock: onToggleZoomLock,
         onZoomIn: onZoomIn,
         onZoomOut: onZoomOut,
         onReset: onZoomReset!,
@@ -671,7 +660,6 @@ class _ZoomControl extends StatelessWidget {
     required this.onReset,
     required this.l10n,
     this.locked = false,
-    this.onToggleLock,
     this.compact = false,
   });
 
@@ -680,9 +668,6 @@ class _ZoomControl extends StatelessWidget {
 
   /// Whether the scale is fixed, which greys this control's three buttons.
   final bool locked;
-
-  /// Called to fix the scale or release it, or null when this bar draws no lock.
-  final VoidCallback? onToggleLock;
 
   /// Called by the `+` half, or null when the bar was built without one.
   final VoidCallback? onZoomIn;
@@ -728,9 +713,17 @@ class _ZoomControl extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           // THE THREE BUTTONS STOP ANSWERING, THEY DO NOT DISAPPEAR. A fixed scale is a state in
-          // which these three cannot do anything; a control that vanished would move the lock, which
-          // stands next to them, and a musician's hand would learn a bar whose shape changes with a
+          // which these three cannot do anything; a control that vanished would move the zoom
+          // control's own shape, and a musician's hand would learn a bar whose shape changes with a
           // mode. Greyed and in place, they say "the scale is fixed" without a word.
+          //
+          // AND THE PADLOCK IS NOT HERE, WHICH IS A REMOVAL AND NOT AN OMISSION. It stood at the end
+          // of this row as well as in the shell's always-visible bar, and the owner reported the
+          // symptom in one sentence: "Юай имеет дубликаты элементов сверху". Two padlocks for one
+          // state, both on screen at once, both toggling the same flag. The shell's copy is the one
+          // that survives: it is present in BOTH chrome states, while this bar is the very thing the
+          // chrome hides — so the padlock that stays is the one a musician can always reach, and the
+          // one that goes is the second copy of it.
           _ZoomButton(
             fieldKey: 'scene-bar-zoom-out',
             glyph: '−',
@@ -752,19 +745,6 @@ class _ZoomControl extends StatelessWidget {
             onTap: locked ? null : onZoomIn,
             compact: compact,
           ),
-          // THE LOCK ITSELF, beside the number it fixes. Its own colour carries the state: accent for
-          // fixed, the bar's ordinary ink for free.
-          if (onToggleLock != null)
-            _ZoomButton(
-              fieldKey: 'scene-bar-zoom-lock',
-              glyph: locked ? '🔒' : '🔓',
-              tooltip: locked
-                  ? l10n.tooltipViewLockOn
-                  : l10n.tooltipViewLockOff,
-              onTap: onToggleLock,
-              compact: compact,
-              selected: locked,
-            ),
         ],
       ),
     ],
@@ -780,7 +760,6 @@ class _ZoomButton extends StatelessWidget {
     required this.tooltip,
     required this.onTap,
     required this.compact,
-    this.selected = false,
   });
 
   /// The widget key the tests and the driving harness find this button by.
@@ -798,12 +777,6 @@ class _ZoomButton extends StatelessWidget {
   /// Whether this button is drawn at the narrow form's smaller size.
   final bool compact;
 
-  /// Whether this button shows a state rather than only an action.
-  ///
-  /// True for the lock while the view is fixed: the accent fill is the same signal the page-mode
-  /// toggle uses for its active half, so "this is on" looks the same wherever it is drawn.
-  final bool selected;
-
   @override
   Widget build(BuildContext context) => Tooltip(
     message: tooltip,
@@ -817,20 +790,15 @@ class _ZoomButton extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          color: selected ? sceneBarAccent : null,
           border: Border.all(
-            color: selected
-                ? sceneBarAccent
-                : (onTap == null ? sceneBarCaptionColor : sceneBarAccent),
+            color: onTap == null ? sceneBarCaptionColor : sceneBarAccent,
             width: 1.5,
           ),
         ),
         child: Text(
           glyph,
           style: TextStyle(
-            color: selected
-                ? sceneBarColor
-                : (onTap == null ? sceneBarCaptionColor : sceneBarTextColor),
+            color: onTap == null ? sceneBarCaptionColor : sceneBarTextColor,
             fontSize: compact ? 13 : 16,
             fontWeight: FontWeight.w700,
           ),

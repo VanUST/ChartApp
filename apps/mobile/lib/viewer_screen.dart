@@ -166,6 +166,7 @@ import 'key_grid.dart';
 import 'l10n/app_localizations.dart';
 import 'new_chart_dialog.dart';
 import 'note_palette_sheet.dart';
+import 'pan_gesture.dart';
 import 'scene_bar.dart';
 import 'setlist_import.dart';
 import 'setlist_resolution.dart';
@@ -531,6 +532,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// be the same fact read from two objects. The layer is told once per transition.
   bool _viewGestureActive = false;
 
+  /// The pan the one-contact pan gesture began at, in pane pixels, or null when none is running.
+  ///
+  /// The START value rather than the previous frame's, because every update is then a function of
+  /// the whole gesture: a moved page whose pan the clamp has already eaten cannot make the next
+  /// update drift, and the log can state the total travel of the gesture rather than a sum of
+  /// per-frame numbers that nobody can check.
+  LayoutOffset? _panFrom;
+
+  /// How far the admitted pan has travelled in total, and how many samples it took.
+  ///
+  /// Reported once at the end of the gesture, because a line per move would be the flood A64's palm
+  /// rule was written to avoid and because the number a report needs is the total, not the samples.
+  LayoutOffset _panTravel = LayoutOffset.zero;
+  int _panMoves = 0;
+
   /// The engraving the last build produced, and the inputs it was produced from.
   ///
   /// WHY A CACHE IS NOW NEEDED, IN A30's OWN WORDS. A30 recorded the cost and predicted this: the
@@ -639,6 +655,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          layer exists, and while the pen is the active tool.
   // KEYWORDS: eraser-mode, app-bar-state, default-off, null-when-empty, exclusive-with-pen
   bool get _eraserOn => _selectedInkLayer?.eraserMode ?? false;
+
+  // PURPOSE: Report whether the SELECT tool is in force — the mode in which a contact neither writes
+  //          nor erases but NAMES something, and in which a drag may therefore move the sheet.
+  // INPUTS: None; reads the two tool modes of the layer of the selected song.
+  // OUTPUTS: True when neither the pen nor the eraser is on. A build with no layer answers true,
+  //          which is harmless: nothing can be panned before a page exists, and [_refusePan] says so
+  //          by name rather than by a silent false.
+  //
+  //          WHY THIS IS A TOOL AND NOT AN ABSENCE. The ink layer's third mode is called `off` in the
+  //          model because in the model it is the absence of a writing tool; to a musician it is the
+  //          tool that SELECTS, and the mode is reached by a named button and named in the selection
+  //          line. [refusePan] hangs the one-contact pan on exactly this mode, because with the pen
+  //          on a single contact is a stroke (A61) and a drag cannot mean two things at once.
+  // KEYWORDS: select-tool, ink-mode-off, pan-owner, one-tool-at-a-time, d34-compatible
+  bool get _selectTool => !_inkOn && !_eraserOn;
 
   /// Whether recognition is switched on for the chart on screen.
   ///
@@ -1378,6 +1409,120 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       'pan=(${_viewPan.x.toStringAsFixed(1)},${_viewPan.y.toStringAsFixed(1)})'
       '${wasRefused ? ' refused=view_locked' : ''}',
     );
+  }
+
+  // PURPOSE: Answer whether ONE contact may pan the sheet right now, and name the reason when it may
+  //          not — so that "the document did not move" is attributable in the log instead of being a
+  //          silence the reader has to interpret.
+  // INPUTS: None; reads the tool in force, the view lock, the magnification drawn and the pane.
+  // OUTPUTS: Null when a pan may start, otherwise one of three stable tokens:
+  //          `tool-writes` (the pen or the eraser is on, so a drag is a stroke or an erasure),
+  //          `view-locked` (the musician fixed the scale and asked nothing to move it), or
+  //          `nothing-to-pan` (the drawn page already fills the pane, so every pan would be clamped
+  //          to zero — and the drag is left to the pager, which is what keeps page turning alive).
+  //
+  //          `nothing-to-pan` IS A REAL ANSWER AND NOT A FAILURE. `PageLayout.withView` clamps the
+  //          pan to `[viewport - content, 0]`, which is zero at zoom 1: a pan admitted here would
+  //          move nothing while taking the gesture away from the page turn. Owner decision D33 gives
+  //          the musician a zoom for exactly this reason, and the two zoom controls stand in the
+  //          scene bar beside the number this method reads.
+  // KEYWORDS: pan-admission, refusal-token, tool-gate, view-lock, nothing-to-pan, page-turn-kept
+  String? _refusePan() {
+    if (!_selectTool) {
+      return 'tool-writes';
+    }
+    if (_viewLocked) {
+      return 'view-locked';
+    }
+    final PageLayout? drawn = _lastDrawnPage;
+    if (drawn == null) {
+      return 'nothing-to-pan';
+    }
+    // The page is drawn at `scale * zoom`, and the surface it was engraved for is `size * scale`.
+    // Anything at zoom 1 therefore has no slack on either axis.
+    if (drawn.zoom <= 1) {
+      return 'nothing-to-pan';
+    }
+    return null;
+  }
+
+  // PURPOSE: Begin a one-contact pan, recording the view it started from so every update is measured
+  //          from the same place.
+  // INPUTS: None.
+  // OUTPUTS: Nothing. The reference is kept and the start is logged with the view it began at.
+  // KEYWORDS: pan-start, gesture-anchor, view-state, d34-compatible
+  void _onPagePanStart() {
+    _panFrom = _viewPan;
+    _panTravel = LayoutOffset.zero;
+    _panMoves = 0;
+    debugPrint(
+      'viewer.pan.start tool=select zoom=${_viewZoom.toStringAsFixed(3)} '
+      'pan=(${_viewPan.x.toStringAsFixed(1)},${_viewPan.y.toStringAsFixed(1)}) '
+      'pane=(${_lastPageSurface.width.toStringAsFixed(1)},'
+      '${_lastPageSurface.height.toStringAsFixed(1)})',
+    );
+  }
+
+  // PURPOSE: Move the sheet by one sample of the admitted pan.
+  // INPUTS: delta — how far the contact travelled since the previous sample, in pane pixels.
+  // OUTPUTS: Nothing; the view is set from the pan the gesture STARTED at plus the travel so far, so
+  //          the arithmetic cannot drift and the clamp cannot accumulate an error. A paused or
+  //          clamped page simply stops; the gesture keeps its reference.
+  // KEYWORDS: pan-update, clamp-safe, no-drift, view-set, measured-travel
+  void _onPagePanUpdate(Offset delta) {
+    final LayoutOffset from = _panFrom ?? _viewPan;
+    _panMoves++;
+    _panTravel = LayoutOffset(_panTravel.x + delta.dx, _panTravel.y + delta.dy);
+    _setView(
+      zoom: _viewZoom,
+      pan: LayoutOffset(from.x + _panTravel.x, from.y + _panTravel.y),
+    );
+  }
+
+  // PURPOSE: End the one-contact pan and report what it did, so the sheet's movement is a number in
+  //          the log rather than an impression from a screenshot.
+  // INPUTS: None.
+  // OUTPUTS: Nothing. The start reference is dropped; the end is logged with the pan it began at, the
+  //          pan it ended at, the total travel and the number of samples, which is what makes "the
+  //          document moves" checkable by anyone reading the log.
+  // KEYWORDS: pan-end, measured-travel, structured-log, view-state
+  void _onPagePanEnd() {
+    final LayoutOffset? from = _panFrom;
+    _panFrom = null;
+    debugPrint(
+      'viewer.pan.end moves=$_panMoves '
+      'dx=${_panTravel.x.toStringAsFixed(1)} dy=${_panTravel.y.toStringAsFixed(1)} '
+      'from=(${from?.x.toStringAsFixed(1) ?? '0.0'},'
+      '${from?.y.toStringAsFixed(1) ?? '0.0'}) '
+      'to=(${_viewPan.x.toStringAsFixed(1)},${_viewPan.y.toStringAsFixed(1)})',
+    );
+  }
+
+  // PURPOSE: Report a drag that was refused a pan, once per contact, so that a musician's drag which
+  //          produced neither ink nor movement has a line saying which rule stopped it.
+  // INPUTS: reason — the stable token [_refusePan] returned.
+  // OUTPUTS: Nothing. One line per declined drag, never per move: a declined drag continues to send
+  //          moves, and only the first decision is reported.
+  // KEYWORDS: pan-refused, instrumented-decision, cheap-once, attributable-inaction
+  void _onPagePanRefused(String reason) {
+    debugPrint(
+      'viewer.pan.refused reason=$reason tool=$_toolToken '
+      'zoom=${_viewZoom.toStringAsFixed(3)} locked=$_viewLocked',
+    );
+  }
+
+  /// The tool in force, as one stable token for a log line.
+  ///
+  /// Written from the same three getters the buttons read, so the log cannot disagree with the bar
+  /// about which tool a press of the pen or the eraser left in force.
+  String get _toolToken {
+    if (_inkOn) {
+      return 'pen';
+    }
+    if (_eraserOn) {
+      return 'eraser';
+    }
+    return 'select';
   }
 
   /// Whether the verification state was changed while the pen was down and is owed a publication.
@@ -2248,7 +2393,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       // state the mode in words, because a toggle whose only signal is a colour is not discoverable.
       IconButton(
         key: const ValueKey<String>('viewer-ink-toggle'),
-        icon: Icon(_inkOn ? Icons.draw : Icons.edit_outlined),
+        // THE GLYPH IS THE MODE, AND THE OFF STATE USED TO LOOK LIKE THE ON ONE. It was a pencil
+        // outline when the pen was off and a pencil when it was on: two nearly identical pictures for
+        // the two states of the one control that decides whether a contact writes, about which the
+        // owner reported "I never understood how to select — it only draws". A selection frame reads
+        // as "choose something" in every application that has ever had one, and it cannot be mistaken
+        // for the pen beside it.
+        icon: Icon(_inkOn ? Icons.draw : Icons.highlight_alt),
         isSelected: _inkOn,
         tooltip: _inkOn
             ? l10n.tooltipInkOn
@@ -2421,7 +2572,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       // the glyph to be guessed — the same rule the pen and the eraser follow here.
       IconButton(
         key: const ValueKey<String>('viewer-recognition-toggle'),
-        icon: Icon(_recognitionOn ? Icons.border_vertical : Icons.linear_scale),
+        // THE GLYPH NO LONGER NAMES A BARLINE, AND THAT IS THE POINT. It was `border_vertical` when
+        // the switch was on and `linear_scale` when it was off — a barline and three dashes — while
+        // the switch now governs RECOGNITION of the page as a whole. A picture narrower than its
+        // meaning is how a control teaches the wrong thing, and the owner's own vocabulary for this
+        // one is «Распознавание: ВКЛ/ВЫКЛ»: the scanner is that word in a picture, and the state is
+        // carried by `isSelected` and by the tooltip's sentence rather than by a second glyph.
+        icon: const Icon(Icons.document_scanner),
         isSelected: _recognitionOn,
         tooltip: _recognitionOn
             ? l10n.tooltipRecognitionOn
@@ -3258,7 +3415,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                 // reads the scale and therefore where he looks for the control that pins it.
                 zoom: _effectiveZoom,
                 zoomLocked: _viewLocked,
-                onToggleZoomLock: _toggleViewLock,
                 onZoomIn: () => _zoomBy(1.25),
                 onZoomOut: () => _zoomBy(0.8),
                 onZoomReset: _resetView,
@@ -4111,9 +4267,18 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ClipPasteOutcome.noSuchBar ||
         ClipPasteOutcome.noSuchRun => l10n.selectionPasteNoBar,
       };
-      // A pasted run of bars moves the address the selection names — the bar the musician was on is
+      // A PASTED RUN OF BARS MOVES THE ADDRESS THE SELECTION NAMES — the bar the musician was on is
       // still the bar he was on, and the run landed after it — so the pending range is dropped rather
       // than left to name bars that have shifted under it.
+      //
+      // AND THE CONSEQUENCE IS NAMED HERE BECAUSE IT COSTS THE MUSICIAN TAPS. The owner's workflow
+      // ends with "транспонировать вставленное", and after this paste the selection is a single bar
+      // again, so the pasted run has to be re-named with two taps and the "До сюда" action before the
+      // transposition can act on it. The alternative — leaving the pasted run selected — was tried and
+      // reverted: a selection here is a `ChartHit`, which holds a `PlacedBar` from the page that is on
+      // screen, and the pasted bars exist only in the engraving the NEXT build produces. Selecting
+      // them would mean a second, address-shaped copy of the selection kept beside this one until that
+      // build ran, which is exactly the duplicated selection D36 forbids.
       if (outcome == ClipPasteOutcome.pasted &&
           clip.depth == SelectionDepth.bars) {
         _selectionEnd = null;
@@ -4451,21 +4616,28 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     final String hint = editable
         ? l10n.selectionHintChord
         : l10n.selectionHintForm;
-    // THE ERASER'S OWN WORDS, WHILE THE ERASER IS THE TOOL IN FORCE. Its icon is a glyph and its
-    // tooltip needs a long press on a tablet, so the one place the mode can say what it does in
-    // words is this line: with nothing selected the line has nothing else to say, and a musician
-    // who has just switched tools is exactly the person who needs to be told what a touch will do.
+    // THE TOOL'S OWN WORDS WHILE A TOOL IS IN FORCE, AND THE PEN'S WERE THE ONES MISSING. Its icon is
+    // a pencil and its tooltip needs a long press on a tablet, so the one place a mode can say what it
+    // does in words is this line: with nothing selected the line has nothing else to say, and a
+    // musician who has just pressed a tool is exactly the person who needs to be told what a touch
+    // will do. The eraser has had its sentence since A64; **the pen never had one, and the owner's own
+    // report is what that costs** — he wrote that the interface "only draws, with the stylus and with
+    // the finger" and could not find selection at all, while the line under the chart said "tap a bar
+    // to select it" the whole time. A sentence that describes a gesture the current tool has taken
+    // away is worse than no sentence: it is a promise the next touch breaks.
     // AND THE LOCK'S OWN WORDS, WHILE THE SCALE IS FIXED. Its button is a padlock and its state is a
-    // colour, and A64 established that a glyph plus a colour is how a mode goes unnoticed: the eraser
-    // had both and the owner reported it missing. So when the scale is fixed and there is nothing
-    // selected to name, this line says so in a sentence. The order of the three is deliberate: a
-    // selection is what the musician just touched and outranks everything; a fixed scale comes next,
-    // because it changes what the whole screen will do; the eraser's hint is last, because it only
-    // changes what one touch will do.
+    // colour, and A64 established that a glyph plus a colour is how a mode goes unnoticed. The order
+    // is deliberate: a selection is what the musician just touched and outranks everything; a fixed
+    // scale comes next, because it changes what the whole screen will do; the tool's hint is last,
+    // because it only changes what one touch will do.
     final String text = hit == null
         ? (_viewLocked
               ? l10n.viewLockActiveHint
-              : (_eraserOn ? l10n.eraserActiveHint : l10n.selectionPrompt))
+              : (_inkOn
+                    ? l10n.penActiveHint
+                    : (_eraserOn
+                          ? l10n.eraserActiveHint
+                          : l10n.selectionPrompt)))
         : _runLabel(song, hit, l10n);
     final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
       fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
@@ -4857,31 +5029,42 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
                   ],
                 );
         }
-        return _twoFingerView(chart);
+        return _chartGestures(chart);
       },
     );
   }
 
-  // PURPOSE: Wrap the chart in the recogniser that owns the two-finger view gesture, so that a pan
-  //          or a pinch is never handed to the pager and a single finger is never taken from it.
+  // PURPOSE: Put the chart's two view gestures in front of the chart — the TWO-finger pan and pinch
+  //          of owner decision D34, and the ONE-contact pan that the Select tool owns — so that
+  //          neither is handed to the pager underneath and a single contact in a writing tool is
+  //          never taken from it.
   // INPUTS: child — the chart, already carrying the current view.
-  // OUTPUTS: The chart with the gesture recogniser in front of it. The callbacks are re-bound on
-  //          every build, and the recogniser itself is REUSED by `RawGestureDetector` for as long
-  //          as the widget is in the same place, which is what lets a gesture survive the rebuild
-  //          its own first frame caused: a recogniser replaced mid-gesture would lose the touches
-  //          it is measuring and the gesture would end at the first frame it moved.
+  // OUTPUTS: The chart with both recognisers in front of it. The callbacks are re-bound on every
+  //          build, and each recogniser itself is REUSED by `RawGestureDetector` for as long as the
+  //          widget is in the same place, which is what lets a gesture survive the rebuild its own
+  //          first frame caused: a recogniser replaced mid-gesture would lose the pointers it is
+  //          measuring and the gesture would end at the first frame it moved.
+  //
+  //          WHY BOTH LIVE IN ONE DETECTOR. They answer two different questions about the same
+  //          contacts — "are there two of them?" and "has this one travelled far enough to be a
+  //          drag?" — and putting them in one detector is what makes the arena resolve between them
+  //          once, deepest first, instead of two detectors racing at different depths. The
+  //          two-finger recogniser needs no help to win: it resolves on the second contact. The
+  //          one-contact pan resolves at `kTouchSlop` because the pager does, and being the deeper
+  //          of the two it is asked first.
   //
   //          THE GATE IS BOUND TO THE INK LAYER AND NOT TO A RULE OF ITS OWN. [refuseTouch] asks
   //          `InkCaptureLayer.refuseViewGestureTouch`, so the question "may this contact move the
   //          page?" is answered by the one object that also answers "may this contact write?" — the
-  //          palm rule, the width arbitration and the pen's proximity window all live there, and a
-  //          copy here is exactly how the two answers would come to disagree. See the ink layer for
-  //          why a palm-like contact and a pen in play are both refusals.
+  //          palm rule, the width arbitration and the pen's open contact all live there, and a copy
+  //          here is exactly how the two answers would come to disagree. See the ink layer for why
+  //          a palm-like contact and a pen that is on the glass are both refusals, and for why the
+  //          pen's one-second proximity window is no longer one of them.
   // KEYWORDS: gesture-detector, recogniser-factory, stable-across-rebuild, d34, palm-refusal,
-  //           single-rule-binding
-  Widget _twoFingerView(Widget child) => RawGestureDetector(
-    // OPAQUE, so a touch on the page's own white space still reaches the recogniser: that is where
-    // the musician's two fingers most often land, and a deferring detector would let exactly those
+  //           single-rule-binding, one-finger-pan, select-tool
+  Widget _chartGestures(Widget child) => RawGestureDetector(
+    // OPAQUE, so a touch on the page's own white space still reaches the recognisers: that is where
+    // the musician's fingers most often land, and a deferring detector would let exactly those
     // touches fall through to nothing.
     behavior: HitTestBehavior.opaque,
     gestures: <Type, GestureRecognizerFactory<GestureRecognizer>>{
@@ -4896,6 +5079,17 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               );
               recognizer.refuseTouch = _refuseViewGestureTouch;
               recognizer.onTouchRefused = _onViewGestureTouchRefused;
+            },
+          ),
+      PagePanGestureRecognizer:
+          GestureRecognizerFactoryWithHandlers<PagePanGestureRecognizer>(
+            () => PagePanGestureRecognizer(),
+            (PagePanGestureRecognizer recognizer) {
+              recognizer.refusePan = _refusePan;
+              recognizer.onPanStart = _onPagePanStart;
+              recognizer.onPanUpdate = _onPagePanUpdate;
+              recognizer.onPanEnd = _onPagePanEnd;
+              recognizer.onPanRefused = _onPagePanRefused;
             },
           ),
     },

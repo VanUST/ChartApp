@@ -394,4 +394,213 @@ void main() async {
       );
     }
   }
+  await probeClamp(
+    song: song,
+    page: page,
+    metrics: metrics,
+    out: out,
+    pageWidth: pageWidth,
+    family: family,
+  );
+}
+
+// -------------------------------------------------------------------------------------------------
+// THE CLAMP, AS A PICTURE AND AS NUMBERS FROM ONE RUN
+//
+// The owner's answer to "the recognised line is taller than the chart's own separators" was
+// «Да обрезать». This section draws the two states of the same division with the application's OWN
+// painter, in one crop, so the reader can see that the line after the clamp is the same height as the
+// separator beside it — and prints the three heights involved, because a picture whose numbers are
+// taken somewhere else is a picture that can lie quietly.
+//
+// The crop covers the chord row AND the melody staff below it, so both of the chart's own separators
+// are in frame: the chord stave's barline and the staff's. The division is a stroke drawn across the
+// staff, which is the mark the owner reported as unrecognised, placed by the application's own anchor
+// rule and weighed by the real detector.
+// -------------------------------------------------------------------------------------------------
+
+/// The magnification the clamp crops are drawn at: a 52-pixel separator becomes 312 pixels, so its
+/// equality with the line beside it can be judged by eye and not only by reading a number.
+const double _clampScale = 6;
+
+/// Page pixels of margin around the bar in a clamp crop.
+const double _clampMargin = 8;
+
+/// Draws the before/after clamp pictures for [page] and prints the heights they were drawn from.
+Future<void> probeClamp({
+  required Song song,
+  required PageLayout page,
+  required FlutterTextMetrics metrics,
+  required Directory out,
+  required double pageWidth,
+  required String? family,
+}) async {
+  if (page.bars.isEmpty) {
+    stdout.writeln('probe.clamp skipped=no-bar');
+    return;
+  }
+  // THE LAST BAR OF THE PAGE, whose chord row his hand did not write on: the crop then shows the
+  // chart's own separators, the staff, and the division, without a chord symbol standing inside the
+  // gap the company gate needs. Measuring the mark against his own handwriting would answer a
+  // different question — and did, `gate=crowded`, the first time this section was run on bar 0.
+  final PlacedBar bar = page.bars.last;
+  if (bar.melody.isEmpty) {
+    stdout.writeln('probe.clamp skipped=the-page-declares-no-staff');
+    return;
+  }
+  final LayoutRect staff = bar.melody.bounds;
+  final LayoutRect row = bar.bounds;
+  final double x = bar.bounds.origin.x + bar.bounds.size.width * 0.55;
+  // THE STROKE A HAND WOULD DRAW across the staff, overshooting it as his marks overshoot the row.
+  final List<LayoutOffset> pagePoints = <LayoutOffset>[
+    for (int index = 0; index < 14; index++)
+      LayoutOffset(
+        x + (index.isEven ? 0.4 : -0.4),
+        staff.origin.y - 2 + (staff.size.height + 4) * index / 13,
+      ),
+  ];
+  final InkAnchorChoice? choice = resolveInkAnchor(page, pagePoints.first);
+  if (choice == null) {
+    stdout.writeln('probe.clamp skipped=no-anchor');
+    return;
+  }
+  final InkStroke stroke = InkStroke(
+    id: 'clamp-staff-division',
+    tool: StrokeTool.pen,
+    color: '#102a43',
+    size: 3,
+    anchor: choice.anchor,
+    points: <InkPoint>[
+      for (final LayoutOffset point in pagePoints)
+        InkPoint(
+          x: point.x - choice.origin.x,
+          y: point.y - choice.origin.y,
+          w: 0.5,
+          t: 0,
+        ),
+    ],
+  );
+  // THE STROKE IS PLACED ONCE AND THE SAME INSTANCE IS HANDED TO THE DETECTOR BOTH WAYS, because
+  // `measureBarlineStroke` skips a neighbour by IDENTITY: two equal-but-distinct values of one stroke
+  // make the stroke its own neighbour, and the company gate then measures a gap of zero and refuses
+  // it. That is what this section did on its first run (`gate=crowded` on a page with no ink near it),
+  // and it is worth keeping in the code as a warning rather than quietly fixing.
+  final PlacedInkStroke placedStroke = PlacedInkStroke(
+    stroke: stroke,
+    origin: choice.origin,
+  );
+  final BarlineVerdict verdict = measureBarlineStroke(
+    stroke: placedStroke,
+    strokes: <PlacedInkStroke>[placedStroke],
+    barFrames: barlineFramesOfPage(page),
+  );
+  final BarlineCandidate? candidate = verdict.candidate;
+  if (candidate == null) {
+    stdout.writeln(
+      'probe.clamp skipped=the-stroke-was-not-accepted '
+      'gate=${verdict.rejection?.token}',
+    );
+    return;
+  }
+  final double barLeft = bar.bounds.origin.x;
+  final double barTop = bar.bounds.origin.y;
+  final double cropTop = barTop - _clampMargin;
+  final double cropBottom = staff.origin.y + staff.size.height + _clampMargin;
+  final ui.Size window = ui.Size(
+    (bar.bounds.size.width + 2 * _clampMargin) * _clampScale,
+    (cropBottom - cropTop) * _clampScale + 26,
+  );
+  // THE TWO DIVISIONS. `before` is the one the application drew until this change: the stroke's own
+  // extent. `after` is the one the structure holds now: the span the separator is drawn across.
+  final BarDivision before = BarDivision(
+    id: 'division-before',
+    place: AnchoredPlace(
+      anchor: candidate.anchor,
+      offsetX: candidate.centreX,
+      offsetY: verdict.measurement.minY,
+    ),
+    height: verdict.measurement.height,
+    sourceStrokeId: stroke.id,
+  );
+  final BarDivision after = BarDivision(
+    id: 'division-after',
+    place: AnchoredPlace(
+      anchor: candidate.anchor,
+      offsetX: candidate.centreX,
+      offsetY: candidate.top,
+    ),
+    height: candidate.height,
+    sourceStrokeId: stroke.id,
+  );
+  final List<ResolvedInkStroke> ink = <ResolvedInkStroke>[
+    ResolvedInkStroke(stroke: stroke, origin: choice.origin),
+  ];
+  for (final (String name, BarDivision division, bool withInk)
+      in <(String, BarDivision, bool)>[
+        ('before', before, false),
+        ('after', after, false),
+        ('ink', before, true),
+      ]) {
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final ui.Canvas canvas = ui.Canvas(recorder);
+    final Paint white = Paint()..color = const Color(0xFFFFFFFF);
+    canvas.drawRect(Rect.fromLTWH(0, 0, window.width, window.height), white);
+    canvas.save();
+    canvas.translate(0, 26);
+    canvas.scale(_clampScale);
+    canvas.translate(-barLeft + _clampMargin, -cropTop);
+    // THE SAME THREE PAINTERS, IN THE APPLICATION'S ORDER, and the ideal division between them the
+    // way the application stacks it.
+    ChartPainter(
+      song: song,
+      page: page,
+      metrics: metrics,
+    ).paint(canvas, ui.Size(pageWidth, probePageHeight));
+    if (withInk) {
+      InkPainter(
+        strokes: ink,
+        pageScale: 1,
+      ).paint(canvas, ui.Size(pageWidth, probePageHeight));
+    }
+    BarlinePainter(
+      divisions: <ResolvedDivision>[
+        ResolvedDivision(division: division, origin: choice.origin),
+      ],
+      pageScale: 1,
+    ).paint(canvas, ui.Size(pageWidth, probePageHeight));
+    canvas.restore();
+    TextPainter(textDirection: TextDirection.ltr)
+      ..text = TextSpan(
+        text:
+            'clamp-$name   chart separator: chord ${row.size.height.toStringAsFixed(0)} px, '
+            'staff ${staff.size.height.toStringAsFixed(0)} px   '
+            'ink: ${verdict.measurement.height.toStringAsFixed(1)} px   '
+            'line drawn: ${division.height.toStringAsFixed(1)} px',
+        style: TextStyle(
+          fontFamily: family,
+          fontSize: 13,
+          color: const Color(0xFF102A43),
+        ),
+      )
+      ..layout()
+      ..paint(canvas, const Offset(6, 6));
+    await writePicture(
+      recorder,
+      window,
+      File('${out.path}${Platform.pathSeparator}clamp-$name.png'),
+      1,
+    );
+  }
+  stdout.writeln(
+    'probe.clamp bar=${bar.barIndex} band=${verdict.measurement.band?.kind.token} '
+    'chord_separator=${row.origin.y.toStringAsFixed(1)}..'
+    '${(row.origin.y + row.size.height).toStringAsFixed(1)} '
+    'staff_separator=${staff.origin.y.toStringAsFixed(1)}..'
+    '${(staff.origin.y + staff.size.height).toStringAsFixed(1)} '
+    'ink_y=${verdict.measurement.minY.toStringAsFixed(1)}..'
+    '${verdict.measurement.maxY.toStringAsFixed(1)} '
+    'ink_height=${verdict.measurement.height.toStringAsFixed(1)} '
+    'line_height_before=${before.height.toStringAsFixed(1)} '
+    'line_height_after=${after.height.toStringAsFixed(1)}',
+  );
 }

@@ -160,13 +160,14 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get tooltipInkOn =>
-      'Рисование: перо рисует, палец по-прежнему выбирает';
+      'Рисование: и перо, и палец пишут, а два пальца двигают лист';
 
   @override
   String get tooltipInkOffEraserOn => 'Перо выключено: ластик включён';
 
   @override
-  String get tooltipInkOff => 'Выбор: и перо, и палец выбирают';
+  String get tooltipInkOff =>
+      'Выбор: касание выбирает такт, а протяжка двигает лист';
 
   @override
   String get tooltipEraserOn =>
@@ -213,21 +214,26 @@ class AppLocalizationsRu extends AppLocalizations {
   String get menuSettings => 'Настройки';
 
   @override
-  String get menuRecognitionOn => 'Распознавать тактовые черты: ВКЛ';
+  String get menuRecognitionOn => 'Распознавание: ВКЛ';
 
   @override
-  String get menuRecognitionOff => 'Распознавать тактовые черты: ВЫКЛ';
+  String get menuRecognitionOff => 'Распознавание: ВЫКЛ';
 
   @override
   String get tooltipRecognitionOn =>
-      'Распознавание включено: проведённая вами черта рисуется идеальной линией';
+      'Распознавание включено: распознанное рисуется вместо рукописи';
 
   @override
   String get tooltipRecognitionOff =>
       'Распознавание выключено: рукопись рисуется ровно так, как вы её написали';
 
   @override
-  String get selectionPrompt => 'Коснитесь такта, чтобы выбрать его.';
+  String get selectionPrompt =>
+      'Коснитесь такта, чтобы выбрать его. Протяжка двигает лист.';
+
+  @override
+  String get penActiveHint =>
+      'Рисование включено: касание пишет. Два пальца двигают лист, щипок увеличивает. Чтобы выбирать такты, нажмите «Выбор».';
 
   @override
   String selectionBar(int bar) {

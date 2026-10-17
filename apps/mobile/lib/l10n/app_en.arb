@@ -118,14 +118,14 @@
   "create": "Create",
   "@create": { "description": "The button that makes the new chart with the key and meter chosen beside it." },
 
-  "tooltipInkOn": "Drawing: the pen draws, a finger still selects",
-  "@tooltipInkOn": { "description": "The pen toggle's tooltip while drawing is on." },
+  "tooltipInkOn": "Drawing: the pen and a finger both write, and two fingers move the sheet",
+  "@tooltipInkOn": { "description": "The pen toggle's tooltip while drawing is on. The sentence used to say 'a finger still selects', and the application's own log shows that a finger DRAWS with ink on (`ink.contact.down ... ink reason=width-not-reported kind=finger`): the tooltip was describing a rule that the ink layer had already replaced. The owner's report — 'it only draws, with the stylus and with the finger' — is that discrepancy seen from the glass." },
 
   "tooltipInkOffEraserOn": "Pen off: the eraser is on",
   "@tooltipInkOffEraserOn": { "description": "The pen toggle's tooltip while drawing is off and the eraser is on." },
 
-  "tooltipInkOff": "Selecting: the pen and a finger both select",
-  "@tooltipInkOff": { "description": "The pen toggle's tooltip while drawing is off." },
+  "tooltipInkOff": "Selecting: a tap selects a bar, a drag moves the sheet",
+  "@tooltipInkOff": { "description": "The pen toggle's tooltip while drawing is off — i.e. the button that puts the SELECT tool in force. It names both the tap and the drag because that is the whole of what the tool does." },
 
   "tooltipEraserOn": "Erasing: touch a stroke or drag across it, and its whole length goes",
   "@tooltipEraserOn": { "description": "The eraser toggle's tooltip while erasing is on." },
@@ -169,20 +169,23 @@
   "menuSettings": "Settings",
   "@menuSettings": { "description": "The overflow menu row that opens the settings sheet." },
 
-  "menuRecognitionOn": "Recognise my barlines: ON",
-  "@menuRecognitionOn": { "description": "The overflow menu row that turns barline recognition OFF; the label states the state in force, so a switched-off feature cannot be discovered only by its absence." },
+  "menuRecognitionOn": "Recognition: ON",
+  "@menuRecognitionOn": { "description": "The overflow menu row that turns RECOGNITION off. It names recognition AS A WHOLE and not bar lines, because the owner said the switch governs everything the application recognises and that bar lines are only the first thing that does: a control whose name is narrower than its meaning is how a musician turns on the wrong thing. The label states the state in force, so a switched-off feature cannot be discovered only by its absence." },
 
-  "menuRecognitionOff": "Recognise my barlines: OFF",
-  "@menuRecognitionOff": { "description": "The overflow menu row that turns barline recognition ON; the label states the state in force." },
+  "menuRecognitionOff": "Recognition: OFF",
+  "@menuRecognitionOff": { "description": "The overflow menu row that turns RECOGNITION on — recognition as a whole, not bar lines alone. The label states the state in force." },
 
-  "tooltipRecognitionOn": "Recognition is on: a barline you draw is drawn as an ideal line",
-  "@tooltipRecognitionOn": { "description": "The recognition toggle's tooltip while recognition is on." },
+  "tooltipRecognitionOn": "Recognition is on: what it recognises is drawn in place of your handwriting",
+  "@tooltipRecognitionOn": { "description": "The recognition toggle's tooltip while recognition is on. It says 'what it recognises' rather than naming a bar line, so the same switch keeps its meaning when notes and chords are recognised too." },
 
   "tooltipRecognitionOff": "Recognition is off: your handwriting is drawn exactly as you wrote it",
-  "@tooltipRecognitionOff": { "description": "The recognition toggle's tooltip while recognition is off, which is the state every chart starts in." },
+  "@tooltipRecognitionOff": { "description": "The recognition toggle's tooltip while recognition is off, which is the state every chart starts in and the state in which nothing but ink is drawn." },
 
-  "selectionPrompt": "Tap a bar to select it.",
-  "@selectionPrompt": { "description": "The selection line before anything is selected." },
+  "selectionPrompt": "Tap a bar to select it. A drag moves the sheet.",
+  "@selectionPrompt": { "description": "The selection line before anything is selected, while the Select tool is in force. It names BOTH things the tool does, because the owner reported that he could not find selection at all and a prompt that named only the tap would leave the drag to be discovered." },
+
+  "penActiveHint": "Drawing is on: a touch writes. Two fingers move the sheet and a pinch zooms. To choose bars, press Select.",
+  "@penActiveHint": { "description": "The selection line while the pen is the active tool and nothing is selected. It says in words what the tool the musician just pressed will do with his next contact, which is what the eraser has always been given (eraserActiveHint) and what the pen was never given — the owner wrote that the interface 'only draws, with the stylus and with the finger' and could not tell how to select." },
 
   "selectionBar": "selected: bar {bar} (whole bar)",
   "@selectionBar": {

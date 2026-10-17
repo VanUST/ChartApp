@@ -529,6 +529,40 @@ List<double> melodyLedgerLineOffsets(int step) {
   return offsets;
 }
 
+// PURPOSE: Name the pitch that stands on a staff step, which is the INVERSE of [melodyStepOf] and
+//          the step a recogniser has to take: a geometry reader measures a POSITION on the staff and
+//          nothing else, so the position is what the pitch has to be derived from — the other
+//          direction from every other caller of this file, which starts from a pitch it already has.
+// INPUTS: step — a staff step as [melodyStepOf] counts it, i.e. 0 is the staff's bottom line.
+//         clef — the staff's clef name, `treble` or `bass`; anything else is read as treble, the
+//         same fallback [melodyStepOf] documents, so the pair can never disagree about which line
+//         is which.
+// OUTPUTS: The written note and its octave. The ALTERATION IS ALWAYS 0, and that is a statement
+//          about the input rather than a default: a staff step carries the LETTER and the octave,
+//          and an accidental is a sign drawn BESIDE the notehead that this function is not shown.
+//          A caller that reads ink therefore gets the diatonic pitch and must say so — see
+//          `MelodyNoteHead.pitch`. The count is by letter, so the round trip with [melodyStepOf] is
+//          exact for every step in `[melodyLowestStep, melodyHighestStep]`, on both clefs.
+// KEYWORDS: staff-position, diatonic-step, inverse, pitch-from-position, clef, treble, bass,
+//           accidental-is-not-read
+/// Returns the pitch written on staff [step] of a [clef] staff.
+PitchedNote melodyPitchOfStep(int step, {String clef = 'treble'}) {
+  // The bottom line is named by the clef exactly as [melodyStepOf] names it, and for the same
+  // reason: the two functions must not be able to disagree about which line step 0 is.
+  final int bottomLine = clef == 'bass'
+      ? 7 * 2 + _letterOrder(NoteLetter.g)
+      : 7 * 4 + _letterOrder(NoteLetter.e);
+  // An absolute diatonic index counts 7 letters per octave from C0 = 0, so `~/` and `%` invert the
+  // multiplication [melodyStepOf] performs. The letter is taken first and subtracted before the
+  // division, which is what keeps a negative index from rounding toward zero.
+  final int absolute = bottomLine + step;
+  final int letter = absolute % 7;
+  return PitchedNote(
+    note: WrittenNote(NoteLetter.values[letter], 0),
+    octave: (absolute - letter) ~/ 7,
+  );
+}
+
 /// The accidental a [WrittenNote] needs, or null for a natural.
 ///
 /// A double sharp is written `x` and a double flat `bb`, which is the ordinary ASCII reading of

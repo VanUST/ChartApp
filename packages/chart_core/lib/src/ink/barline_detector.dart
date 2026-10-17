@@ -14,35 +14,53 @@
 //
 //            1. SHAPE  — it travels downward and does not come back: net fall over path length, and
 //                        height over width. This is what a line is and a curve is not.
-//            2. SIZE   — it is tall relative to the ROW it divides. Derived from his hand: the
-//                        tallest vertical mark he wrote is 22.8 px in a 52 px row, 44% of it, so
-//                        the floor is set above that and below the row's own height.
-//            3. PLACE  — it crosses the row it claims to divide rather than sitting above or below
-//                        it. A note stem or a mark in the margin is not a division of this bar.
+//            2. SIZE   — it is tall relative to THE HEIGHT A BARLINE DIVIDES ON THIS PAGE. Derived
+//                        from his hand: the tallest vertical mark he wrote is 22.8 px against a
+//                        52 px barline, 44% of it, so the floor is set above that and below the
+//                        barline's own span.
+//            3. PLACE  — it crosses ONE OF THE SPANS the page engraves a separator across: the chord
+//                        row or the melody staff. A note stem, a mark in the margin, or a letter
+//                        written above the row crosses neither.
 //            4. COMPANY — no other ink within a gap at its side. THIS IS THE GATE THAT SEPARATES
 //                        "inside a chord symbol" from "between two symbols", and it is the one the
 //                        page's own letters cannot pass: the owner's `(` stands 1.1 px from the `b`
-//                        it belongs to.
+//                        it belongs to. It is also what separates a DIVISION from a NOTE STEM,
+//                        which is a vertical segment attached to a notehead.
 //
-//          WHAT IT DELIBERATELY DOES NOT DO. It does not read notes or chord symbols, and it does
-//          not guess a musician's intention from a mark that is merely close: a candidate must be
-//          a line by measurement. It also does not act on the chart — it returns candidates, and
+//          THE SCALE IS THE PAGE'S, NOT THE ROW'S, AND THAT IS A CORRECTION RATHER THAN A REFINEMENT.
+//          The first version of this file measured every mark against the CHORD ROW, because the chord
+//          row was the only band the page had a use for. The owner then drew a division inside the
+//          melody staff — where a barline goes when you are writing notes — and nothing happened: the
+//          staff lies BELOW the bar's rectangle, its span is a different height in general, and every
+//          threshold derived from the row is then a statement about the wrong band. A division is the
+//          SAME INTENTION whichever band it is drawn in, so the scale it is judged by is ONE VALUE
+//          FOR THE WHOLE PAGE ([BarlineFrame.referenceHeight]), taken from the music the page
+//          engraves, and the place gate asks only WHICH of the page's own spans the mark crosses.
+//          See [BarlineFrame] for the derivation and [barlineFramesOfPage] for where it is read.
+//
+//          WHAT IT DELIBERATELY DOES NOT DO. It does not read notes or chord symbols, it uses no
+//          model, no weight and no dependency — a barline is length, angle and narrowness — and it
+//          does not guess a musician's intention from a mark that is merely close: a candidate must
+//          be a line by measurement. It also does not act on the chart — it returns candidates, and
 //          the caller records them as divisions through the operation log.
 // INPUTS: A committed [InkStroke] whose points are in ANCHOR-LOCAL logical pixels, the
-//         [LayoutRect] of the anchor it was captured against, and — for the company gate — the
-//         other strokes on the same page with the anchor origins that place them.
+//         [BarlineFrame] of the bar it was captured against — the spans that bar offers a divider and
+//         the one height the whole page is measured against — and, for the company gate, the other
+//         strokes on the same page with the anchor origins that place them.
 // OUTPUTS: [BarlineCandidate] values naming the stroke, the anchor-local centre of the line it
-//         implies, and its vertical extent. Detection is TOTAL: a stroke that fails any gate is
-//         reported with the gate it failed as a [BarlineRejection], never with an exception, and a
-//         page with no ink yields no candidates. Every threshold lives in [BarlineThresholds] as a
-//         named constant with the measurement that chose it beside it, so a change is one edit
-//         rather than a hunt.
+//         implies, and its vertical extent — WHICH IS THE SPAN'S OWN EXTENT AND NOT THE STROKE'S, so a
+//         division that overshoots the band is drawn at the height of the chart's own separators.
+//         Detection is TOTAL: a stroke that fails any gate is reported with the gate it failed as a
+//         [BarlineRejection], never with an exception, and a page with no ink yields no candidates.
+//         Every threshold lives in [BarlineThresholds] as a named constant with the measurement that
+//         chose it beside it, so a change is one edit rather than a hunt.
 // KEYWORDS: barline, detection, handwriting, geometry, verticality, aspect, isolation, false-
-//           positive, thresholds-from-ink, d37, no-ml, pure-dart
+//           positive, thresholds-from-ink, melody-staff, page-scale, clamp, d37, no-ml, pure-dart
 import 'dart:math' as math;
 
 import 'package:chart_core/src/ink/page_anchor.dart';
 import 'package:chart_core/src/layout/geometry.dart';
+import 'package:chart_core/src/layout/melody_staff.dart';
 import 'package:chart_core/src/layout/page_layout.dart';
 import 'package:chart_core/src/oplog/oplog.dart';
 
@@ -57,7 +75,7 @@ class BarlineThresholds {
     this.minVerticality = 0.80,
     this.minAspect = 4.0,
     this.minHeightFraction = 0.75,
-    this.minRowOverlapFraction = 0.50,
+    this.minBandOverlapFraction = 0.50,
     this.minIsolationFraction = 0.15,
   });
 
@@ -80,13 +98,21 @@ class BarlineThresholds {
   /// preference is stated, not by accident.
   final double minAspect;
 
-  /// The least height of the stroke as a fraction of the row it divides.
+  /// The least height of the stroke as a fraction of the height a barline divides on this page.
   ///
   /// THE MEASUREMENT THAT CHOSE 0.75. On the owner's page the tallest vertical mark he wrote — the
-  /// `(` of `(b9)` — is 22.8 anchor-local pixels tall inside a 52-pixel chord row, which is 0.44 of
-  /// the row. A mark that divides a row must be most of the row's height, and the owner draws
-  /// through the chord line and past it rather than inside it. 0.75 therefore sits 1.7 times above
-  /// every letter he has written and a quarter of the row below the row's own top and bottom.
+  /// `(` of `(b9)` — is 22.8 anchor-local pixels tall against a 52-pixel barline, which is 0.44 of
+  /// it. A mark that divides a band must be most of that band's height, and the owner draws through
+  /// the chord line and past it rather than inside it. 0.75 therefore sits 1.7 times above every
+  /// letter he has written and a quarter of the barline below it.
+  ///
+  /// WHAT THE DENOMINATOR IS NOW, AND WHY IT CHANGED. It was the CHORD ROW, and the chord row is one
+  /// of two bands a division can be drawn in: the melody staff lies below the bar's rectangle and a
+  /// musician writing notes draws his divisions there. Measured on the application's own page, both
+  /// bands are 52 px, so this number did not move when the denominator became the page's barline
+  /// height — but the denominator is now ONE value for the whole page ([BarlineFrame.referenceHeight])
+  /// rather than whichever band the mark happened to land in, because a division between two symbols
+  /// and a division across the staff are the same intention drawn differently.
   ///
   /// THE HONEST GAP: the sample above contains NO true barline, so this number is anchored to the
   /// CEILING of his letters and not to the floor of his divisions. It is the one threshold that a
@@ -94,42 +120,52 @@ class BarlineThresholds {
   /// shortest division he would draw and set this below it while keeping it above 0.44.
   final double minHeightFraction;
 
-  /// The least share of the anchor row's height that the stroke's vertical span must cover.
+  /// The least share of the page's barline height that the stroke's vertical span must cover of ONE
+  /// of the page's spans.
   ///
-  /// This is the PLACE gate: a tall vertical stroke written well above or below the row is a mark
-  /// about something else — a margin note, a note stem in the melody staff under the chords — and
-  /// a division must cross the row it divides. Half the row is the floor because the owner's marks
-  /// overshoot the row symmetrically and a division drawn to one side only would not be one.
-  final double minRowOverlapFraction;
+  /// This is the PLACE gate: a tall vertical stroke written well above or below every span is a mark
+  /// about something else — a margin note, a note stem beside no notehead, a letter written in the
+  /// gap between two systems — and a division must cross the band it divides. Half of the barline is
+  /// the floor because the owner's marks overshoot the band symmetrically and a division drawn to one
+  /// side only would not be one.
+  ///
+  /// IT IS A FRACTION OF THE PAGE'S BARLINE, NOT OF THE SPAN IT CROSSES, for the reason the whole
+  /// file is now written around: the two bands of one system are the same music, and a gate whose
+  /// denominator changed with the band would be two rules wearing one name.
+  final double minBandOverlapFraction;
 
-  /// The least empty gap, as a fraction of the row height, that must stand between the candidate
-  /// and any other ink at its side.
+  /// The least empty gap, as a fraction of the page's barline height, that must stand between the
+  /// candidate and any other ink at its side.
   ///
-  /// THE COMPANY GATE, AND THE ONE THAT ANSWERS "AND WHAT ABOUT `1`, `l`, `I` AND THE STEM OF A
-  /// `t`". Those letters live inside a word: something is always beside them. On the owner's page
-  /// the `(` of `(b9)` stands 1.1 px from the `b` it belongs to and the `7` 1.2 px from the `(`,
-  /// while 7.8 px (0.15 of 52) is the floor here. A division written between two chord symbols is
-  /// separated by the space a musician leaves to make the division visible, which is what makes
-  /// this gate legitimate rather than a heuristic: if the mark were touching the symbol, the
-  /// musician himself would not read it as a division.
+  /// THE COMPANY GATE, AND THE ONE THAT ANSWERS "AND WHAT ABOUT `1`, `l`, `I`, THE STEM OF A `t` AND
+  /// THE STEM OF A NOTE". Those marks live attached to something: a letter to its word, a stem to its
+  /// notehead. On the owner's page the `(` of `(b9)` stands 1.1 px from the `b` it belongs to and the
+  /// `7` 1.2 px from the `(`, while 7.8 px (0.15 of 52) is the floor here. A division written between
+  /// two chord symbols is separated by the space a musician leaves to make the division visible, which
+  /// is what makes this gate legitimate rather than a heuristic: if the mark were touching the symbol,
+  /// the musician himself would not read it as a division. A note stem is measured against its own
+  /// notehead by the same rule and at the same distance, which is why the staff needed no second gate.
   final double minIsolationFraction;
 
   /// The threshold set the detector uses unless a caller says otherwise.
   static const BarlineThresholds standard = BarlineThresholds();
 
-  /// The least height, in anchor-local pixels, a stroke must have to divide a row [rowHeight] tall.
-  double minimumHeightFor(double rowHeight) => rowHeight * minHeightFraction;
+  /// The least height, in anchor-local pixels, a stroke must have to divide a barline
+  /// [referenceHeight] tall.
+  double minimumHeightFor(double referenceHeight) =>
+      referenceHeight * minHeightFraction;
 
-  /// The least empty gap, in anchor-local pixels, a candidate needs on each side in a row
-  /// [rowHeight] tall.
-  double minimumIsolationFor(double rowHeight) =>
-      rowHeight * minIsolationFraction;
+  /// The least empty gap, in anchor-local pixels, a candidate needs on each side of a barline
+  /// [referenceHeight] tall.
+  double minimumIsolationFor(double referenceHeight) =>
+      referenceHeight * minIsolationFraction;
 
   @override
   String toString() =>
       'BarlineThresholds(verticality>=$minVerticality, aspect>=$minAspect, '
-      'height>=$minHeightFraction x row, overlap>=$minRowOverlapFraction x row, '
-      'isolation>=$minIsolationFraction x row)';
+      'height>=$minHeightFraction x barline, '
+      'overlap>=$minBandOverlapFraction x barline, '
+      'isolation>=$minIsolationFraction x barline)';
 }
 
 /// Why a stroke was not accepted as a division.
@@ -147,10 +183,11 @@ enum BarlineRejection {
   /// The stroke is wide for its height: a slash, a letter, a hook.
   notNarrowEnough('not-narrow-enough'),
 
-  /// The stroke is shorter than the row it would divide allows.
+  /// The stroke is shorter than the barline it divides allows.
   tooShort('too-short'),
 
-  /// The stroke does not cross the row: it sits above, below, or beside it.
+  /// The stroke does not cross a span the page draws a separator across: it sits above every one of
+  /// them, below every one of them, or beside the music.
   missesTheRow('misses-the-row'),
 
   /// Another mark stands within the gap the division needs at one of its sides.
@@ -160,6 +197,127 @@ enum BarlineRejection {
 
   /// The stable token the probe and any future diagnostics print.
   final String token;
+}
+
+/// Which of the page's two bands a span belongs to.
+///
+/// The token travels into the log so that "the division he drew across the staff was found" can be
+/// told apart from "the division between two chord symbols was found": they are the same intention
+/// and the same stored unit, but a report that could not name the band could not show that the
+/// staff case works.
+enum BarlineBandKind {
+  /// The chord row: the bar's own rectangle, where the chord symbols are written and where the
+  /// chart draws its barline across the stave.
+  chordStave('chord-stave'),
+
+  /// The melody staff under the chord row, from its top line to its bottom line, which is where a
+  /// barline goes when there are notes to divide.
+  melodyStaff('melody-staff');
+
+  const BarlineBandKind(this.token);
+
+  /// Stable spelling used in a log line and in the probe.
+  final String token;
+}
+
+/// One span of a bar that the chart itself draws a vertical separator across.
+///
+/// A BAND IS A CLAIM ABOUT THE PAGE, NOT ABOUT THE INK: it is exactly the rectangle the engraver's
+/// own separator occupies, so a division clamped to it is drawn at the height of the chart's own
+/// lines and cannot stand out as a layout fault.
+class BarlineBand {
+  /// Creates a band of [kind] occupying [bounds].
+  const BarlineBand({required this.kind, required this.bounds});
+
+  /// Which band of the page this is.
+  final BarlineBandKind kind;
+
+  /// The band's rectangle, in whatever coordinate space the frame that holds it is expressed in.
+  final LayoutRect bounds;
+
+  /// The top of the band.
+  double get top => bounds.origin.y;
+
+  /// The bottom of the band.
+  double get bottom => bounds.origin.y + bounds.size.height;
+
+  /// The band's own height.
+  double get height => bounds.size.height;
+
+  @override
+  String toString() =>
+      'BarlineBand(${kind.token} '
+      'y=${top.toStringAsFixed(1)}..${bottom.toStringAsFixed(1)})';
+}
+
+/// What one bar offers a barline: the spans the chart draws a separator across, and the ONE height
+/// every division on the page is measured against.
+///
+/// WHY THE HEIGHT IS ON THE FRAME AND NOT DERIVED FROM THE BAND THE MARK LANDED IN. The first
+/// version of this detector measured a mark against the chord row, so a division drawn across the
+/// melody staff — a different band, a different y, in general a different height — was judged by a
+/// number that had nothing to do with the line the musician drew. The owner found that by drawing.
+/// A division between two chord symbols and a division across the staff are the SAME INTENTION drawn
+/// in two places, so the scale they are judged by cannot depend on which place it was: [referenceHeight]
+/// is ONE value for the whole page, read once by [barlineFramesOfPage] from the music the page
+/// engraves, and every threshold is applied against it.
+///
+/// AND IT IS WHY THE SCALE FOLLOWS THE MUSIC RATHER THAN A LAYOUT CONSTANT. The height a barline
+/// divides is a fact about the engraved page — the melody staff's five lines when there is one, the
+/// chord stave when there is not — and reading it from the page means a chart engraved at a different
+/// size, or with the staff in a different place, needs no second number.
+class BarlineFrame {
+  /// Creates a frame offering [bands] and measuring every mark against [referenceHeight].
+  const BarlineFrame({required this.referenceHeight, required this.bands});
+
+  /// The frame of a page that engraves nothing but the chord row — the shape a chords-only chart has.
+  ///
+  /// The row's own height is then the one value the page has, which is not a shortcut but the same
+  /// rule with one band: a page with no staff has no other span to measure a division against.
+  factory BarlineFrame.chordRow(LayoutRect row) => BarlineFrame(
+    referenceHeight: row.size.height,
+    bands: <BarlineBand>[
+      BarlineBand(kind: BarlineBandKind.chordStave, bounds: row),
+    ],
+  );
+
+  /// The height a barline divides on this page, in anchor-local pixels — ONE value for the page.
+  final double referenceHeight;
+
+  /// The spans of this bar a division may cross, in the order a tie between two of them resolves.
+  ///
+  /// The chord row comes first, because that is the band a page without a staff has and the band this
+  /// detector was first measured against; a mark that covers both equally is read as dividing the
+  /// chord row, which is the reading the chart's own drawing order gives it too.
+  final List<BarlineBand> bands;
+
+  /// The band that the vertical span [top]..[bottom] crosses MOST, or null when it crosses none.
+  ///
+  /// "Crosses" is an overlap of positive area, and the winner is the largest overlap, so a mark
+  /// written across the staff is not credited to the chord row it merely touches. Ties go to the
+  /// earlier band; a mark that crosses nothing returns null rather than the nearest band, because
+  /// "which of the page's separators does this cross" has no nearest-answer.
+  BarlineBand? bandCrossedBy({required double top, required double bottom}) {
+    BarlineBand? best;
+    double bestOverlap = 0;
+    for (final BarlineBand band in bands) {
+      final double overlap =
+          (math.min(bottom, band.bottom) - math.max(top, band.top)).clamp(
+            0,
+            double.infinity,
+          );
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        best = band;
+      }
+    }
+    return best;
+  }
+
+  @override
+  String toString() =>
+      'BarlineFrame(reference=${referenceHeight.toStringAsFixed(1)}, '
+      'bands=[${bands.map((BarlineBand band) => band.toString()).join(', ')}])';
 }
 
 /// One stroke measured against the geometry a candidate division needs.
@@ -180,8 +338,11 @@ class BarlineMeasurement {
     required this.netDy,
     required this.verticality,
     required this.aspect,
+    required this.referenceHeight,
     required this.rowHeight,
     required this.rowOverlap,
+    required this.band,
+    required this.bandOverlap,
     required this.isolation,
   });
 
@@ -215,11 +376,30 @@ class BarlineMeasurement {
   /// Bounding-box height over width, with a width of zero reported as [unboundedAspect].
   final double aspect;
 
-  /// Height of the row the stroke was captured against, in anchor-local pixels.
+  /// The height a barline divides on this page, in anchor-local pixels — the ONE value every
+  /// threshold was applied against.
+  final double referenceHeight;
+
+  /// Height of the chord row the stroke was captured against, in anchor-local pixels.
+  ///
+  /// KEPT BESIDE [bandOverlap] RATHER THAN REPLACED BY IT, because it is the number the owner's
+  /// handwriting was first measured against and the number a reader compares the new one with. The
+  /// gate no longer reads it — a division drawn on the staff has a row overlap of zero and must still
+  /// be found — and it is reported so that "the row moved out of the rule" is visible in a probe
+  /// rather than only in this comment.
   final double rowHeight;
 
-  /// Share of the row's height the stroke's vertical span covers, in `[0, 1]`.
+  /// Share of the chord row's height the stroke's vertical span covers, in `[0, 1]`.
   final double rowOverlap;
+
+  /// The span of this bar the stroke crosses most, or null when it crosses none.
+  final BarlineBand? band;
+
+  /// Share of [referenceHeight] the stroke's vertical span covers of [band], in `[0, 1]`.
+  ///
+  /// THIS IS THE PLACE GATE'S NUMBER, and it is a share of the PAGE'S barline rather than of the
+  /// band's own height, so that the two bands cannot disagree about what "half of it" means.
+  final double bandOverlap;
 
   /// The narrowest empty gap, in anchor-local pixels, between this stroke and another mark whose
   /// vertical span overlaps it, or [double.infinity] when nothing is near.
@@ -244,8 +424,11 @@ class BarlineMeasurement {
       'y=${minY.toStringAsFixed(1)}..${maxY.toStringAsFixed(1)}, '
       'height=${height.toStringAsFixed(1)}, aspect=${aspect.toStringAsFixed(1)}, '
       'verticality=${verticality.toStringAsFixed(2)}, '
+      'barline=${referenceHeight.toStringAsFixed(1)}, '
+      'band=${band?.kind.token ?? 'none'}, '
+      'band_overlap=${bandOverlap.toStringAsFixed(2)}, '
       'row=${rowHeight.toStringAsFixed(1)}, '
-      'overlap=${rowOverlap.toStringAsFixed(2)}, '
+      'row_overlap=${rowOverlap.toStringAsFixed(2)}, '
       'isolation=${isolation.isFinite ? isolation.toStringAsFixed(1) : 'unbounded'})';
 }
 
@@ -253,6 +436,8 @@ class BarlineMeasurement {
 class BarlineCandidate {
   /// Creates a candidate for [measurement] whose line is [lineHeight] pixels tall, centred on
   /// [centreX] and spanning [top] to [bottom] in anchor-local pixels.
+  ///
+  /// [top] and [bottom] are the SPAN'S endpoints, not the stroke's: see [BarlineCandidate.top].
   const BarlineCandidate({
     required this.measurement,
     required this.centreX,
@@ -267,9 +452,18 @@ class BarlineCandidate {
   final double centreX;
 
   /// The top of the ideal line, in anchor-local pixels.
+  ///
+  /// THE LINE IS THE CHART'S, NOT HIS NIB'S, and this is the clamp the owner asked for («Да
+  /// обрезать»). A recognised division used to keep the extent of the stroke it was found in, so a
+  /// barline he drew from above the chord line to below it stood taller than every separator the
+  /// chart itself draws and read as a layout fault. The line is now the SPAN IT DIVIDES — the chord
+  /// stave or the melody staff, which is exactly the rectangle the engraver draws its own separator
+  /// across — so a recognised division is the same height as the app's own. His stroke is untouched:
+  /// the ink stays in the document at its own extent, and only the structure derived from it is
+  /// regularised.
   final double top;
 
-  /// The bottom of the ideal line, in anchor-local pixels.
+  /// The bottom of the ideal line, in anchor-local pixels — the span's own bottom.
   final double bottom;
 
   /// Identifier of the stroke this candidate was recognised from.
@@ -335,13 +529,13 @@ class BarlineDetector {
   /// A stroke that is part of a chord symbol cannot pass: it is either short, or crowded, or both.
   BarlineVerdict measure({
     required InkStroke stroke,
-    required LayoutRect row,
+    required BarlineFrame frame,
     List<InkStroke> neighbours = const <InkStroke>[],
   }) {
     final List<InkPoint> points = stroke.points;
     if (points.length < 2) {
       return BarlineVerdict(
-        measurement: _emptyMeasurement(stroke, row),
+        measurement: _emptyMeasurement(stroke, frame),
         rejection: BarlineRejection.tooFewPoints,
       );
     }
@@ -366,24 +560,40 @@ class BarlineDetector {
     final double height = maxY - minY;
     final double width = maxX - minX;
     final double netDy = points.last.y - points.first.y;
-    final double rowHeight = row.size.height;
+    final double referenceHeight = frame.referenceHeight;
     final double verticality = path <= 0 ? 0 : netDy.abs() / path;
     final double aspect = width <= 0.0001
         ? BarlineMeasurement.unboundedAspect
         : height / width;
-    final double rowTop = row.origin.y;
-    final double rowBottom = row.origin.y + rowHeight;
-    final double overlap = (math.min(maxY, rowBottom) - math.max(minY, rowTop))
-        .clamp(0, height);
-    final double overlapFraction = height <= 0
+    // THE PLACE NUMBER IS ABOUT THE SPANS, so it is read from the frame rather than from a row the
+    // caller happened to pass: `bandCrossedBy` answers WHICH of the page's own separators this mark
+    // crosses, and the share is measured against the page's ONE barline height.
+    final BarlineBand? band = frame.bandCrossedBy(top: minY, bottom: maxY);
+    final double bandOverlap = band == null || referenceHeight <= 0
         ? 0
-        : (overlap / rowHeight).clamp(0, 1);
+        : ((math.min(maxY, band.bottom) - math.max(minY, band.top)).clamp(
+                    0,
+                    height,
+                  ) /
+                  referenceHeight)
+              .clamp(0, 1);
+    // THE ROW NUMBERS ARE STILL REPORTED. They are the measurement the owner's ink was first taken
+    // against and the number a reader compares the new one with; the gate no longer reads them.
+    final BarlineBand? rowBand = _rowBandOf(frame);
+    final double rowHeight = rowBand?.height ?? referenceHeight;
+    final double rowOverlap = rowBand == null || rowHeight <= 0
+        ? 0
+        : ((math.min(maxY, rowBand.bottom) - math.max(minY, rowBand.top)).clamp(
+                    0,
+                    height,
+                  ) /
+                  rowHeight)
+              .clamp(0, 1);
     final double isolation = _isolationOf(
       minX: minX,
       maxX: maxX,
       minY: minY,
       maxY: maxY,
-      rowHeight: rowHeight,
       neighbours: neighbours,
     );
     final BarlineMeasurement measurement = BarlineMeasurement(
@@ -397,8 +607,11 @@ class BarlineDetector {
       netDy: netDy,
       verticality: verticality,
       aspect: aspect,
+      referenceHeight: referenceHeight,
       rowHeight: rowHeight,
-      rowOverlap: overlapFraction,
+      rowOverlap: rowOverlap,
+      band: band,
+      bandOverlap: bandOverlap,
       isolation: isolation,
     );
     final BarlineRejection? rejection = _firstFailedGate(measurement);
@@ -410,8 +623,10 @@ class BarlineDetector {
       candidate: BarlineCandidate(
         measurement: measurement,
         centreX: measurement.centreX,
-        top: minY,
-        bottom: maxY,
+        // THE CLAMP: the ideal line is the span's own extent, so a recognised division is exactly as
+        // tall as the separator the chart draws across that band.
+        top: band!.top,
+        bottom: band.bottom,
       ),
     );
   }
@@ -429,17 +644,33 @@ class BarlineDetector {
       return BarlineRejection.notNarrowEnough;
     }
     if (measurement.height <
-        thresholds.minimumHeightFor(measurement.rowHeight)) {
+        thresholds.minimumHeightFor(measurement.referenceHeight)) {
       return BarlineRejection.tooShort;
     }
-    if (measurement.rowOverlap < thresholds.minRowOverlapFraction) {
+    if (measurement.band == null ||
+        measurement.bandOverlap < thresholds.minBandOverlapFraction) {
       return BarlineRejection.missesTheRow;
     }
     if (measurement.isolation <
-        thresholds.minimumIsolationFor(measurement.rowHeight)) {
+        thresholds.minimumIsolationFor(measurement.referenceHeight)) {
       return BarlineRejection.crowded;
     }
     return null;
+  }
+
+  /// The chord row [frame] offers, or null when it offers none.
+  ///
+  /// A frame is built from a page, and a page's first band is its chord stave; a frame built by a
+  /// caller with one band therefore reports that band as the row. Null is reachable for a frame with
+  /// no bands at all — the frame of a bar this page cannot place — and that is the state the place
+  /// gate refuses rather than reporting a row height of zero.
+  BarlineBand? _rowBandOf(BarlineFrame frame) {
+    for (final BarlineBand band in frame.bands) {
+      if (band.kind == BarlineBandKind.chordStave) {
+        return band;
+      }
+    }
+    return frame.bands.isEmpty ? null : frame.bands.first;
   }
 
   /// The narrowest horizontal gap between the box `[minX]..[maxX]` and another mark on the same
@@ -453,7 +684,6 @@ class BarlineDetector {
     required double maxX,
     required double minY,
     required double maxY,
-    required double rowHeight,
     required List<InkStroke> neighbours,
   }) {
     double nearest = double.infinity;
@@ -485,22 +715,27 @@ class BarlineDetector {
   }
 
   /// The measurement reported for a stroke too short to have one.
-  BarlineMeasurement _emptyMeasurement(InkStroke stroke, LayoutRect row) =>
-      BarlineMeasurement(
-        strokeId: stroke.id,
-        anchor: stroke.anchor,
-        minX: 0,
-        maxX: 0,
-        minY: 0,
-        maxY: 0,
-        pathLength: 0,
-        netDy: 0,
-        verticality: 0,
-        aspect: 0,
-        rowHeight: row.size.height,
-        rowOverlap: 0,
-        isolation: double.infinity,
-      );
+  BarlineMeasurement _emptyMeasurement(InkStroke stroke, BarlineFrame frame) {
+    final BarlineBand? row = _rowBandOf(frame);
+    return BarlineMeasurement(
+      strokeId: stroke.id,
+      anchor: stroke.anchor,
+      minX: 0,
+      maxX: 0,
+      minY: 0,
+      maxY: 0,
+      pathLength: 0,
+      netDy: 0,
+      verticality: 0,
+      aspect: 0,
+      referenceHeight: frame.referenceHeight,
+      rowHeight: row?.height ?? frame.referenceHeight,
+      rowOverlap: 0,
+      band: null,
+      bandOverlap: 0,
+      isolation: double.infinity,
+    );
+  }
 }
 
 /// A stroke together with the page position of its anchor, which is the pair the company gate needs
@@ -524,25 +759,29 @@ class PlacedInkStroke {
       '${origin.x.toStringAsFixed(1)},${origin.y.toStringAsFixed(1)})';
 }
 
-/// A candidate division together with the row it was measured against, in page coordinates.
+/// A candidate division together with the page position of the anchor it is stored against.
 class PlacedBarlineCandidate {
-  /// Creates a placed candidate for [candidate] whose row is [row] on the page.
-  const PlacedBarlineCandidate({required this.candidate, required this.row});
+  /// Creates a placed candidate for [candidate] anchored at [origin] on the page.
+  const PlacedBarlineCandidate({required this.candidate, required this.origin});
 
   /// The candidate, in anchor-local pixels.
   final BarlineCandidate candidate;
 
-  /// The anchor's rectangle in the page's engraved coordinates.
-  final LayoutRect row;
+  /// The anchor's top-left corner in the page's engraved coordinates.
+  ///
+  /// THE ORIGIN RATHER THAN A RECTANGLE, because the origin is the whole of what placing a division
+  /// needs: its offsets are anchor-local and its extent now comes from the span, so a rectangle here
+  /// would be a second answer to "where is this line" that could differ from the frame's.
+  final LayoutOffset origin;
 
   /// The ideal line's horizontal centre in page coordinates.
-  double get pageX => row.origin.x + candidate.centreX;
+  double get pageX => origin.x + candidate.centreX;
 
   /// The ideal line's top in page coordinates.
-  double get pageTop => row.origin.y + candidate.top;
+  double get pageTop => origin.y + candidate.top;
 
   /// The ideal line's bottom in page coordinates.
-  double get pageBottom => row.origin.y + candidate.bottom;
+  double get pageBottom => origin.y + candidate.bottom;
 
   @override
   String toString() =>
@@ -560,12 +799,12 @@ class PlacedBarlineCandidate {
 /// an anchor would therefore compare the wrong pairs, and the gate would pass marks it should
 /// reject. Placing both in page coordinates is the only comparison that means what the rule says.
 ///
-/// INPUTS: Every stroke of the page, each with its anchor's page origin, and the anchor rectangle
-/// the division must divide — the BAR, because a division divides a bar and not one cell of it.
+/// INPUTS: Every stroke of the page, each with its anchor's page origin, and the frames of the
+/// page's bars — every span each bar draws a separator across plus the page's ONE barline height.
 /// OUTPUTS: One [PlacedBarlineCandidate] per accepted stroke, in the order the strokes were given.
 List<PlacedBarlineCandidate> detectBarlineDivisions({
   required List<PlacedInkStroke> strokes,
-  required Map<String, LayoutRect> barRows,
+  required Map<String, BarlineFrame> barFrames,
   BarlineDetector detector = const BarlineDetector(),
 }) {
   final List<PlacedBarlineCandidate> accepted = <PlacedBarlineCandidate>[];
@@ -573,16 +812,13 @@ List<PlacedBarlineCandidate> detectBarlineDivisions({
     final BarlineVerdict verdict = measureBarlineStroke(
       stroke: placed,
       strokes: strokes,
-      barRows: barRows,
+      barFrames: barFrames,
       detector: detector,
     );
     final BarlineCandidate? candidate = verdict.candidate;
     if (candidate != null) {
       accepted.add(
-        PlacedBarlineCandidate(
-          candidate: candidate,
-          row: _rowFor(placed.stroke, placed.origin, barRows)!,
-        ),
+        PlacedBarlineCandidate(candidate: candidate, origin: placed.origin),
       );
     }
   }
@@ -592,14 +828,14 @@ List<PlacedBarlineCandidate> detectBarlineDivisions({
 /// Every verdict on a page, accepted or rejected, so a probe can print the reasons.
 List<BarlineVerdict> measureBarlineDivisions({
   required List<PlacedInkStroke> strokes,
-  required Map<String, LayoutRect> barRows,
+  required Map<String, BarlineFrame> barFrames,
   BarlineDetector detector = const BarlineDetector(),
 }) => <BarlineVerdict>[
   for (final PlacedInkStroke placed in strokes)
     measureBarlineStroke(
       stroke: placed,
       strokes: strokes,
-      barRows: barRows,
+      barFrames: barFrames,
       detector: detector,
     ),
 ];
@@ -615,19 +851,24 @@ List<BarlineVerdict> measureBarlineDivisions({
 /// page's other ink is still what the company gate compares it with.
 ///
 /// A stroke the page cannot place — one whose anchor names a bar this page does not hold — gets a
-/// verdict with [BarlineRejection.missesTheRow] and a zero-height row, rather than throwing: this
-/// function is called from the write path, and a detector that could fail there could lose ink.
+/// verdict with [BarlineRejection.missesTheRow] and a frame with no band and no height, rather than
+/// throwing: this function is called from the write path, and a detector that could fail there could
+/// lose ink.
 BarlineVerdict measureBarlineStroke({
   required PlacedInkStroke stroke,
   required List<PlacedInkStroke> strokes,
-  required Map<String, LayoutRect> barRows,
+  required Map<String, BarlineFrame> barFrames,
   BarlineDetector detector = const BarlineDetector(),
 }) {
-  final LayoutRect? row = _rowFor(stroke.stroke, stroke.origin, barRows);
-  if (row == null) {
+  final BarlineFrame? frame = barlineFrameFor(
+    barFrames: barFrames,
+    anchor: stroke.stroke.anchor,
+    origin: stroke.origin,
+  );
+  if (frame == null) {
     return detector.measure(
       stroke: stroke.stroke,
-      row: const LayoutRect(origin: LayoutOffset(0, 0), size: LayoutSize(0, 0)),
+      frame: const BarlineFrame(referenceHeight: 0, bands: <BarlineBand>[]),
     );
   }
   final List<InkStroke> neighbours = <InkStroke>[
@@ -637,45 +878,90 @@ BarlineVerdict measureBarlineStroke({
   ];
   return detector.measure(
     stroke: stroke.stroke,
-    row: row,
+    frame: frame,
     neighbours: neighbours,
   );
 }
 
-/// The row a stroke must divide, expressed in THAT STROKE'S OWN anchor-local space.
+/// The frame of the bar [anchor] names, expressed in the anchor-local space [origin] measures from.
 ///
-/// The BAR and never the cell, because a division divides a bar. A stroke captured inside one cell
-/// of a four-beat bar is stored against that cell, and reading its row from the cell's own height
-/// would be the same number but reading its ORIGIN from the cell would shift the row by the cell's
-/// column — which is the difference between "this line crosses the row" and "this line is beside
-/// it". A cell rect does span the bar's full stave height, so only the origin has to be converted.
-LayoutRect? _rowFor(
-  InkStroke stroke,
-  LayoutOffset origin,
-  Map<String, LayoutRect> barRows,
-) {
-  final LayoutRect? row = barRows[_rowKey(stroke.anchor)];
-  if (row == null) {
+/// The BAR and never the cell, because a division divides a bar. A stroke captured inside one cell of
+/// a four-beat bar is stored against that cell, and reading its spans from the cell's own rectangle
+/// would shift them by the cell's column — which is the difference between "this line crosses the
+/// staff" and "this line is beside it". A cell spans the bar's full stave height, so only the origin
+/// has to be converted.
+///
+/// Null when the page holds no bar at this address, which the caller reports as a rejection rather
+/// than as a frame of invented geometry.
+BarlineFrame? barlineFrameFor({
+  required Map<String, BarlineFrame> barFrames,
+  required EventAnchor anchor,
+  required LayoutOffset origin,
+}) {
+  final BarlineFrame? frame = barFrames[_barKey(anchor)];
+  if (frame == null) {
     return null;
   }
-  return LayoutRect(
-    origin: LayoutOffset(row.origin.x - origin.x, row.origin.y - origin.y),
-    size: row.size,
+  return BarlineFrame(
+    referenceHeight: frame.referenceHeight,
+    bands: <BarlineBand>[
+      for (final BarlineBand band in frame.bands)
+        BarlineBand(
+          kind: band.kind,
+          bounds: LayoutRect(
+            origin: LayoutOffset(
+              band.bounds.origin.x - origin.x,
+              band.bounds.origin.y - origin.y,
+            ),
+            size: band.bounds.size,
+          ),
+        ),
+    ],
   );
 }
 
-/// The key a bar's row is indexed by, matching the key [barRowsOfPage] builds.
-String _rowKey(EventAnchor anchor) => '${anchor.sectionId}\u0000${anchor.bar}';
+/// The key a bar's frame is indexed by, matching the key [barlineFramesOfPage] builds.
+String _barKey(EventAnchor anchor) => '${anchor.sectionId}\u0000${anchor.bar}';
 
-/// The row every bar of [page] occupies, indexed by the section-and-bar key the detector uses.
+/// What every bar of [page] offers a barline, indexed by the section-and-bar key the detector uses.
 ///
 /// THE KEY IS A STRING AND NOT THE ANCHOR ITSELF because a bar has no beat and an anchor that named
 /// one would be a different address; encoding the two fields that identify a bar is the smallest
 /// thing that cannot be confused with a cell.
-Map<String, LayoutRect> barRowsOfPage(PageLayout page) => <String, LayoutRect>{
-  for (final PlacedBar bar in page.bars)
-    '${bar.sectionId}\u0000${bar.barIndex}': bar.bounds,
-};
+///
+/// THE HEIGHT IS COMPUTED ONCE, FOR THE PAGE, AND THEN PUT IN EVERY FRAME. That is the whole of "one
+/// value for the page": the tallest span the page draws a separator across — the melody staff's five
+/// lines when the song declares a staff, the chord stave when it does not — is read before any bar is
+/// described, so no mark can be measured against a different number from the mark beside it. Reading
+/// it per bar would have been the same number on every bar of this application's page and still
+/// wrong, because it would have made the gate's denominator a property of the place the musician
+/// happened to draw in rather than of the page he drew on.
+Map<String, BarlineFrame> barlineFramesOfPage(PageLayout page) {
+  double referenceHeight = 0;
+  for (final PlacedBar bar in page.bars) {
+    if (bar.bounds.size.height > referenceHeight) {
+      referenceHeight = bar.bounds.size.height;
+    }
+    final PlacedMelodyStaff staff = bar.melody;
+    if (!staff.isEmpty && staff.height > referenceHeight) {
+      referenceHeight = staff.height;
+    }
+  }
+  return <String, BarlineFrame>{
+    for (final PlacedBar bar in page.bars)
+      '${bar.sectionId}\u0000${bar.barIndex}': BarlineFrame(
+        referenceHeight: referenceHeight,
+        bands: <BarlineBand>[
+          BarlineBand(kind: BarlineBandKind.chordStave, bounds: bar.bounds),
+          if (!bar.melody.isEmpty)
+            BarlineBand(
+              kind: BarlineBandKind.melodyStaff,
+              bounds: bar.melody.bounds,
+            ),
+        ],
+      ),
+  };
+}
 
 /// Every stroke of [strokes] that [page] can place, with the page position of its anchor.
 ///

@@ -1145,4 +1145,209 @@ void main() {
       );
     },
   );
+
+  // --- THE GATE THAT NEVER OPENED, AND ITS SHIPPED FORM AS A TEST -------------------------------
+  //
+  // WHY THIS CASE EXISTS, IN THE OWNER'S TERMS. His tablet report was "перемещение с помощью одного
+  // пальца вообще пропало — никак не переместится по листу", and the cause was not the pan (that
+  // needs two fingers by owner decision D34 and is measured above) but the ADMISSION GATE in front
+  // of it: `InkCaptureLayer.refuseViewGestureTouch` refused every touch with `stylus-in-play` for one
+  // second after any pen contact OR hover while the ink mode was on. He holds the pen for the whole
+  // session, so the window was effectively always open and the gesture was refused for the whole
+  // session. **A safety gate that depends on a condition the user never stops satisfying is an
+  // outage, and this case is the form of that lesson that runs in the gate.**
+  //
+  // WHAT IT MEASURES, AND WHY IT WOULD HAVE FAILED BEFORE THE FIX. The pen writes a stroke and LIFTS
+  // — nothing is drawing, so the strongest refusal (`ink-contact-open`) has nothing to fire on — and
+  // the two fingers arrive in the very next frame, deep inside the one-second proximity window. Under
+  // the old rule both touches were refused; under the rule as it stands the gesture is admitted and
+  // the pinch magnifies the page. The assertion is deliberately on the OUTCOME (the zoom) and not on
+  // the token, because the token is what the fix removed: a test that asserted a string would have
+  // kept the outage and passed.
+  //
+  // AND IT CARRIES ITS OWN COUNTER-ASSERTION, ONE CASE ABOVE. A pen contact that is still OPEN must
+  // still refuse — that is A64's defect, and `no touch joins the view gesture while a stroke is open`
+  // pins it — so this file fails if the whole gate were removed rather than the staleness window
+  // alone.
+  testWidgets('a pen that has lifted does not refuse the two-finger pan', (
+    WidgetTester tester,
+  ) async {
+    await pumpViewer(tester, viewChart());
+    await setInkMode(tester, true);
+    final Offset centre = tester.getRect(pageSurfaceFinder()).center;
+    final InkCaptureLayer layer = inkLayerOf(tester);
+
+    // The pen writes and lifts: the state a musician is in for a whole session, and the state in
+    // which the old window refused everything for a second after every stroke.
+    final TestGesture pen = await tester.startGesture(
+      centre - const Offset(40, 30),
+      kind: PointerDeviceKind.stylus,
+      pointer: 71,
+    );
+    await tester.pump(const Duration(milliseconds: 8));
+    await pen.moveTo(centre - const Offset(10, 10));
+    await tester.pump(const Duration(milliseconds: 8));
+    await pen.up();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(
+      layer.isDrawingInk,
+      isFalse,
+      reason: 'the pen has lifted, which is the whole point of the case',
+    );
+    final int before = layer.viewGestureRefusalCount;
+
+    // Two ordinary fingers, immediately — inside the one-second window the old rule measured.
+    sendTouchDown(
+      tester,
+      pointer: 81,
+      at: centre - const Offset(60, 0),
+      radiusMajor: 0,
+      timeMs: 40,
+    );
+    await tester.pump();
+    sendTouchDown(
+      tester,
+      pointer: 82,
+      at: centre + const Offset(60, 0),
+      radiusMajor: 0,
+      timeMs: 56,
+    );
+    await tester.pump();
+    // A pinch out, so the evidence is a scale that changed rather than a pan the clamp could eat.
+    for (int step = 0; step < 4; step++) {
+      sendTouchMove(
+        tester,
+        pointer: 81,
+        at: centre - Offset(60 + 20.0 * step, 0),
+        radiusMajor: 0,
+        timeMs: 72 + 16 * step,
+      );
+      sendTouchMove(
+        tester,
+        pointer: 82,
+        at: centre + Offset(60 + 20.0 * step, 0),
+        radiusMajor: 0,
+        timeMs: 72 + 16 * step,
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    sendTouchUp(tester, pointer: 81, at: centre, timeMs: 160);
+    sendTouchUp(tester, pointer: 82, at: centre, timeMs: 176);
+    await tester.pumpAndSettle();
+
+    final PageLayout page = chartPainter(tester).page;
+    expect(
+      layer.viewGestureRefusalCount,
+      before,
+      reason:
+          'a pen that has LIFTED is not a pen on the glass: no touch may be refused on the '
+          'proximity window, because on this musician’s tablet that window never closes',
+    );
+    expect(
+      page.zoom,
+      greaterThan(1.2),
+      reason:
+          'THE DEFECT: the two-finger gesture was refused for the whole session and the document '
+          'could not be moved. A pinch after a lifted pen must magnify the page',
+    );
+    stdout.writeln(
+      'view.test.pen_lifted refused=${layer.viewGestureRefusalCount - before} '
+      '${viewOf(page)}',
+    );
+  });
+
+  // --- THE ONE-CONTACT PAN, WHICH IS THE GESTURE THAT CAN BE PROVED ON THE GLASS ---------------
+  //
+  // WHY IT IS MEASURED HERE AND ON THE TABLET BOTH. Owner decision D34 gives the view a TWO-finger
+  // pan and that decision stands, but a gesture no instrument can inject — `adb shell input` carries
+  // one pointer, and two simultaneous injections are cancelled by the dispatcher — is a gesture
+  // nobody has ever seen work on the glass. So the SELECT tool, in which nothing lays ink and a drag
+  // is therefore free by construction, owns a one-contact pan: the one `adb` can inject and the one
+  // the owner can perform with the pen in his hand.
+  //
+  // WHAT THIS CASE PINS, INCLUDING THE HALF THAT MUST NOT REGRESS. In the Select tool a drag moves
+  // the sheet. In the PEN tool the same drag still draws, because the pan's own admission gate says
+  // `tool-writes` and the stroke keeps the contact — the pen must keep writing, and a pan that stole
+  // one stroke of every session would be a worse defect than the one it fixed.
+  testWidgets(
+    'the select tool moves the sheet with one contact; the pen still writes',
+    (WidgetTester tester) async {
+      await pumpViewer(tester, viewChart());
+      // Two steps in, through the interface: at zoom 1 the page exactly fills the pane and the clamp
+      // makes every pan zero, so a pan could not be measured there even if it were admitted.
+      await tester.tap(find.byKey(const ValueKey<String>('scene-bar-zoom-in')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('scene-bar-zoom-in')));
+      await tester.pumpAndSettle();
+      final PageLayout zoomed = chartPainter(tester).page;
+      expect(
+        zoomed.zoom,
+        greaterThan(1),
+        reason: 'the view has somewhere to move',
+      );
+      final Offset centre = tester.getRect(pageSurfaceFinder()).center;
+
+      // --- THE SELECT TOOL (ink off, which is the state the screen opens in) --------------------
+      final TestGesture drag = await tester.startGesture(centre, pointer: 91);
+      await tester.pump();
+      // Two samples after the slop, so the recogniser accepts on the first and follows the rest.
+      await drag.moveBy(const Offset(-30, -20));
+      await tester.pump(const Duration(milliseconds: 16));
+      await drag.moveBy(const Offset(-30, -20));
+      await tester.pump(const Duration(milliseconds: 16));
+      await drag.up();
+      await tester.pumpAndSettle();
+      final PageLayout panned = chartPainter(tester).page;
+      expect(
+        panned.pan.x,
+        lessThan(zoomed.pan.x - 1),
+        reason: 'dragging left must move the sheet left in the Select tool',
+      );
+      expect(
+        panned.pan.y,
+        lessThan(zoomed.pan.y - 1),
+        reason: 'dragging up must move the sheet up in the Select tool',
+      );
+      expect(
+        panned.zoom,
+        closeTo(zoomed.zoom, 1e-9),
+        reason:
+            'a one-contact pan is a translation and must not change the scale',
+      );
+      stdout.writeln(
+        'view.test.select_pan pointers=1 travel=(-60,-40) '
+        'from=${viewOf(zoomed)} to=${viewOf(panned)}',
+      );
+
+      // --- THE PEN TOOL: THE SAME DRAG IS A STROKE ----------------------------------------------
+      await setInkMode(tester, true);
+      final InkCaptureLayer layer = inkLayerOf(tester);
+      final int strokesBefore = layer.documentStrokes.length;
+      final PageLayout beforeInk = chartPainter(tester).page;
+      final TestGesture write = await tester.startGesture(centre, pointer: 92);
+      await tester.pump(const Duration(milliseconds: 8));
+      await write.moveBy(const Offset(-30, -20));
+      await tester.pump(const Duration(milliseconds: 8));
+      await write.moveBy(const Offset(-30, -20));
+      await tester.pump(const Duration(milliseconds: 8));
+      await write.up();
+      await tester.pumpAndSettle();
+      expect(
+        layer.documentStrokes.length,
+        strokesBefore + 1,
+        reason:
+            'THE PEN MUST KEEP WRITING: in the pen tool a one-contact drag is a stroke, and the pan '
+            'recogniser declines by name (`tool-writes`) rather than taking it',
+      );
+      expect(
+        chartPainter(tester).page.pan,
+        beforeInk.pan,
+        reason: 'a stroke must not move the sheet',
+      );
+      stdout.writeln(
+        'view.test.pen_still_writes strokes=${layer.documentStrokes.length} '
+        '${viewOf(chartPainter(tester).page)}',
+      );
+    },
+  );
 }

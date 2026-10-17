@@ -1,4 +1,4 @@
-// PURPOSE: Pin the layout pipeline's behaviour with exact geometry. Because the engine takes its
+﻿// PURPOSE: Pin the layout pipeline's behaviour with exact geometry. Because the engine takes its
 //          text metrics as an input, every number below is arithmetic rather than a font
 //          measurement, so an expectation can be derived by hand and a failure names a real
 //          regression instead of a font-version difference.
@@ -36,26 +36,37 @@ Section sectionOf(String id, String label, int count) => Section(
 void main() {
   // Defaults, restated here so that a change to the style is visible as a change to these
   // expectations rather than as a mystery: advance 8/char, barPadding 8, chordSpacing 10,
-  // minCellWidth 14, barMinWidth 56, pageMargin 24, barHeight 44, systemSpacing 12,
+  // minCellWidth 18, barMinWidth 56, pageMargin 24, barHeight 44, systemSpacing 12,
   // sectionLabelHeight 22.
   const LayoutEngine engine = LayoutEngine();
 
   group('measureBar', () {
-    test('a single-character chord in 4/4 measures to 76', () {
-      // Cell 0: one 8-wide chord plus a 10 gap = 18. Cells 1..3 empty, floored at 14 each = 42.
-      // Total 60, plus 8 padding on each side = 76.
-      expect(engine.measureBar(oneChordBar(0), Key.cMajor), 76);
+    test('a single-character chord in 4/4 measures to 88', () {
+      // Cell 0: one 8-wide chord plus a 10 gap = 18. Cells 1..3 empty, floored at 18 each = 54.
+      // Total 72, plus 8 padding on each side = 88.
+      //
+      // THE EXPECTATION WAS 76 AND IS 88 BECAUSE THE CELL FLOOR ROSE FROM 14 TO 18. 14 was the
+      // old LayoutStyle.minCellWidth default, and it was narrower than a notehead (15.6), so two
+      // notes on adjacent beats were engraved overlapping. See LayoutStyle.minCellWidth for the
+      // measurement. The old assertion, quoted: expect(engine.measureBar(oneChordBar(0),
+      // Key.cMajor), 76); — with cells floored at 14 the same bar was 18 + 3×14 + 16 = 76.
+      expect(engine.measureBar(oneChordBar(0), Key.cMajor), 88);
     });
 
     test('a bar with no chords still reserves every cell', () {
-      // Four empty cells at 14 = 56, plus 16 padding = 72. Empty cells are not free: they are
+      // Four empty cells at 18 = 72, plus 16 padding = 88. Empty cells are not free: they are
       // where a sustained chord is drawn, and collapsing them would move the chords that remain.
-      expect(engine.measureBar(const Bar(), Key.cMajor), 72);
+      //
+      // WAS 72: expect(engine.measureBar(const Bar(), Key.cMajor), 72); at the old 14-pixel cell
+      // floor, which is now 18 because a notehead is 15.6 wide and a cell narrower than a notehead
+      // merges two adjacent-beat notes into one shape.
+      expect(engine.measureBar(const Bar(), Key.cMajor), 88);
     });
 
     test('a wider chord widens its own cell only', () {
-      // Dm7 renders as three characters = 24, plus a 10 gap = 34 for cell 0, plus 42 for the
-      // other three cells, plus 16 padding = 92.
+      // Dm7 renders as three characters = 24, plus a 10 gap = 34 for cell 0, plus 54 for the
+      // other three cells at the 18 floor, plus 16 padding = 104. (WAS 92, with 42 for the other
+      // three cells at the old 14 floor.)
       final Bar bar = Bar(
         chords: <BeatChord>[
           BeatChord(
@@ -67,18 +78,19 @@ void main() {
           ),
         ],
       );
-      expect(engine.measureBar(bar, Key.cMajor), 92);
+      expect(engine.measureBar(bar, Key.cMajor), 104);
     });
 
     test('a three-four bar has three cells, not four', () {
-      // 18 + 14 + 14 = 46, plus 16 padding = 62.
+      // 18 + 18 + 18 = 54, plus 16 padding = 70. (WAS 62: 18 + 14 + 14 = 46, plus 16, at the old
+      // 14-pixel cell floor.)
       const Bar bar = Bar(
         timeSignature: TimeSignature.threeFour,
         chords: <BeatChord>[
           BeatChord(chord: Chord(root: ChordRoot(0)), beat: 0),
         ],
       );
-      expect(engine.measureBar(bar, Key.cMajor), 62);
+      expect(engine.measureBar(bar, Key.cMajor), 70);
     });
 
     test('the minimum bar width is respected', () {
@@ -109,12 +121,12 @@ void main() {
             BeatChord(chord: Chord(root: ChordRoot(7)), beat: 7),
           ],
         );
-        // In the meter: cell 0 holds an 8-wide chord plus a 10 gap, three empty cells at the 14
-        // minimum, and 16 of bar padding: 18 + 42 + 16 = 76.
-        expect(engine.measureBar(inMeter, Key.cMajor), 76);
-        // Widened to eight cells: cell 0 = 18, six empty cells at 14 = 84, cell 7 holds the second
-        // one-character chord = 18, plus 16 padding: 18 + 84 + 18 + 16 = 136.
-        expect(engine.measureBar(beyond, Key.cMajor), 136);
+        // In the meter: cell 0 holds an 8-wide chord plus a 10 gap, three empty cells at the 18
+        // minimum, and 16 of bar padding: 18 + 54 + 16 = 88. (WAS 76 with the old 14 floor.)
+        expect(engine.measureBar(inMeter, Key.cMajor), 88);
+        // Widened to eight cells: cell 0 = 18, six empty cells at 18 = 108, cell 7 holds the second
+        // one-character chord = 18, plus 16 padding: 18 + 108 + 18 + 16 = 160. (WAS 136.)
+        expect(engine.measureBar(beyond, Key.cMajor), 160);
       },
     );
 
@@ -127,7 +139,7 @@ void main() {
           BeatChord(chord: Chord(root: ChordRoot(7)), beat: -3),
         ],
       );
-      expect(engine.measureBar(bar, Key.cMajor), 76);
+      expect(engine.measureBar(bar, Key.cMajor), 88);
     });
   });
 
@@ -314,7 +326,9 @@ void main() {
           .single;
 
       expect(bar.bounds.left, 24);
-      expect(bar.bounds.size.width, 76);
+      // WAS 76: expect(bar.bounds.size.width, 76); with the old 14-pixel cell floor. The bar is
+      // 88 wide now, and the chord still starts one padding inside it.
+      expect(bar.bounds.size.width, 88);
       expect(bar.chords.single.bounds.left, 32);
       expect(
         bar.chords.single.bounds.size.width,
@@ -324,9 +338,9 @@ void main() {
     });
 
     test('a chord on a later beat is offset by the cells before it', () {
-      // Cell widths are 14, 14, 18 and 14 — the third cell holds the chord — so the offsets are
-      // 8, 22, 36 and 54 from the bar's left edge. A chord on beat 2 therefore starts at
-      // 24 + 36 = 60.
+      // Cell widths are 18, 18, 18 and 18 — the third cell holds the chord — so the offsets are
+      // 8, 26, 44 and 62 from the bar's left edge. A chord on beat 2 therefore starts at
+      // 24 + 44 = 68. (WAS 60 with cell widths 14, 14, 18, 14 and offsets 8, 22, 36, 54.)
       final Song song = Song(
         title: 'Placement',
         sections: <Section>[
@@ -346,7 +360,7 @@ void main() {
           .single;
 
       expect(chord.beat, 2);
-      expect(chord.bounds.left, 60);
+      expect(chord.bounds.left, 68);
     });
 
     test('two chords packed onto one beat are laid out side by side', () {

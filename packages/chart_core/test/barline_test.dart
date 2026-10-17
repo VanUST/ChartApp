@@ -44,6 +44,13 @@ LayoutRect _row() => const LayoutRect(
   size: LayoutSize(88, _rowHeight),
 );
 
+/// The frame of a page that engraves one chord row and nothing else.
+///
+/// It is the shape a chords-only chart has, and it is built through the library's own
+/// `BarlineFrame.chordRow` rather than by hand so that the tests below are held to the same rule the
+/// application's page is: one row, one band, and the row's height as the page's one barline height.
+BarlineFrame _frame() => BarlineFrame.chordRow(_row());
+
 /// A straight stroke from ([x], [y0]) to ([x + lean], [y1]), with [samples] points between them.
 ///
 /// Straight and hand-like in the one respect the detector measures: it travels downward without
@@ -121,21 +128,41 @@ void main() {
       final InkStroke stroke = _line(id: 'division', x: 40, y0: 4, y1: 50);
       final BarlineVerdict verdict = detector.measure(
         stroke: stroke,
-        row: _row(),
+        frame: _frame(),
       );
       expect(verdict.rejection, isNull, reason: 'a full-height line is a line');
       final BarlineCandidate candidate = verdict.candidate!;
       expect(candidate.strokeId, 'division');
       expect(candidate.centreX, closeTo(40, 1));
-      expect(candidate.top, closeTo(4, 1));
-      expect(candidate.bottom, closeTo(50, 1));
-      expect(candidate.height, greaterThanOrEqualTo(_rowHeight * 0.75));
+      // THE OLD ASSERTIONS HERE WERE `expect(candidate.top, closeTo(4, 1))` and
+      // `expect(candidate.bottom, closeTo(50, 1))`, and they are replaced because they PINNED THE
+      // DEFECT the owner reported and said yes to fixing: a recognised division used to keep the
+      // extent of the stroke it was found in, so a line drawn from above the chord line to below it
+      // stood taller than every separator the chart draws itself and read as a layout fault. His
+      // answer to the proposed clamp is «Да обрезать». The ideal line is now the SPAN — the chord row
+      // or the melody staff, which is exactly the rectangle the engraver draws its own separator
+      // across — so the recognised line is the same height as the app's own. The ink is not
+      // touched: `verdict.measurement.minY`/`maxY` still report 4 and 50, which the next assertion
+      // checks, because the division must not be able to lose what he wrote.
+      expect(candidate.top, 0);
+      expect(candidate.bottom, _rowHeight);
+      expect(
+        candidate.height,
+        _rowHeight,
+        reason: 'the chart\'s own separator',
+      );
+      expect(verdict.measurement.minY, closeTo(4, 1));
+      expect(verdict.measurement.maxY, closeTo(50, 1));
+      expect(
+        verdict.measurement.height,
+        greaterThanOrEqualTo(_rowHeight * 0.75),
+      );
     });
 
     test('a lean of three pixels over the row is still a division', () {
       final BarlineVerdict verdict = const BarlineDetector().measure(
         stroke: _line(id: 'leaning', x: 40, y0: 2, y1: 52, lean: 3),
-        row: _row(),
+        frame: _frame(),
       );
       expect(
         verdict.rejection,
@@ -154,7 +181,7 @@ void main() {
       // mark anywhere on the page.
       final BarlineVerdict verdict = const BarlineDetector().measure(
         stroke: _line(id: 'paren', x: 67, y0: 1, y1: 23.8, lean: 5),
-        row: _row(),
+        frame: _frame(),
       );
       expect(verdict.rejection, BarlineRejection.tooShort);
       expect(verdict.measurement.height, closeTo(22.8, 0.1));
@@ -165,7 +192,7 @@ void main() {
       // 3.3 wide, 18.7 tall: narrow enough and vertical enough, and still a digit.
       final BarlineVerdict verdict = const BarlineDetector().measure(
         stroke: _line(id: 'seven', x: 49, y0: 1, y1: 19.7, lean: 3),
-        row: _row(),
+        frame: _frame(),
       );
       expect(verdict.rejection, BarlineRejection.tooShort);
     });
@@ -174,7 +201,7 @@ void main() {
       // 8.3 wide, 17.1 tall: a slash is a diagonal, and its box is wide for its height.
       final BarlineVerdict verdict = const BarlineDetector().measure(
         stroke: _line(id: 'slash', x: 26, y0: 10, y1: 27.1, lean: 8),
-        row: _row(),
+        frame: _frame(),
       );
       expect(verdict.rejection, BarlineRejection.notNarrowEnough);
       expect(
@@ -194,7 +221,7 @@ void main() {
         final InkStroke neighbour = _line(id: 'word', x: 44, y0: 30, y1: 42);
         final BarlineVerdict verdict = const BarlineDetector().measure(
           stroke: candidate,
-          row: _row(),
+          frame: _frame(),
           neighbours: <InkStroke>[neighbour],
         );
         expect(verdict.rejection, BarlineRejection.crowded);
@@ -211,7 +238,7 @@ void main() {
       () {
         final BarlineVerdict verdict = const BarlineDetector().measure(
           stroke: _line(id: 'division', x: 40, y0: 2, y1: 50),
-          row: _row(),
+          frame: _frame(),
           neighbours: <InkStroke>[_line(id: 'chord', x: 54, y0: 30, y1: 42)],
         );
         expect(verdict.rejection, isNull);
@@ -228,7 +255,7 @@ void main() {
     test('a circle of the row\'s own height is not a division', () {
       final BarlineVerdict verdict = const BarlineDetector().measure(
         stroke: _curve(id: 'circle', x: 20, y0: 0, width: 30, height: 52),
-        row: _row(),
+        frame: _frame(),
       );
       expect(verdict.rejection, BarlineRejection.notVerticalEnough);
     });
@@ -238,10 +265,170 @@ void main() {
       // stem there is tall and narrow and has nothing to do with the bar beneath it.
       final BarlineVerdict verdict = const BarlineDetector().measure(
         stroke: _line(id: 'stem', x: 40, y0: -80, y1: -20),
-        row: _row(),
+        frame: _frame(),
       );
       expect(verdict.rejection, BarlineRejection.missesTheRow);
     });
+  });
+
+  // THE BUG THE OWNER FOUND BY DRAWING, held here as the four claims the fix stands on: a division
+  // drawn across the melody staff is FOUND, it is found for the right reason (it crosses the staff,
+  // which is a span the chart draws its own separator across), the line it becomes is the staff's own
+  // height, and the marks that are NOT divisions on a staff — a note stem, a ledger line, the staff's
+  // own line, and the letters of his chord symbols — are still refused.
+  //
+  // THE GEOMETRY IS THE APPLICATION'S, NOT AN INVENTED ONE: with `barHeight: 52` and
+  // `melodyStaffHeight: 52`, the staff sits at row-local y 70..122 on a chart whose staff carries no
+  // note and at 124..176 on one that does. Both numbers are what `LayoutEngine` produces and what
+  // `probe_barline_detect.dart` measures; the constant below is the blank-staff case, which is the
+  // state his own chart was in when he drew on the staff.
+  group('a division drawn across the melody staff is found', () {
+    /// The melody staff's rectangle in the chord row's own anchor-local space, for a chart whose
+    /// declared staff carries no note: the band is `melodyEmptyBandHeight` = 68, the staff is centred
+    /// in it, and the chord row is 52 tall, so the five lines are 70..122 below the row's top.
+    const LayoutRect staff = LayoutRect(
+      origin: LayoutOffset(0, 70),
+      size: LayoutSize(88, 52),
+    );
+
+    /// A frame offering BOTH spans of one bar, with the ONE barline height the page measures every
+    /// mark against — 52 px, which is the staff's own span and the row's own height on this page.
+    BarlineFrame staffFrame() => BarlineFrame(
+      referenceHeight: _rowHeight,
+      bands: <BarlineBand>[
+        BarlineBand(kind: BarlineBandKind.chordStave, bounds: _row()),
+        const BarlineBand(kind: BarlineBandKind.melodyStaff, bounds: staff),
+      ],
+    );
+
+    test('it is accepted on the staff band, not the chord row', () {
+      final BarlineVerdict verdict = const BarlineDetector().measure(
+        // The stroke overshoots the five lines by two pixels at each end, as a hand does.
+        stroke: _line(id: 'staff-division', x: 40, y0: 68, y1: 124),
+        frame: staffFrame(),
+      );
+      expect(
+        verdict.rejection,
+        isNull,
+        reason:
+            'the mark the owner drew across the staff must be found; before the page-wide '
+            'reference it died at misses-the-row with a row overlap of 0.00',
+      );
+      expect(verdict.measurement.band?.kind, BarlineBandKind.melodyStaff);
+      expect(
+        verdict.measurement.rowOverlap,
+        0,
+        reason:
+            'the row is still reported and is still zero: the gate stopped reading it, '
+            'it did not start pretending the staff is the row',
+      );
+      expect(verdict.measurement.bandOverlap, 1.0);
+    });
+
+    test(
+      'the line it becomes is the staff\'s own height, not the stroke\'s',
+      () {
+        final BarlineVerdict verdict = const BarlineDetector().measure(
+          stroke: _line(id: 'staff-division', x: 40, y0: 68, y1: 124),
+          frame: staffFrame(),
+        );
+        final BarlineCandidate candidate = verdict.candidate!;
+        // THE CLAMP (the owner's «Да обрезать»): 56 pixels of ink become the 52-pixel span the chart
+        // draws its own separator across, so the recognised line does not stand out as taller than the
+        // structure beside it. The ink still reports 56 — the stroke is not lost, only regularised.
+        expect(verdict.measurement.height, closeTo(56, 0.5));
+        expect(candidate.top, 70);
+        expect(candidate.bottom, 122);
+        expect(candidate.height, 52);
+      },
+    );
+
+    test('a note stem next to its notehead is refused as crowded', () {
+      // A STEM IS A VERTICAL SEGMENT ATTACHED TO A NOTEHEAD, and that is the whole of what tells it
+      // from a division. The notehead is the mark beside it, so the company gate is the gate that
+      // separates them — no second rule was added for the staff.
+      final InkStroke head = _curve(
+        id: 'notehead',
+        x: 40,
+        y0: 90.2,
+        width: 15.6,
+        height: 11.7,
+      );
+      // 3.5 staff spaces of stem — 45.5 px at the application's 13-pixel space — rising from the
+      // head's right edge. It clears the shape gates and, at 0.88 of the barline, the size gate too;
+      // only its company refuses it, which is the point.
+      final BarlineVerdict verdict = const BarlineDetector().measure(
+        stroke: _line(id: 'stem', x: 55, y0: 50.5, y1: 96),
+        frame: staffFrame(),
+        neighbours: <InkStroke>[head],
+      );
+      expect(verdict.rejection, BarlineRejection.crowded);
+      expect(
+        verdict.measurement.isolation,
+        lessThan(BarlineThresholds.standard.minimumIsolationFor(52)),
+      );
+    });
+
+    test('a ledger line is refused: it is horizontal and short', () {
+      final BarlineVerdict verdict = const BarlineDetector().measure(
+        stroke: _line(id: 'ledger', x: 30, y0: 128, y1: 128),
+        frame: staffFrame(),
+      );
+      expect(verdict.rejection, BarlineRejection.notVerticalEnough);
+    });
+
+    test(
+      'the staff\'s own line is refused: it is horizontal and spans the bar',
+      () {
+        final BarlineVerdict verdict = const BarlineDetector().measure(
+          stroke: _line(id: 'staff-line', x: 1, y0: 70, y1: 70),
+          frame: staffFrame(),
+        );
+        expect(verdict.rejection, BarlineRejection.notVerticalEnough);
+      },
+    );
+
+    test('the letters of his chord symbols are still refused on the staff', () {
+      // A LETTER CAN BE DRAWN IN THE SAME BAND AS A DIVISION, so the size and shape gates are what
+      // have to refuse it there: 22.8 px is 0.44 of the 52-pixel barline the page measures against.
+      final BarlineVerdict paren = const BarlineDetector().measure(
+        stroke: _line(id: 'paren', x: 40, y0: 76, y1: 98.8, lean: 5),
+        frame: staffFrame(),
+      );
+      expect(paren.rejection, BarlineRejection.tooShort);
+      final BarlineVerdict slash = const BarlineDetector().measure(
+        stroke: _line(id: 'slash', x: 40, y0: 76, y1: 93.1, lean: 8),
+        frame: staffFrame(),
+      );
+      expect(slash.rejection, BarlineRejection.notNarrowEnough);
+    });
+
+    test(
+      'one height for the page: a frame with one band and one with two agree',
+      () {
+        // THE ONE-VALUE CLAIM, stated as an equality rather than an adjective. A division in the chord
+        // row is judged by the same barline height whether or not the page also engraves a staff, so
+        // the same stroke must get the same SIZE verdict from both frames.
+        final InkStroke tall = _line(id: 'tall', x: 40, y0: 0, y1: 40);
+        expect(
+          const BarlineDetector()
+              .measure(stroke: tall, frame: _frame())
+              .measurement
+              .referenceHeight,
+          const BarlineDetector()
+              .measure(stroke: tall, frame: staffFrame())
+              .measurement
+              .referenceHeight,
+        );
+        // And a mark that clears the height gate but crosses NEITHER span is refused, which is what
+        // makes the place gate a statement about the page and not about a mark being tall.
+        final BarlineVerdict above = const BarlineDetector().measure(
+          stroke: _line(id: 'above', x: 40, y0: -60, y1: -8),
+          frame: staffFrame(),
+        );
+        expect(above.rejection, BarlineRejection.missesTheRow);
+      },
+    );
   });
 
   group('a division is a structural unit', () {

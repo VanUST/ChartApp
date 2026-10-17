@@ -43,7 +43,7 @@ class LayoutStyle {
     this.barMinWidth = 56,
     this.barPadding = 8,
     this.chordSpacing = 10,
-    this.minCellWidth = 14,
+    this.minCellWidth = 18,
     this.staffTextInset = 2,
     this.staffTextBottomInset = 2,
     this.barHeight = 44,
@@ -81,6 +81,32 @@ class LayoutStyle {
   /// An empty cell still occupies this much room. It has to: a cell is where a sustained chord
   /// is drawn, and letting empty cells collapse would pack the chords of a bar into a width that
   /// no longer says anything about where in the bar they fall.
+  ///
+  /// IT IS ALSO THE PITCH GAP BETWEEN TWO NOTES ON ADJACENT BEATS, and that is why the default is
+  /// 18 and not the 14 it was. The melody staff places a note at its cell's own column
+  /// (`LayoutEngine._placeMelody` hands the staff the offsets the chords use), so two notes on
+  /// adjacent beats stand exactly one cell apart — and a notehead is
+  /// `MelodyMetrics.noteheadWidth` = 1.2 staff spaces = **15.6** logical pixels at the default
+  /// [melodyStaffSpace] of 13. At 14 the heads of two adjacent-beat notes OVERLAP by 1.6 pixels:
+  /// they are drawn merged into one shape, and a reader of the ink finds one blob where the
+  /// musician wrote two notes. That was measured, not reasoned about — a raster reader scored 0 of
+  /// 4 notes on a bar engraved with the old default and 16 of 16 with the application's own 18 —
+  /// so the old default was a false statement about where a note is.
+  ///
+  /// THE MARGIN IT LEAVES, IN NUMBERS: 18 − 15.6 = **2.4 logical pixels** of clear white between
+  /// two adjacent-beat noteheads, which is 4.8 device pixels at the 2× ratio of the owner's tablet
+  /// and 0.185 of a staff space. This is the same value `apps/mobile` has been passing explicitly
+  /// since the staff was built, so raising the DEFAULT changes no pixel of the application and only
+  /// repairs the geometry every other caller was getting: `viewer_screen.dart`'s explicit 18 and
+  /// this default are now one number instead of a correct call beside a wrong default.
+  ///
+  /// [`beatMarkMinCellWidth`] is 18 for the same reason and says so: a four-beat bar must have room
+  /// to name its beats, and the two values were documented as "the same" while one of them was not.
+  ///
+  /// THE MARGIN IS PROTECTED BY A CHECK, NOT BY THIS COMMENT: `melody_cell_width_test.dart` asserts
+  /// that this value stays at least 2.4 pixels above `MelodyMetrics.noteheadWidth ×
+  /// melodyStaffSpace`, so a narrower default or a larger notehead fails the suite instead of
+  /// silently merging two notes on the page.
   final double minCellWidth;
 
   /// Horizontal inset of a staff-text line from the bar's left edge.

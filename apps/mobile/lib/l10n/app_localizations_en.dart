@@ -149,13 +149,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get create => 'Create';
 
   @override
-  String get tooltipInkOn => 'Drawing: the pen draws, a finger still selects';
+  String get tooltipInkOn =>
+      'Drawing: the pen and a finger both write, and two fingers move the sheet';
 
   @override
   String get tooltipInkOffEraserOn => 'Pen off: the eraser is on';
 
   @override
-  String get tooltipInkOff => 'Selecting: the pen and a finger both select';
+  String get tooltipInkOff =>
+      'Selecting: a tap selects a bar, a drag moves the sheet';
 
   @override
   String get tooltipEraserOn =>
@@ -202,21 +204,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuSettings => 'Settings';
 
   @override
-  String get menuRecognitionOn => 'Recognise my barlines: ON';
+  String get menuRecognitionOn => 'Recognition: ON';
 
   @override
-  String get menuRecognitionOff => 'Recognise my barlines: OFF';
+  String get menuRecognitionOff => 'Recognition: OFF';
 
   @override
   String get tooltipRecognitionOn =>
-      'Recognition is on: a barline you draw is drawn as an ideal line';
+      'Recognition is on: what it recognises is drawn in place of your handwriting';
 
   @override
   String get tooltipRecognitionOff =>
       'Recognition is off: your handwriting is drawn exactly as you wrote it';
 
   @override
-  String get selectionPrompt => 'Tap a bar to select it.';
+  String get selectionPrompt =>
+      'Tap a bar to select it. A drag moves the sheet.';
+
+  @override
+  String get penActiveHint =>
+      'Drawing is on: a touch writes. Two fingers move the sheet and a pinch zooms. To choose bars, press Select.';
 
   @override
   String selectionBar(int bar) {
