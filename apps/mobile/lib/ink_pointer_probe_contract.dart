@@ -47,12 +47,29 @@ class InkProbeControl {
   /// Discards everything measured so far, so a run can mark the moment its own input began.
   void reset() => _reset();
 
+  /// The probe's OWN measurements, with nothing folded in, ready to serialise.
+  ///
+  /// THIS IS THE ONE A CALLER INSIDE THE APPLICATION MUST USE, and the reason is a cycle that cost
+  /// the pen its whole first stroke budget. The application's ink state describes the document, and
+  /// one of the things it carries is what the browser delivered — that is [report] here. But [report]
+  /// folds the LAST PUBLISHED ink state back in under `ink`, so an application that read [report] in
+  /// order to build the next state would publish a state containing the previous one, and the one
+  /// before that inside it. Measured on the owner's tablet: the published line reached 42.7 million
+  /// characters after thirty-nine strokes, growing by a full copy of the document per stroke, and the
+  /// serialisation of it took 2.8 s per stroke — which starved the input queue until a one-second
+  /// gesture was delivered as two events. A state cannot contain itself; this getter is the half that
+  /// makes that true, and [report] keeps its fold for a tool that wants both halves in one call.
+  Map<String, Object?> get counters => _report();
+
   /// The measurements as a plain map, ready to be written to a log or serialised into a page.
   ///
   /// The ink state the application published is folded in under `ink`, so one call answers both
   /// halves of a verification. It is parsed from its JSON line here rather than held as a map,
   /// because that is the shape it is published in and a second representation is a second thing
   /// that could disagree with the first.
+  ///
+  /// NOT FOR THE APPLICATION'S OWN USE: the published state is built by the application, so reading
+  /// it back inside the state's own construction is a cycle. Use [counters] there.
   Map<String, Object?> report() {
     final Map<String, Object?> measured = _report();
     final String? ink = publishedInkState;

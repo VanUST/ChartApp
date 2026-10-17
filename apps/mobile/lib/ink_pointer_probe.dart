@@ -47,8 +47,17 @@ export 'ink_pointer_probe_stub.dart'
 /// `ink`.
 ///
 /// A named wrapper rather than a direct field write, so a caller cannot leave a tool with a line it
-/// cannot parse: the value is validated here, at the moment it is stored, and a state that is not
-/// JSON is refused rather than published as a line that reads like a report and is not one.
+/// cannot parse: the value is checked here, at the moment it is stored.
+///
+/// THE CHECK IS A SHAPE CHECK AND A DEBUG-TIME ROUND TRIP, NOT A PARSE IN THE SHIPPED BUILD. It used
+/// to be `jsonDecode(state)` unconditionally, and that was half the cost of the whole pen defect: the
+/// only caller produces the value with `jsonEncode` from a map it just built, so the parse could not
+/// fail, while decoding a multi-megabyte line twice per stroke was measured at 33 % of a publication
+/// that reached 2.8 s. A validating parse of a string this file produced itself is a check that
+/// cannot be false being paid for at the price of the most expensive operation in the application.
+/// The shape check below is what a release build keeps, because it is true of every JSON object and
+/// catches the one mistake a caller can actually make — handing over something that is not one. The
+/// full parse is kept inside an `assert`, so every test run still proves the line round-trips.
 ///
 /// NOTHING IN THE APPLICATION READS THIS BACK. It is a one-way handoff to whatever is inspecting the
 /// page, and it carries no state the application itself consults.
@@ -57,10 +66,16 @@ void publishInkProbeState(String? state) {
     InkProbeControl.publishedInkState = null;
     return;
   }
-  try {
-    jsonDecode(state);
-  } on FormatException {
+  final String trimmed = state.trimLeft();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
     return;
   }
+  assert(
+    () {
+      jsonDecode(state);
+      return true;
+    }(),
+    'the published ink state must be a JSON object that parses back to itself',
+  );
   InkProbeControl.publishedInkState = state;
 }

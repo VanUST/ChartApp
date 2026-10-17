@@ -810,12 +810,21 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          input streams' tallies, the page transform, and every stroke with the anchor it was
   //          stored against. Without this a headless run can draw and photograph but cannot check a
   //          single number, because the application's Dart objects are unreachable from outside.
-  // INPUTS: None; reads the current session, page, layer and probe.
+  // INPUTS: withInk — whether every stroke's CANONICAL form is included. True for the reader a tool
+  //         calls on demand; false for the copy this screen publishes after every stroke, because
+  //         that copy is written on the frame after each lift and a canonical form per stroke makes
+  //         it cost time proportional to all the ink on the page, once per stroke, for ever. The two
+  //         flavours differ in that ONE key and in nothing else.
   // OUTPUTS: A map, empty when nothing is on screen. It is built on demand and never cached: a
   //          cached copy would be read right after input and answer with the state from before it,
-  //          which looks exactly like input that did nothing.
-  // KEYWORDS: verification-handoff, live-state, stroke-list, anchor, page-scale, no-cache
-  Map<String, Object?> _inkProbeState() {
+  //          which looks exactly like input that did nothing. With `withInk: false` the map still
+  //          answers which strokes exist, where each is anchored, how many points it has, where its
+  //          first point is and when its last one arrived — everything a run needs to say what
+  //          happened — and it omits only the coordinates, which a run that must compare the INK
+  //          asks this same method for without the flag.
+  // KEYWORDS: verification-handoff, live-state, stroke-list, anchor, page-scale, no-cache,
+  //           two-fidelities, ink-out-of-the-published-copy, cost-independent-of-ink
+  Map<String, Object?> _inkProbeState({bool withInk = true}) {
     final IRealLibrary? library = _library;
     final InkCaptureLayer? layer = _activeInkLayer;
     if (library == null || library.songs.isEmpty || layer == null) {
@@ -838,7 +847,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       'scale': _lastPageScale,
       'contact': layer.lastPointWasInk,
       'flutters': layer.inputReport,
-      'raw': probe?.report() ?? const <String, Object?>{},
+      // THE PROBE'S OWN COUNTERS, NOT ITS REPORT. `report()` folds the last published ink state in
+      // under `ink` so that a browser tool gets both halves in one call, so reading it HERE — while
+      // building the state that is about to be published — put the previous publication inside this
+      // one, and the one before that inside it. That is the defect A87 records: the published line
+      // grew by a full copy of the document per stroke and reached 42.7 million characters after
+      // thirty-nine strokes.
+      'raw': probe?.counters ?? const <String, Object?>{},
       'rule': layer.ruleReport,
       // --- TEXT CUES (the words written on the chart) ----------------------------------------
       // Reported beside the strokes for the same reason the strokes are: a browser-driving tool
@@ -869,12 +884,19 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             'pts': stroke.points.length,
             'p0': <double>[stroke.points.first.x, stroke.points.first.y],
             't': stroke.points.last.t,
-            // THE CANONICAL FORM, because the fields above are a summary and an eraser
-            // verification has to compare the STROKE: a removal and an undo that restored a
+            // THE CANONICAL FORM, WHEN ASKED FOR, because the fields above are a summary and an
+            // eraser verification has to compare the STROKE: a removal and an undo that restored a
             // re-derived stroke with the same id and the same first point would agree with every
             // summary field and disagree about the ink. This is the same JSON a `.chart` file
             // carries, so what a driver reads here is what the document actually holds.
-            'canonical': stroke.toJson(),
+            //
+            // ABSENT FROM THE PUBLISHED COPY, and that absence is the fix rather than a compromise.
+            // This one key is 99.9 % of the state's size — about 46 characters per point, so 1.5 MB
+            // at thirty thousand points and 5 MB at a hundred thousand — and the published copy is
+            // written once per stroke, which made it the only job in the application that cost time
+            // proportional to the page's whole ink on every lift. A run that needs the coordinates
+            // asks [inkStateReader], which calls this method with the flag left alone.
+            if (withInk) 'canonical': stroke.toJson(),
           },
       ],
       // --- THE PROGRAMME (the setlist being played) -------------------------------------------
@@ -1476,24 +1498,34 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   bool _inkPublishOwed = false;
 
   // PURPOSE: Publish the verification state, but only from a frame in which no contact is drawing,
-  //          so that a cost proportional to the ink on the page is never paid on the thread that
-  //          reads the pen.
+  //          so that no cost at all is paid on the thread that reads the pen.
   //
   //          THE WORK IS MOVED AND NOT DROPPED, AND THIS METHOD IS THE WHOLE OF THAT CLAIM. The
   //          publication is a one-way convenience for a tool inspecting the page; nothing in the
   //          application reads it back, so no behaviour depends on when it happens — but a tool that
   //          reads it after a stroke must still see the committed stroke, and it does: the lift
-  //          resumes the build that carries it, and the build calls this. What was removed from the
-  //          pen path is only the O(ink) serialisation that used to run inside a stroke, and the
-  //          interval that bounded it is gone with it.
+  //          resumes the build that carries it, and the build calls this.
+  //
+  //          MOVING IT WAS NOT ENOUGH, AND A87 IS WHY. The publication still cost time proportional
+  //          to the ink on the page, and — because the state read the probe's `report()`, which folds
+  //          the last published state back in — it also grew by one full copy of the document EVERY
+  //          STROKE. Measured on the owner's tablet: a 1.6 MB line after the first
+  //          stroke, 13.0 MB after twenty and 42.7 MB after thirty-nine, serialised at 2.8 s per
+  //          stroke by then, while the ink itself had stopped growing. The application's own frame
+  //          was the blocker, so the platform delivered a one-second gesture as two events and the
+  //          accepted point count fell to two. Off the pen's thread is not the same as out of the
+  //          budget: the thing that must be bounded is the WORK, and it is bounded now — the state
+  //          published here carries no point coordinates, so it costs time proportional to the
+  //          number of strokes and to nothing else.
   // INPUTS: None. The owed flag is set by [_onPagePointerMove] while a contact is drawing, and the
   //         ink layer is asked whether a contact still is.
   // OUTPUTS: Nothing. Returns without publishing when no change is owed or a contact is still down,
   //          which is what makes the call safe from every frame; otherwise publishes through
-  //          [_publishInkState] and charges the time to [_PenPathCost]. Note that the charge lands on
-  //          whichever stroke's report is open when the publication finally runs, so `publish_ms`
-  //          reads zero throughout a stroke by construction.
-  // KEYWORDS: verification-handoff, publish-when-idle, pen-starvation, latency, deferred-work
+  //          [_publishInkState] and charges the time to [_PenPathCost]. The charge lands on whichever
+  //          stroke's report is open when the publication finally runs, so `publish_ms` reads zero
+  //          throughout a stroke by construction and a few tenths of a millisecond between two.
+  // KEYWORDS: verification-handoff, publish-when-idle, pen-starvation, latency, deferred-work,
+  //           bounded-work, a62, a87
   void publishInkStateWhenIdle() {
     if (!_inkPublishOwed || (_activeInkLayer?.isDrawingInk ?? false)) {
       return;
@@ -1509,19 +1541,52 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // INPUTS: None.
   // OUTPUTS: Nothing when the state is empty or unchanged. The published line is a convenience, not
   //          the source of truth: the live reader is what a verification should call, because this
-  //          one is written during a build and is therefore as old as the last frame.
-  // KEYWORDS: verification-handoff, publish, change-guard, convenience-copy
+  //          one is written during a build and is therefore as old as the last frame — and, since
+  //          A87, because this copy carries every stroke's address but not its points.
+  //
+  //          THE COST IS MEASURED IN PARTS, because a total cannot say which part to fix and this
+  //          method is the one place where work proportional to the document used to be spent once
+  //          per stroke. `build_us` is [_inkProbeState]; `encode_us` is the JSON of it; `store_us`
+  //          is the handoff. `chars` is the length of that line, `points` the number of ink points
+  //          behind it, and `nested` says whether the previous publication ended up inside this one
+  //          — it is the flag that would have caught A87 on its first stroke, and it is kept so that
+  //          a regression of that shape fails a measurement instead of a musician's page.
+  // KEYWORDS: verification-handoff, publish, change-guard, convenience-copy, cost-split, instrument,
+  //           summary-not-ink, a87
   void _publishInkState() {
-    final Map<String, Object?> state = _inkProbeState();
+    final Stopwatch clock = Stopwatch()..start();
+    final Map<String, Object?> state = _inkProbeState(withInk: false);
+    final int buildMicros = clock.elapsedMicroseconds;
     if (state.isEmpty) {
       return;
     }
     final String line = jsonEncode(state);
+    final int encodeMicros = clock.elapsedMicroseconds - buildMicros;
     if (line == _publishedInkState) {
       return;
     }
     _publishedInkState = line;
+    final int compareMicros =
+        clock.elapsedMicroseconds - buildMicros - encodeMicros;
     publishInkProbeState(line);
+    final int storeMicros =
+        clock.elapsedMicroseconds - buildMicros - encodeMicros - compareMicros;
+    final Object? raw = state['raw'];
+    final bool nested = raw is Map && raw.containsKey('ink');
+    final int strokes = (state['strokes'] as List<Object?>?)?.length ?? 0;
+    final int points =
+        ((state['strokes'] as List<Object?>?) ?? const <Object?>[]).fold<int>(
+          0,
+          (int sum, Object? stroke) {
+            final Object? count = stroke is Map ? stroke['pts'] : null;
+            return sum + (count is int ? count : 0);
+          },
+        );
+    debugPrint(
+      'viewer.ink.publish build_us=$buildMicros encode_us=$encodeMicros '
+      'compare_us=$compareMicros store_us=$storeMicros chars=${line.length} '
+      'strokes=$strokes points=$points nested=$nested',
+    );
   }
 
   // PURPOSE: Replace the shown library with the one the current reference holds, or record why it
@@ -3188,8 +3253,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          resumes the build that carries the committed stroke. A tool that reads the state after
   //          a stroke therefore still sees the stroke, and it no longer reads it at the pen's
   //          expense. See [publishInkStateWhenIdle] for why the work is moved and not dropped.
+  //
+  //          MOVING IT WAS ONLY HALF, AND A87 MEASURED THE OTHER HALF. The publication was unbounded
+  //          as well: it embedded the previous publication, so it grew by a full copy of the document
+  //          per stroke and reached 42.7 MB / 2.8 s per stroke by the thirty-ninth. Off the pen's
+  //          path, it still blocked the frame that follows every lift, and the input queue backed up
+  //          behind THAT — a one-second gesture delivered as two events, which is the same starvation
+  //          this paragraph describes arriving by a longer road. The pen path is unchanged by A87;
+  //          what changed is that the deferred work is now bounded.
   // KEYWORDS: verification-handoff, publish-when-idle, cost-measurement, no-rebuild, latency,
-  //           pen-starvation
+  //           pen-starvation, bounded-work, a62, a87
   void _onPagePointerMove() {
     final InkCaptureLayer? layer = _activeInkLayer;
     if (!(layer?.isDrawingInk ?? false)) {
@@ -3218,12 +3291,26 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          for both the stroke that was committed and the strokes that were erased — including the
   //          case of an eraser drag that crossed twelve of them. With nothing written the method
   //          costs a field read, which is why it is safe on the pen's own lift.
+  //          THE LIFT ALSO ENDS THE STROKE FOR THE COST INSTRUMENT, and that is the one line in this
+  //          method that is not about the document. The counters are started by the first MOVE of a
+  //          stroke, and the flag that detects "first move" was cleared only by a move that arrived
+  //          while nothing was drawing — which never happens between two strokes, because the pen
+  //          goes down again before any such move can occur. So `viewer.pen.cost` accumulated across
+  //          every stroke of a run: A84 §6 saw `samples` reach 11 453 and `publish_ms` 2 545.4 over
+  //          twenty strokes, and A86 §9.3 read a number like that as a cost PER STROKE and was
+  //          misled by it. The lift is one event per contact, so clearing the flag here costs the
+  //          pen nothing — the per-sample path is not touched — and it is what makes the next
+  //          stroke's report start at zero.
   // INPUTS: None. The active song's ink layer is asked how many edits it has appended.
   // OUTPUTS: Nothing. Rebuilds when the count moved since the last lift, so the undo control becomes
   //          live and the chart stops showing ink the document no longer holds, and offers the
-  //          verification state for publication by the frame that follows.
-  // KEYWORDS: pointer-up, commit-then-show, drag-not-a-tap, edit-counter, undo-liveness, d34
+  //          verification state for publication by the frame that follows. Always clears
+  //          [_penWasDrawing], even when nothing was written, because the instrument's stroke ended
+  //          whether or not it left ink.
+  // KEYWORDS: pointer-up, commit-then-show, drag-not-a-tap, edit-counter, undo-liveness, d34,
+  //           per-stroke-counters, a87
   void _onPagePointerUp() {
+    _penWasDrawing = false;
     final InkCaptureLayer? layer = _activeInkLayer;
     if (layer == null || layer.documentEdits == _shownDocumentEdits) {
       return;
@@ -4231,16 +4318,27 @@ class _EraserGlyphPainter extends CustomPainter {
 //          last report of a stroke is partial: the sample count at its end is in the stroke's own
 //          `ink.stroke.commit` line, which is the number to compare across builds.
 //
+//          THE COUNTERS ARE PER STROKE, AND THAT IS A FIX RATHER THAN A DESCRIPTION. They are
+//          started by the first move of a stroke and, until A87, were started again only when a move
+//          arrived with no contact drawing — which does not happen between two strokes. The numbers
+//          therefore ran on across a whole run: twenty strokes reported `samples` 11 453 and
+//          `publish_ms` 2 545.4, and by then the ratio between them described the RUN and not a
+//          stroke. A86 §9.3 read `publish_ms` against a two-sample stroke from that same
+//          accumulator and reported a per-stroke cost that the instrument had not measured. The
+//          lift now clears the flag that starts a stroke (see [_onPagePointerUp]), so a report made
+//          during one stroke counts that stroke and only it.
+//
 //          WHAT `publish_ms` MEANS NOW, AND WHY A READER MUST NOT MISREAD IT AS A REGRESSION. It
-//          accumulates the cost of publications that a stroke OWED, and those publications now run
-//          after the pen has left the glass, so this number is zero for as long as the contact
-//          lasts and the publication is charged to the report of whichever stroke is open when it
-//          finally runs. Zero here therefore means "nothing on the pen path serialised anything",
-//          which is the property the number was introduced to establish; the total is still worth
-//          reading, because a total that grows with the document is still an O(ink) job, and the
-//          question of whether it can be made cheaper is left open rather than hidden.
+//          accumulates the cost of publications that a stroke OWED, and those publications run after
+//          the pen has left the glass, so this number is zero for as long as the contact lasts and
+//          the publication is charged to the report of whichever stroke is open when it finally
+//          runs. Zero here therefore means "nothing on the pen path serialised anything", which is
+//          the property the number was introduced to establish; the total is still worth reading,
+//          because a total that grows with the document is a job whose cost nobody bounded. It is
+//          bounded now (A87): the published state carries no point coordinates, so a stroke's
+//          publication costs a few tenths of a millisecond whatever the page holds.
 // KEYWORDS: pen-latency, cost-measurement, layout-passes, structured-log, no-flood, ldd,
-//           publish-when-idle
+//           publish-when-idle, per-stroke-counters, a87
 class _PenPathCost {
   int _samples = 0;
   int _layoutPasses = 0;
