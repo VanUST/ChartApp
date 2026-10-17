@@ -66,7 +66,6 @@ import '../key.dart';
 import '../pitch.dart';
 import '../song/section.dart';
 import '../song/song.dart';
-import '../song/staff.dart';
 import 'obfuscation.dart';
 import 'parser.dart';
 
@@ -411,7 +410,6 @@ IRealParseResult parseIRealPayload(String decoded, {String documentId = ''}) {
   }
 
   List<Section> sections = const <Section>[];
-  StaffSet staffSet = StaffSet.chordsOnly;
   final String? music = payload.musicField;
   if (music == null) {
     issues.add(
@@ -437,7 +435,6 @@ IRealParseResult parseIRealPayload(String decoded, {String documentId = ''}) {
       );
     }
     sections = notation.song.sections;
-    staffSet = notation.song.staffSet;
   }
 
   final Key baseKey = writtenKey ?? Key.cMajor;
@@ -465,7 +462,6 @@ IRealParseResult parseIRealPayload(String decoded, {String documentId = ''}) {
       key: baseKey,
       tempo: bpm ?? 0,
       sections: sections,
-      staffSet: staffSet,
     ),
     issues: issues,
   );

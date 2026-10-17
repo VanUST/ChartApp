@@ -23,7 +23,6 @@
 /// ChartApp design system and interaction layer.
 library;
 
-export 'src/barline_painter.dart';
 export 'src/chart_painter.dart';
 export 'src/flutter_text_metrics.dart';
 export 'src/ink_painter.dart';

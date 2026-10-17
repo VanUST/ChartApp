@@ -97,54 +97,6 @@ abstract final class ModelJson {
         denominator: EventJson.integer(json, 'denominator'),
       );
 
-  /// Writes a [NoteValue] as its base, dot count and optional tuplet ratio.
-  static Map<String, Object?> noteValue(NoteValue value) {
-    final Tuplet? tuplet = value.tuplet;
-    return <String, Object?>{
-      'base': value.base.name,
-      'dots': value.dots,
-      'tuplet': tuplet == null
-          ? null
-          : <String, Object?>{'actual': tuplet.actual, 'normal': tuplet.normal},
-    };
-  }
-
-  /// Rebuilds a [NoteValue] from [json].
-  static NoteValue decodeNoteValue(Map<String, Object?> json) {
-    final Map<String, Object?>? tuplet = EventJson.optionalObject(
-      json,
-      'tuplet',
-    );
-    return NoteValue(
-      base: EventJson.enumeration(
-        NoteBase.values,
-        EventJson.string(json, 'base'),
-        'base',
-      ),
-      dots: EventJson.integer(json, 'dots'),
-      tuplet: tuplet == null
-          ? null
-          : Tuplet(
-              actual: EventJson.integer(tuplet, 'actual'),
-              normal: EventJson.integer(tuplet, 'normal'),
-            ),
-    );
-  }
-
-  /// Writes a [PitchedNote] as its written pitch and octave.
-  static Map<String, Object?> pitchedNote(PitchedNote pitch) =>
-      <String, Object?>{
-        'note': writtenNote(pitch.note),
-        'octave': pitch.octave,
-      };
-
-  /// Rebuilds a [PitchedNote] from [json].
-  static PitchedNote decodePitchedNote(Map<String, Object?> json) =>
-      PitchedNote(
-        note: decodeWrittenNote(EventJson.object(json, 'note')),
-        octave: EventJson.integer(json, 'octave'),
-      );
-
   /// Writes a [ChordMark] as the chord plus its place and engraving size.
   ///
   /// THE PLACE CARRIES THE BAR, so this payload has one address and not two: the mark's place is
@@ -170,38 +122,6 @@ abstract final class ModelJson {
     ),
   );
 
-  /// Writes a [NoteMark] as its pitch, written duration, place and tie.
-  static Map<String, Object?> noteMark(NoteMark note) => <String, Object?>{
-    'pitch': pitchedNote(note.pitch),
-    'value': noteValue(note.value),
-    'place': note.place.toJson(),
-    'tiedToNext': note.tiedToNext,
-  };
-
-  /// Rebuilds a [NoteMark] from [json].
-  static NoteMark decodeNoteMark(Map<String, Object?> json) => NoteMark(
-    pitch: decodePitchedNote(EventJson.object(json, 'pitch')),
-    value: decodeNoteValue(EventJson.object(json, 'value')),
-    place: EventJson.anchoredPlace(json, 'place'),
-    tiedToNext: EventJson.boolean(json, 'tiedToNext'),
-  );
-
-  /// Writes a [PercussionMark] as its instrument, written duration and place.
-  static Map<String, Object?> percussionMark(PercussionMark hit) =>
-      <String, Object?>{
-        'instrument': hit.instrument,
-        'value': noteValue(hit.value),
-        'place': hit.place.toJson(),
-      };
-
-  /// Rebuilds a [PercussionMark] from [json].
-  static PercussionMark decodePercussionMark(Map<String, Object?> json) =>
-      PercussionMark(
-        instrument: EventJson.integer(json, 'instrument'),
-        value: decodeNoteValue(EventJson.object(json, 'value')),
-        place: EventJson.anchoredPlace(json, 'place'),
-      );
-
   /// Writes a [Bar] with every field the model carries, including the structural signs.
   ///
   /// All of them are written because a `measure.*` event carries a whole bar and carries it for
@@ -213,10 +133,6 @@ abstract final class ModelJson {
     'timeSignature': timeSignature(bar.timeSignature),
     'size': bar.size.factor,
     'chords': <Object?>[for (final ChordMark c in bar.chords) chordMark(c)],
-    'melody': <Object?>[for (final NoteMark n in bar.melody) noteMark(n)],
-    'percussion': <Object?>[
-      for (final PercussionMark h in bar.percussion) percussionMark(h),
-    ],
     'openingBarline': bar.openingBarline.name,
     'closingBarline': bar.closingBarline.name,
     'volta': bar.volta?.number,
@@ -247,14 +163,6 @@ abstract final class ModelJson {
       chords: <ChordMark>[
         for (final Object? entry in EventJson.array(json, 'chords'))
           decodeChordMark(_asObject(entry, 'chords')),
-      ],
-      melody: <NoteMark>[
-        for (final Object? entry in EventJson.array(json, 'melody'))
-          decodeNoteMark(_asObject(entry, 'melody')),
-      ],
-      percussion: <PercussionMark>[
-        for (final Object? entry in EventJson.array(json, 'percussion'))
-          decodePercussionMark(_asObject(entry, 'percussion')),
       ],
       openingBarline: EventJson.enumeration(
         Barline.values,
@@ -389,130 +297,6 @@ abstract final class ModelJson {
     ),
   );
 
-  /// Writes a [StaffSpec] as its kind, clef and — for a percussion staff — its drum map.
-  ///
-  /// The drum map's instrument numbers are written as JSON object keys, which JSON forces to be
-  /// strings. That is the only reason the reader has to parse them back, and the reader reports a
-  /// key that is not a number rather than dropping the instrument.
-  static Map<String, Object?> staffSpec(StaffSpec spec) {
-    final Map<int, String>? drumMap = spec.drumMap;
-    return <String, Object?>{
-      'kind': spec.kind.name,
-      'clef': spec.clef,
-      'drumMap': drumMap == null
-          ? null
-          : <String, Object?>{
-              for (final MapEntry<int, String> entry in drumMap.entries)
-                '${entry.key}': entry.value,
-            },
-    };
-  }
-
-  /// Rebuilds a [StaffSpec] from [json], enforcing the rule the model's own constructor asserts.
-  ///
-  /// The two states the model forbids — a pitched staff carrying a drum map, and a percussion
-  /// staff without one — are reported as [EventFormatException] rather than reaching the assert,
-  /// because a decode path must not depend on asserts being enabled.
-  static StaffSpec decodeStaffSpec(Map<String, Object?> json) {
-    final StaffKind kind = EventJson.enumeration(
-      StaffKind.values,
-      EventJson.string(json, 'kind'),
-      'kind',
-    );
-    final Map<String, Object?>? rawMap = EventJson.optionalObject(
-      json,
-      'drumMap',
-    );
-    final Map<int, String>? drumMap = rawMap == null
-        ? null
-        : _decodeDrumMap(rawMap);
-    if (kind == StaffKind.pitched && drumMap != null) {
-      throw const EventFormatException(
-        'field "drumMap" is present on a pitched staff, which reads notes, '
-        'not a drum map',
-      );
-    }
-    if (kind == StaffKind.percussion && drumMap == null) {
-      throw const EventFormatException(
-        'a percussion staff without field "drumMap" has no way to name what '
-        'is struck',
-      );
-    }
-    return StaffSpec(
-      kind: kind,
-      drumMap: drumMap,
-      clef: EventJson.string(json, 'clef'),
-    );
-  }
-
-  /// Rebuilds a drum map from its JSON object, reporting an instrument key that is not a number.
-  static Map<int, String> _decodeDrumMap(Map<String, Object?> json) {
-    final Map<int, String> drumMap = <int, String>{};
-    for (final MapEntry<String, Object?> entry in json.entries) {
-      final int? instrument = int.tryParse(entry.key);
-      if (instrument == null) {
-        throw EventFormatException(
-          'an entry of "drumMap" has key "${entry.key}", which is not an '
-          'instrument number',
-        );
-      }
-      final Object? label = entry.value;
-      if (label is! String) {
-        throw EventFormatException(
-          'the label of drum-map instrument $instrument is not a string',
-        );
-      }
-      drumMap[instrument] = label;
-    }
-    return drumMap;
-  }
-
-  /// Writes a [StaffSet] as its optional pitched and percussion slots.
-  static Map<String, Object?> staffSet(StaffSet set) {
-    final StaffSpec? pitched = set.pitched;
-    final StaffSpec? percussion = set.percussion;
-    return <String, Object?>{
-      'pitched': pitched == null ? null : staffSpec(pitched),
-      'percussion': percussion == null ? null : staffSpec(percussion),
-    };
-  }
-
-  /// Rebuilds a [StaffSet] from [json], reporting a staff placed in the wrong slot.
-  static StaffSet decodeStaffSet(Map<String, Object?> json) {
-    final Map<String, Object?>? pitched = EventJson.optionalObject(
-      json,
-      'pitched',
-    );
-    final Map<String, Object?>? percussion = EventJson.optionalObject(
-      json,
-      'percussion',
-    );
-    return StaffSet(
-      pitched: pitched == null
-          ? null
-          : _staffOfKind(pitched, StaffKind.pitched, 'pitched'),
-      percussion: percussion == null
-          ? null
-          : _staffOfKind(percussion, StaffKind.percussion, 'percussion'),
-    );
-  }
-
-  /// Rebuilds the staff at [field] and reports it when its kind is not [kind].
-  static StaffSpec _staffOfKind(
-    Map<String, Object?> json,
-    StaffKind kind,
-    String field,
-  ) {
-    final StaffSpec spec = decodeStaffSpec(json);
-    if (spec.kind != kind) {
-      throw EventFormatException(
-        'field "$field" holds a ${spec.kind.name} staff where a ${kind.name} '
-        'one belongs',
-      );
-    }
-    return spec;
-  }
-
   /// Writes a [SongMetadata] as the four fields it carries.
   ///
   /// All four are written every time, including an empty title and a zero tempo, so that a reader
@@ -554,7 +338,6 @@ abstract final class ModelJson {
     'style': song.style,
     'key': key(song.key),
     'tempo': song.tempo,
-    'staffSet': staffSet(song.staffSet),
     'sections': <Object?>[
       for (final Section section in song.sections) ModelJson.section(section),
     ],
@@ -572,10 +355,9 @@ abstract final class ModelJson {
       for (final Object? entry in EventJson.array(json, 'sections'))
         decodeSection(_asObject(entry, 'sections')),
     ],
-    staffSet: decodeStaffSet(EventJson.object(json, 'staffSet')),
   );
 
-  /// Writes a [DocumentState] as the song plus the three anchored collections.
+  /// Writes a [DocumentState] as the song plus the two anchored collections.
   ///
   /// This is the materialised snapshot a container stores so that opening a document does not
   /// depend on replaying every operation, and so that a reader which cannot understand a newer
@@ -585,10 +367,6 @@ abstract final class ModelJson {
         'song': song(state.song),
         'strokes': <Object?>[
           for (final InkStroke stroke in state.strokes) stroke.toJson(),
-        ],
-        'annotations': <Object?>[
-          for (final Annotation annotation in state.annotations)
-            annotation.toJson(),
         ],
         'textCues': <Object?>[
           for (final TextCue cue in state.textCues) cue.toJson(),
@@ -602,10 +380,6 @@ abstract final class ModelJson {
         strokes: <InkStroke>[
           for (final Object? entry in EventJson.array(json, 'strokes'))
             InkStroke.fromJson(_asObject(entry, 'strokes')),
-        ],
-        annotations: <Annotation>[
-          for (final Object? entry in EventJson.array(json, 'annotations'))
-            Annotation.fromJson(_asObject(entry, 'annotations')),
         ],
         textCues: <TextCue>[
           for (final Object? entry in EventJson.array(json, 'textCues'))

@@ -22,8 +22,6 @@ extension BarEditing on Bar {
     TimeSignature? timeSignature,
     BarSize? size,
     List<ChordMark>? chords,
-    List<NoteMark>? melody,
-    List<PercussionMark>? percussion,
     Barline? openingBarline,
     Barline? closingBarline,
     Volta? volta,
@@ -37,8 +35,6 @@ extension BarEditing on Bar {
     timeSignature: timeSignature ?? this.timeSignature,
     size: size ?? this.size,
     chords: chords ?? this.chords,
-    melody: melody ?? this.melody,
-    percussion: percussion ?? this.percussion,
     openingBarline: openingBarline ?? this.openingBarline,
     closingBarline: closingBarline ?? this.closingBarline,
     volta: clearVolta ? null : (volta ?? this.volta),
@@ -72,7 +68,6 @@ extension SongEditing on Song {
     Key? key,
     int? tempo,
     List<Section>? sections,
-    StaffSet? staffSet,
   }) => Song(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -81,7 +76,6 @@ extension SongEditing on Song {
     key: key ?? this.key,
     tempo: tempo ?? this.tempo,
     sections: sections ?? this.sections,
-    staffSet: staffSet ?? this.staffSet,
   );
 
   /// Returns a copy of this song carrying [metadata]'s four fields.

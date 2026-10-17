@@ -24,20 +24,13 @@ import 'dart:convert';
 
 import '../anchored_place.dart';
 import '../chord.dart';
-import '../editing/bar_range.dart';
-import '../editing/chord_symbol_parser.dart';
-import '../editing/selection.dart';
 import '../key.dart';
 import '../pitch.dart';
 import '../song/bar.dart';
-import '../song/note.dart';
-import '../song/note_value.dart';
 import '../song/section.dart';
 import '../song/song.dart';
-import '../song/staff.dart';
 import '../song/time_signature.dart';
 import '../spelling_table.dart';
-import '../transposition.dart';
 
 // The place type lives outside this library, because the song model carries places too and a
 // model may not depend on the operation log. It is RE-EXPORTED rather than merely imported for two
@@ -49,35 +42,20 @@ import '../transposition.dart';
 // from a cell while the surface speaks in beats. Both exports go together when the shim dies.
 export '../anchored_place.dart';
 
-part 'barline.dart';
-part 'barline_events.dart';
-part 'annotation.dart';
-part 'annotation_events.dart';
-part 'chord_events.dart';
+part '../editing/edit_session.dart';
+part '../editing/setlist_session.dart';
 part 'document_edits.dart';
 part 'document_event.dart';
 part 'document_reducer.dart';
 part 'document_state.dart';
-part '../editing/edit_session.dart';
-part '../editing/selection_clip.dart';
-part '../editing/setlist_session.dart';
 part 'event_codec.dart';
 part 'event_json.dart';
 part 'ink.dart';
 part 'ink_events.dart';
-part 'key_events.dart';
-part 'mark_events.dart';
-part 'measure_events.dart';
-part 'meter_events.dart';
 part 'model_json.dart';
-part 'note_events.dart';
-part 'section_events.dart';
-part 'selection_events.dart';
 part 'setlist.dart';
 part 'setlist_events.dart';
-part 'sign_events.dart';
 part 'size_events.dart';
 part 'song_events.dart';
-part 'staff_events.dart';
 part 'text_cue.dart';
 part 'textcue_events.dart';

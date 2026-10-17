@@ -34,7 +34,6 @@
 //  below the staff is over neither and gets null from both. "A chord cannot be engraved below the
 //  bar" is therefore not a special case here — below the bar is a place this file does not name.
 import '../song/bar.dart';
-import '../song/note.dart';
 import 'geometry.dart';
 import 'page_layout.dart';
 
@@ -133,26 +132,6 @@ ChordMark? nearestChordAt(
 // OUTPUTS: The note whose x is nearest [offsetX] within [tolerance], or null. The x compared is the
 //          notehead's CENTRE, which is what a note's `place.offsetX` means (see [NoteMark]).
 // KEYWORDS: note-hit, nearest, tolerance, coordinate, notehead-centre, no-grid
-/// Returns the note of [bar] nearest [offsetX] within [tolerance], or null.
-NoteMark? nearestNoteAt(
-  List<NoteMark> notes,
-  double offsetX, {
-  required double tolerance,
-}) {
-  NoteMark? best;
-  double bestDistance = tolerance;
-  for (final NoteMark note in notes) {
-    final double distance = (note.offsetX - offsetX).abs();
-    if (best == null || distance < bestDistance) {
-      if (distance <= tolerance) {
-        best = note;
-        bestDistance = distance;
-      }
-    }
-  }
-  return best;
-}
-
 // PURPOSE: Answer the one question a touch asks of the melody staff: which bar's staff is under this
 //          point. This is the second entrance to hit testing and it exists because the staff is a
 //          SECOND, INDEPENDENT surface over the same bars: the chord line decides where a chord is
@@ -182,41 +161,6 @@ NoteMark? nearestNoteAt(
 //          the second died with the grid. A bar's staff is one band, and WHERE in it the finger
 //          landed is the `x` of the hit — which is what a note's place means.
 // KEYWORDS: hit-testing, melody-staff, second-surface, address-agreement, pure-dart, no-columns
-/// Returns the bar whose staff band contains [pagePoint], or null.
-ChartHit? hitTestMelodyStaff(PageLayout page, LayoutOffset pagePoint) {
-  for (final PlacedSystem system in page.systems) {
-    if (pagePoint.y < system.bounds.top || pagePoint.y > system.bounds.bottom) {
-      continue;
-    }
-    for (final PlacedBar bar in system.bars) {
-      if (bar.melody.isEmpty) {
-        continue;
-      }
-      // The band the staff is touchable over: its five lines, and half a space below them where a
-      // note on the ledger line under the staff sits. Nothing below that is staff.
-      final LayoutRect lines = bar.melody.bounds;
-      final double space = lines.size.height / 4;
-      final LayoutRect band = LayoutRect.fromLTWH(
-        lines.left,
-        lines.top,
-        lines.size.width,
-        lines.size.height + space / 2,
-      );
-      if (!band.contains(pagePoint)) {
-        continue;
-      }
-      return ChartHit(
-        bar: bar,
-        local: LayoutOffset(
-          pagePoint.x - bar.bounds.left,
-          pagePoint.y - bar.bounds.top,
-        ),
-      );
-    }
-  }
-  return null;
-}
-
 // PURPOSE: Report which bar of [page] lies under [pagePoint]. This is the single entrance to hit
 //          testing for the chord line, so that the ambiguous cases below have one answer each
 //          instead of one per call site.

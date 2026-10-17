@@ -78,6 +78,14 @@ IRealLibrary libraryOf(Song song) => IRealLibrary(
 
 /// A chart long enough that FIT must genuinely shrink it, which is the case a page-scale defect
 /// survives on every ordinary page and only shows on a fitted one.
+///
+/// NINETY-SIX BARS AND NOT SIXTY-FOUR, AND THE REASON IS A MEASUREMENT. The fitted page used to be
+/// reached by pressing the scene bar's FIT control while the chrome was shown; that control is
+/// deleted, and the case now reaches FIT the way a musician does — by HIDING the chrome, which
+/// removes the rail and WIDENS the pane from 439 to 700 across [sceneBarTabletWidth]. The wider pane
+/// fits sixty-four bars at exactly 1:1, which would leave the "FIT actually shrank the page"
+/// assertion unsatisfiable and the case proving nothing; ninety-six bars is long enough that the
+/// same pane has to shrink them, which is the state the case is about.
 Song longInkChart() => Song(
   id: 'ink-mode-long',
   title: 'Ink mode long',
@@ -86,7 +94,7 @@ Song longInkChart() => Song(
   key: Key.cMajor,
   tempo: 120,
   sections: <Section>[
-    for (int section = 0; section < 4; section++)
+    for (int section = 0; section < 6; section++)
       Section(
         id: 'S$section',
         label: SectionLabel.letter(String.fromCharCode(65 + section)),
@@ -445,7 +453,14 @@ void main() {
       1,
       reason: 'the narrow pane must still open in PAGES, or the two cases cannot be compared',
     );
-    final PlacedBar plainBar = plainPainter.page.bars[0];
+    // THE MIDDLE BAR OF THE PAGE AND NOT THE FIRST ONE, because the first bar's corner is the same
+    // number on both engravings — it sits at the page's own margin in PAGES and in FIT, which is what
+    // a layout is supposed to do — so a stroke drawn there could not tell "the ink follows its bar"
+    // from "the ink is pinned to the page". A bar further down the page has a DIFFERENT corner in a
+    // fifteen-system engraving and in an eighteen-system one, so the origin has to move for the ink
+    // to stay on the music, and the assertion below says so.
+    final PlacedBar plainBar =
+        plainPainter.page.bars[plainPainter.page.bars.length ~/ 2];
     final LayoutRect plainCell = plainBar.bounds;
     final Offset plainCentre = Offset(
       plainCell.left + plainCell.size.width / 2,
@@ -482,10 +497,16 @@ void main() {
       closeTo(plainCentre.dy - plainBar.bounds.top - aim, 1e-6),
     );
 
-    // FIT: the page is re-engraved larger and drawn smaller, so the anchor's origin on the page is a
-    // different number while the stored point is the SAME number, which is what keeps the ink on its
-    // musical position when the musician switches to a page that has been shrunk.
-    await tester.tap(find.byKey(const ValueKey<String>('scene-bar-mode-fit')));
+    // FIT, REACHED BY THE CONTROL THAT STILL EXISTS. This step used to press the scene bar's FIT
+    // control; the page-mode SWITCH is deleted (`docs/sdd.md` A83) and the mode now follows the pane.
+    // Hiding the chrome is what the musician actually presses to get more page, and on this surface
+    // it is also the mode switch: the chrome carries the rail, so hiding it widens the pane past
+    // `sceneBarTabletWidth` and the surface re-engraves in FIT. The claim below is unchanged and is
+    // still measured on a page the application really chose — only the press that produces it moved
+    // from a deleted control to a live one.
+    await tester.tap(
+      find.byKey(const ValueKey<String>('viewer-chrome-toggle')),
+    );
     await tester.pumpAndSettle();
     final ChartPainter fitted = chartPainter(tester);
     expect(
@@ -506,14 +527,24 @@ void main() {
     );
     expect(fitOffset.dy, closeTo(plainOffset.dy, 1e-9));
     // The page really is a different one: FIT re-engraved it, which is what the scale below 1 means,
-    // and the anchor still resolved to the same bar of the same section. Comparing the two origins by
-    // value would prove nothing — the first bar of the first section sits at the page margin on both
-    // pages, which is exactly what a layout is supposed to do.
+    // and the anchor still resolved to the same bar of the same section.
     expect(onFit.stroke.anchor, onPlain.stroke.anchor);
     expect(
       fitted.page.systems.length,
       isNot(plainPainter.page.systems.length),
       reason: 'the fitted page must be a different engraving, or this test proves nothing',
+    );
+    // AND THE BAR'S OWN CORNER MUST HAVE MOVED, or the invariant above is a tautology: a stroke whose
+    // stored points were untouched would pass whether or not it follows its bar, because "unchanged
+    // stored point plus unchanged origin" is satisfied by a page that did not move the music either.
+    // This says the re-engraving put that bar somewhere else, so `fitOffset == plainOffset` is the
+    // stroke recomposing onto a DIFFERENT corner and landing back on the same music.
+    expect(
+      fitOrigin == plainOrigin,
+      isFalse,
+      reason:
+          'the aimed bar must sit at a different corner on the fitted page, or the case cannot tell '
+          'ink that follows its bar from ink pinned to the page',
     );
 
     stdout.writeln(
@@ -533,73 +564,14 @@ void main() {
     );
   });
 
-  testWidgets('transposing re-spells the chords and leaves the ink measured from'
-      ' its own cell', (WidgetTester tester) async {
-    await pumpViewer(tester, inkChart());
-    await setInkMode(tester, true);
-    final ChartPainter painter = chartPainter(tester);
-    final PlacedBar bar = painter.page.bars[5];
-    final LayoutRect cell = bar.bounds;
-    final Offset centre = Offset(
-      cell.left + cell.size.width / 2,
-      cell.top + cell.size.height / 2,
-    );
-    await drawStroke(
-      tester,
-      painter,
-      pageStart: centre - const Offset(4, 2),
-      pageEnd: centre + const Offset(4, 2),
-      kind: PointerDeviceKind.stylus,
-    );
-    final ResolvedInkStroke before = inkPainter(tester).strokes.single;
-    final Offset storedBefore = Offset(
-      before.stroke.points.first.x,
-      before.stroke.points.first.y,
-    );
-
-    // Transpose with the twelve-key grid's own control: open it from the key badge and pick a key
-    // two semitones up, which is the second cell of the grid.
-    await tester.tap(find.byKey(const ValueKey<String>('scene-bar-key-badge')));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey<String>('key-grid-2')),
-      findsOneWidget,
-      reason: 'the grid must offer a key two semitones up',
-    );
-    await tester.tap(find.byKey(const ValueKey<String>('key-grid-2')));
-    await tester.pumpAndSettle();
-
-    final ChartPainter transposed = chartPainter(tester);
-    expect(
-      transposed.song.key,
-      isNot(painter.song.key),
-      reason: 'the chart must actually have been transposed',
-    );
-    final ResolvedInkStroke after = inkPainter(tester).strokes.single;
-    final Offset storedAfter = Offset(
-      after.stroke.points.first.x,
-      after.stroke.points.first.y,
-    );
-    expect(
-      storedAfter.dx,
-      closeTo(storedBefore.dx, 1e-9),
-      reason: 'the stored point is not rewritten by a transposition',
-    );
-    expect(storedAfter.dy, closeTo(storedBefore.dy, 1e-9));
-    expect(after.stroke.anchor.sectionId, before.stroke.anchor.sectionId);
-    expect(after.stroke.anchor.bar, before.stroke.anchor.bar);
-
-    stdout.writeln(
-      'ink.test.transpose written_key=${painter.song.key} '
-      'shown_key=${transposed.song.key} '
-      'anchor_before=${before.stroke.anchor} anchor_after=${after.stroke.anchor} '
-      'origin_before=(${before.origin.x},${before.origin.y}) '
-      'origin_after=(${after.origin.x.toStringAsFixed(2)},'
-      '${after.origin.y.toStringAsFixed(2)}) '
-      'stored_before=(${storedBefore.dx},${storedBefore.dy}) '
-      'stored_after=(${storedAfter.dx},${storedAfter.dy})',
-    );
-  });
+  // DELETED WITH ITS SUBJECT, AND NAMED HERE SO THE GAP IS NOT MISTAKEN FOR AN OVERSIGHT. A case
+  // called «transposing re-spells the chords and leaves the ink measured from its own cell» stood
+  // here. Transposition is deleted from the tree (`docs/sdd.md` A83 lists the transposer, the key
+  // vocabulary and the key grid among what the reset removed), so the case had no control to press
+  // and no chord row to spell: there is nothing left for it to check. The half of it that IS alive —
+  // that a stroke's stored point is measured from its own anchor and not from the glass — is checked
+  // by the case above and by `view_transform_test.dart`'s pen-at-zoom case, both of which compare the
+  // stored point with the page point the pen touched at a magnification that is not 1.
 
   test('a stroke survives the .chart container with its geometry intact', () {
     final Song song = inkChart();

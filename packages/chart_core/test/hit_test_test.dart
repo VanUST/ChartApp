@@ -53,46 +53,6 @@ LayoutOffset centreOf(LayoutRect rect) => LayoutOffset(
   rect.left + rect.size.width / 2,
   rect.top + rect.size.height / 2,
 );
-
-/// A song that DECLARES a pitched staff and carries a chord and a note at every fixture slot.
-///
-/// The declaration is the point: D29 makes the staff exist because the chart asked for it, so every
-/// bar of this song carries one whether or not a note was written on it, and a tap on its five lines
-/// has something to name.
-Song staffSong() => Song(
-  title: 'Staff',
-  staffSet: StaffSet.of(pitched: const StaffSpec.pitched()),
-  sections: <Section>[
-    Section(
-      id: 'staff-a',
-      label: const SectionLabel.letter('A'),
-      bars: <Bar>[
-        for (int barIndex = 0; barIndex < 4; barIndex++)
-          Bar(
-            chords: <ChordMark>[
-              for (int slot = 0; slot < 4; slot++)
-                ChordMark(
-                  place: placeAt(slot),
-                  chord: Chord(root: ChordRoot(barIndex + slot)),
-                ),
-            ],
-            melody: <NoteMark>[
-              for (int slot = 0; slot < 4; slot++)
-                NoteMark(
-                  place: placeAt(slot),
-                  pitch: const PitchedNote(
-                    note: WrittenNote(NoteLetter.e, 0),
-                    octave: 4,
-                  ),
-                  value: const NoteValue.plain(NoteBase.quarter),
-                ),
-            ],
-          ),
-      ],
-    ),
-  ],
-);
-
 void main() {
   const LayoutEngine engine = LayoutEngine();
 
@@ -272,7 +232,7 @@ void main() {
       final FitOutcome fit = engine.fitToPage(
         long,
         pageWidth: 1200,
-        pageHeight: 900,
+        pageHeight: 700,
       );
       final PageLayout fitted = fit.page!;
       expect(fitted.scale, lessThan(1));
@@ -298,7 +258,7 @@ void main() {
           sections: <Section>[sectionOf('sec-a', 'A', 300)],
         );
         final PageLayout fitted = engine
-            .fitToPage(long, pageWidth: 1200, pageHeight: 900)
+            .fitToPage(long, pageWidth: 1200, pageHeight: 700)
             .page!;
         final PlacedBar last = fitted.bars.last;
         final LayoutOffset engraved = centreOf(last.bounds);
@@ -335,120 +295,5 @@ void main() {
         );
       },
     );
-  });
-
-  group('hitTestMelodyStaff', () {
-    // THE SECOND SURFACE, AND THE DEFECT THAT MADE THESE CASES NECESSARY. The staff's touch target
-    // used to be built out of the beat CAPTIONS: the band ran down to the caption row and each
-    // beat's column was that beat's marker. The owner read the captions and the tick marks as noise
-    // and asked for them to go; switching them off then switched off NOTE ENTRY, because a tap on
-    // the five lines named nothing. The tablet found it in one tap — `viewer.select staff ... hit=none`
-    // — after seventy tests stayed green. There are no captions to switch off any more (the engine
-    // publishes no markers at all), so the pair below instead proves the band itself answers, and
-    // that the answer carries the point rather than a column.
-    final Song staffChart = staffSong();
-    final PageLayout staffPage = engine
-        .layout(staffChart, pageWidth: 400, pageHeight: 600)
-        .first;
-
-    test('a tap anywhere on a bar staff names that bar and the point tapped', () {
-      int tapped = 0;
-      for (final PlacedBar bar in staffPage.bars) {
-        expect(
-          bar.melody.isEmpty,
-          isFalse,
-          reason: 'D29: the chart declared a staff, so the bar carries one',
-        );
-        // Four x positions across the staff, so the case cannot pass by one lucky middle.
-        for (int step = 0; step < 4; step++) {
-          final double x =
-              bar.melody.bounds.left +
-              bar.melody.bounds.size.width * (step + 1) / 5;
-          final LayoutOffset point = LayoutOffset(
-            x,
-            bar.melody.bounds.top + bar.melody.bounds.size.height / 2,
-          );
-          final ChartHit? hit = hitTestMelodyStaff(staffPage, point);
-          stdout.writeln(
-            'hit.staff bar=${bar.barIndex} step=$step '
-            'point=(${point.x.toStringAsFixed(2)},${point.y.toStringAsFixed(2)}) '
-            'answered=${hit == null ? 'null' : '${hit.sectionId}[${hit.barIndex}] '
-                      'x=${hit.local.x.toStringAsFixed(2)}'}',
-          );
-          expect(
-            hit,
-            isNotNull,
-            reason:
-                'a tap on the five lines of bar ${bar.barIndex} must name that bar: a staff whose '
-                'lines cannot be touched is a staff notes cannot be written on',
-          );
-          expect(hit!.sectionId, bar.sectionId);
-          expect(hit.barIndex, bar.barIndex);
-          expect(
-            hit.local.x,
-            closeTo(x - bar.bounds.left, 1e-9),
-            reason:
-                'the x a tap names is the tap own place in the bar, which is the number a note '
-                'would be written at',
-          );
-          tapped++;
-        }
-      }
-      expect(tapped, 16, reason: 'four 4/4 bars, four points across each');
-    });
-
-    test('the touch band is the five lines and half a space below them', () {
-      final PlacedBar bar = staffPage.bars.first;
-      final double space = bar.melody.bounds.size.height / 4;
-      final double columnX = bar.melody.bounds.left + 12;
-      final ChartHit? onTheLines = hitTestMelodyStaff(
-        staffPage,
-        LayoutOffset(columnX, bar.melody.bounds.top + 1),
-      );
-      // Half a space under the bottom line is where a notehead on the ledger line below the staff
-      // sits, so that band is staff; a whole space below it is blank paper and is not.
-      final ChartHit? onTheLedgerNote = hitTestMelodyStaff(
-        staffPage,
-        LayoutOffset(columnX, bar.melody.bounds.bottom + space / 4),
-      );
-      final ChartHit? onBlankPaper = hitTestMelodyStaff(
-        staffPage,
-        LayoutOffset(columnX, bar.melody.bounds.bottom + space),
-      );
-      // Above the top line, inside the band the system reserved, there is nothing to touch either:
-      // the reserved band is not the staff, and a tap on it must not be told it named a note.
-      final ChartHit? aboveTheStaff = hitTestMelodyStaff(
-        staffPage,
-        LayoutOffset(columnX, bar.melody.bounds.top - 12),
-      );
-      stdout.writeln(
-        'hit.staff-band on_lines=${onTheLines?.local.x.toStringAsFixed(1)} '
-        'on_ledger=${onTheLedgerNote?.local.x.toStringAsFixed(1)} '
-        'below_band=${onBlankPaper?.local.x} above_staff=${aboveTheStaff?.local.x} '
-        'staff=(${bar.melody.bounds.top}..${bar.melody.bounds.bottom}) space=$space',
-      );
-      expect(onTheLines, isNotNull);
-      expect(
-        onTheLedgerNote,
-        isNotNull,
-        reason:
-            'half a staff space under the bottom line is where a note on the ledger line below the '
-            'staff is drawn, so a touch there is still on the staff',
-      );
-      expect(
-        onBlankPaper,
-        isNull,
-        reason:
-            'below the staff and its ledger room is blank paper: a touch there has not chosen a '
-            'note, and answering anyway would put one where nothing was touched',
-      );
-      expect(
-        aboveTheStaff,
-        isNull,
-        reason:
-            'the band the system reserves above the staff is not the staff: a tap on the paper '
-            'above the five lines names nothing',
-      );
-    });
   });
 }

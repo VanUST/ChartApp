@@ -126,7 +126,6 @@
 // document changed and the ink painter was told to repaint, and drawing it anywhere else would put
 // the same information in two places. It does not own selection: it answers whether a contact would
 // draw, and the widget decides what a contact that does not draw means.
-import 'dart:math' as math;
 
 import 'package:chart_core/chart_core.dart';
 import 'package:chart_ui/chart_ui.dart';
@@ -305,67 +304,6 @@ class InkCaptureLayer {
   /// a stroke placed by address against the page on screen moves with the music when the chart is
   /// transposed.
   List<InkStroke> get documentStrokes => _session.document.strokes;
-
-  /// The bar divisions the document holds, recognised from that ink or drawn by the musician.
-  List<BarDivision> get documentDivisions => _session.document.divisions;
-
-  /// Whether the application looks for bar divisions in what the pen writes.
-  ///
-  /// OFF UNTIL THE MUSICIAN TURNS IT ON, which is owner decision D37 rule 1 and the reason this
-  /// feature cannot damage a chart nobody asked it to read: with the flag false the whole of it is
-  /// a skipped branch at the end of [endStroke], [endErase] and the tap path, and every other line
-  /// of this class behaves exactly as it did before the feature existed.
-  ///
-  /// It is a plain field rather than a mode beside [InkMode] because it is not a tool: the pen still
-  /// writes and the eraser still erases, and this decides only whether a stroke that was written is
-  /// ALSO read.
-  bool recognitionEnabled = false;
-
-  /// The divisions found in the ink of the page that has just been written on, newest last.
-  ///
-  /// Set by [recogniseBarDivisions] so that a screen can report what was found without asking the
-  /// detector a second time, and so that a probe can read the same numbers the application acts on.
-  List<BarDivision> get lastRecognisedDivisions => _lastRecognised;
-  List<BarDivision> _lastRecognised = const <BarDivision>[];
-
-  /// Whether the last contact that ended with the eraser removed a RECOGNISED DIVISION instead of a
-  /// stroke, which is the one-action repair for a barline the detector should not have found.
-  bool get lastEraseRejectedRecognition => _lastEraseRejectedRecognition;
-  bool _lastEraseRejectedRecognition = false;
-
-  /// The strokes whose notehead a recognition pass ACCEPTED, so that the screen hides exactly the
-  /// handwriting the recognised notes replaced.
-  ///
-  /// IT IS A SET OF IDS AND NOT A GEOMETRIC FILTER, and that is the whole point: the reader already
-  /// decided which ink became a head (the head carries its `strokeIds`), so hiding by distance from
-  /// the head's centre would be a second answer to "which ink is this note" that could drift from
-  /// the gates. The ink stays in the document either way (D37 rule 5); this set only decides what is
-  /// DRAWN while recognition is on, and it is cleared for a stroke the moment the musician rejects
-  /// the note it became.
-  ///
-  /// IT IS SESSION STATE AND NOT THE FILE, AND THAT IS A NAMED LIMIT rather than an oversight: a
-  /// recognised note stores no stroke id (`NoteMark` is the model's own note and has nowhere to put
-  /// one), so after a reload the application knows the notes and the ink but not that they are the
-  /// same mark. The hiding is therefore rebuilt by the whole-page pass when recognition is switched
-  /// on, and a chart reopened with recognition on shows both layers until that pass runs. Storing the
-  /// provenance in the file is a FORMAT change and is the owner's decision, exactly like the single
-  /// "replace this bar's melody" event the writer's own note leaves to him.
-  Set<String> get recognisedNoteStrokeIds => _recognisedNoteStrokes;
-  final Set<String> _recognisedNoteStrokes = <String>{};
-
-  /// The last reading of each bar, so that a tap can name the note a stroke became without reading
-  /// the ink a second time — and so that a rejection can find the head the musician pointed at.
-  final Map<String, MelodyNoteReading> _noteReadings =
-      <String, MelodyNoteReading>{};
-
-  /// The STROKES whose recognised note the musician has REJECTED, by ink identity.
-  ///
-  /// A rejected note is deleted from the model, which frees its address — so without this set the
-  /// very next pass would read the same ink and write the same wrong note back, and the one-action
-  /// repair would be a joke. It is session state for the same reason the switch is (A73 §7): the
-  /// document has no place for "the musician said no to this". A rejection is forgotten when the ink
-  /// that provoked it is erased, because ink he removed is not a mark he still means.
-  final Set<String> _rejectedNoteStrokes = <String>{};
 
   /// Milliseconds of the last event of any kind that proved a stylus is near the glass.
   ///
@@ -1223,17 +1161,6 @@ class InkCaptureLayer {
     // that has to exist whatever recognition decides, and a detector that throws must not be able to
     // lose the ink. With the switch off this is one boolean read and nothing else.
     //
-    // AND THE NOTE READER'S CALL IS DELIBERATELY ABSENT FROM HERE, WHICH IS A DECISION AND NOT AN
-    // OMISSION. [recogniseMelodyNotes] exists, is measured and works — but it writes `(beat, step,
-    // pitch)` through `note.insert`, and the owner removed that shape as a class: «Запись сама по
-    // себе структурированная единица. Относительное ее положение — нет. Сетка НЕ квантизована».
-    // Wiring it here would put the representation he rejected INTO THE FILE while the replacement is
-    // still being decided, so the call comes back in this one place when the model is settled — and
-    // not before. The reader, its provenance and its gates are untouched by that decision, because
-    // they measure ink and not addresses.
-    if (recognitionEnabled) {
-      recogniseBarDivisions(page);
-    }
     return stroke;
   }
 
@@ -1247,114 +1174,6 @@ class InkCaptureLayer {
   //          while recognition is on and show it again the moment the switch goes off or the
   //          division is rejected.
   //
-  //          ONLY THE STROKE NAMED BY [onlyStrokeId] IS CONSIDERED, and that is a decision about
-  //          repair rather than about cost. A whole-page pass would re-recognise a division the
-  //          musician had already deleted, every time he wrote anything else, which would make the
-  //          one-action repair a joke. A stroke he writes again is a stroke he means again.
-  // INPUTS: page — the layout on screen, which is what resolves each anchor to a page position and
-  //         what every row's height is read from. onlyStrokeId — the stroke whose commit triggered
-  //         this pass; null means the whole page, which is what a probe wants and the app does not.
-  // OUTPUTS: The divisions the page now holds, newest last, also kept in [lastRecognisedDivisions]
-  //          for a caller that reports them. The document is changed ONLY when a candidate was found
-  //          and was not already known: no rejection is recorded anywhere, so a stroke the detector
-  //          refuses leaves the document byte-identical to what it was before the pass.
-  // KEYWORDS: recognition, bar-division, structure-from-ink, op-log-write, dedupe, repair-aware,
-  //           off-by-default, d37
-  /// Looks for divisions in the ink of [page] and records them through the log.
-  List<BarDivision> recogniseBarDivisions(
-    PageLayout page, {
-    String? onlyStrokeId,
-  }) {
-    final List<InkStroke> strokes = _session.document.strokes;
-    if (strokes.isEmpty) {
-      _lastRecognised = _session.document.divisions;
-      return _lastRecognised;
-    }
-    final List<PlacedInkStroke> placed = placeInkStrokes(page, strokes);
-    final Map<String, BarlineFrame> frames = barlineFramesOfPage(page);
-    List<PlacedBarlineCandidate> found = const <PlacedBarlineCandidate>[];
-    for (final PlacedInkStroke one in placed) {
-      if (onlyStrokeId != null && one.stroke.id != onlyStrokeId) {
-        continue;
-      }
-      final BarlineVerdict verdict = measureBarlineStroke(
-        stroke: one,
-        strokes: placed,
-        barFrames: frames,
-      );
-      final BarlineCandidate? candidate = verdict.candidate;
-      if (candidate == null) {
-        debugPrint(
-          'barline.refused id=${one.stroke.id} '
-          'gate=${verdict.rejection?.token} ${verdict.measurement}',
-        );
-        continue;
-      }
-      debugPrint(
-        'barline.found id=${one.stroke.id} '
-        'band=${verdict.measurement.band?.kind.token ?? 'none'} '
-        'x=${candidate.centreX.toStringAsFixed(1)} '
-        'ink_height=${verdict.measurement.height.toStringAsFixed(1)} '
-        'line_height=${candidate.height.toStringAsFixed(1)} '
-        '${verdict.measurement}',
-      );
-      found = <PlacedBarlineCandidate>[
-        ...found,
-        PlacedBarlineCandidate(candidate: candidate, origin: one.origin),
-      ];
-    }
-    if (found.isEmpty) {
-      _lastRecognised = _session.document.divisions;
-      return _lastRecognised;
-    }
-    final List<BarDivision> next = List<BarDivision>.of(
-      _session.document.divisions,
-    );
-    for (final PlacedBarlineCandidate placedCandidate in found) {
-      final BarlineCandidate candidate = placedCandidate.candidate;
-      final bool known = next.any(
-        (BarDivision division) => division.cameFrom(candidate.strokeId),
-      );
-      if (known) {
-        continue;
-      }
-      next.add(
-        BarDivision(
-          // The stroke's own id, so that the division and the ink it came from can never be
-          // confused for two different marks, and so that a reader of the file can follow one to
-          // the other without a second table.
-          id: 'division-${candidate.strokeId}',
-          place: AnchoredPlace(
-            anchor: candidate.anchor,
-            offsetX: candidate.centreX,
-            offsetY: candidate.top,
-          ),
-          height: candidate.height,
-          sourceStrokeId: candidate.strokeId,
-        ),
-      );
-    }
-    if (next.length == _session.document.divisions.length) {
-      _lastRecognised = _session.document.divisions;
-      return _lastRecognised;
-    }
-    _session.apply(
-      DivisionSetEvent(
-        docId: _session.docId,
-        seq: _session.seq,
-        from: _session.document.divisions,
-        to: next,
-      ),
-    );
-    _documentEdits++;
-    _lastRecognised = next;
-    debugPrint(
-      'barline.divisions count=${next.length} seq=${_session.seq} '
-      'ids=${next.map((BarDivision division) => division.sourceStrokeId).join(',')}',
-    );
-    return next;
-  }
-
   // PURPOSE: Read the NOTES out of the ink on [page] and record them as STRUCTURE — the same one
   //          organ the musician turned on, now reading a second kind of mark.
   //
@@ -1372,351 +1191,10 @@ class InkCaptureLayer {
   //          recognising the same ink twice writes nothing, and a correction the musician made by
   //          hand survives the next pass.
   //
-  //          WHY ONLY ONE BAR WHEN A STROKE IS NAMED. The reader's input is a BAR — its ink, its
-  //          staff frame, its beat columns — so the unit of work is a bar and not a stroke. Reading
-  //          only the bar the new stroke landed in is what makes a pass cost one bar rather than a
-  //          page, and it is also what keeps a rejection durable in every OTHER bar: a pass that
-  //          re-read the whole page on every stroke would re-write every note the musician had
-  //          rejected elsewhere. A stroke whose anchor resolves to no bar costs no read at all.
-  // INPUTS: page — the layout on screen. onlyStrokeId — the stroke whose commit triggered the pass;
-  //         null means every bar of the page, which is what switching recognition on wants.
-  // OUTPUTS: What the pass wrote, as one [MelodyNoteWrite] per bar that had ink: the notes added,
-  //          the addresses already spoken for, and the value each added note carries. The document
-  //          is changed only by the `note.insert` events, and [recognisedNoteStrokeIds] gains the
-  //          ink of every head that now has a note, so the screen hides that ink in the same frame.
-  //          A bar that yields no head is left alone entirely, and nothing is ever deleted.
-  // KEYWORDS: recognition, note-reader, structure-from-ink, op-log-write, one-bar-pass,
-  //           idempotent, off-by-default, d37, d28, a78
-  /// Reads the notes of the page's staff ink and records them through the log.
-  MelodyNoteWrite recogniseMelodyNotes(
-    PageLayout page, {
-    String? onlyStrokeId,
-  }) {
-    // WHICH BAR THE TRIGGERING STROKE BELONGS TO, if the caller named one. The anchor is the address
-    // the ink was stored against, which is the document's own answer to "where is this stroke" and
-    // the same answer the renderer uses, so the bar read here is the bar drawn there.
-    EventAnchor? onlyAnchor;
-    if (onlyStrokeId != null) {
-      for (final InkStroke stroke in _session.document.strokes) {
-        if (stroke.id == onlyStrokeId) {
-          onlyAnchor = stroke.anchor;
-          break;
-        }
-      }
-    }
-    MelodyNoteWrite total = const MelodyNoteWrite.none(recognisedNoteValue);
-    for (final PlacedBar placed in page.bars) {
-      if (onlyAnchor != null &&
-          (onlyAnchor.sectionId != placed.sectionId ||
-              onlyAnchor.bar != placed.barIndex)) {
-        continue;
-      }
-      final String key = _barKey(placed.sectionId, placed.barIndex);
-      final MelodyNoteReading reading = readMelodyNotesOfBar(
-        page: page,
-        strokes: _session.document.strokes,
-        sectionId: placed.sectionId,
-        barIndex: placed.barIndex,
-      );
-      if (reading.heads.isEmpty) {
-        _noteReadings.remove(key);
-        continue;
-      }
-      // THE MUSICIAN'S REJECTIONS ARE APPLIED HERE, in the layer that holds them, rather than inside
-      // the writer: `chart_core` writes what a reading says, and "the musician said no to this
-      // address" is a session decision that the document has nowhere to keep.
-      // A HEAD IS REMEMBERED BY ITS INK AND NOT BY ITS PIXELS. A rejection used to be filed under the
-      // head's beat and step; under a coordinate model the equivalent would be its x, and an x MOVES
-      // when the page reflows — the bar's own left edge is what the head's place is measured from, so
-      // the same handwriting on a re-engraved page yields a slightly different number and the musical
-      // answer "no" would be forgotten. The stroke ids are the ink itself: they do not move with the
-      // page, they are what the reader actually weighed, and hiding by them is already how a
-      // recognised note is drawn as structure (see `recognisedNoteStrokeIds`).
-      final List<MelodyNoteHead> accepted = <MelodyNoteHead>[
-        for (final MelodyNoteHead head in reading.heads)
-          if (!head.strokeIds.any(_rejectedNoteStrokes.contains)) head,
-      ];
-      final MelodyNoteReading wanted = MelodyNoteReading(
-        sectionId: reading.sectionId,
-        barIndex: reading.barIndex,
-        heads: accepted,
-        refusals: reading.refusals,
-      );
-      final MelodyNoteWrite write = writeRecognisedNotes(
-        session: _session,
-        reading: wanted,
-      );
-      _noteReadings[key] = wanted;
-      // EVERY accepted head whose address the bar now HOLDS is drawn as structure, so its ink is
-      // hidden while recognition is on — whether this pass wrote the note or found it already
-      // written, because either way the note on the page is the structure and not the hand.
-      for (final MelodyNoteHead head in accepted) {
-        if (_session.existingNoteNear(
-              sectionId: placed.sectionId,
-              barIndex: placed.barIndex,
-              offsetX: head.offsetX,
-              tolerance: 0,
-            ) ==
-            null) {
-          continue;
-        }
-        _recognisedNoteStrokes.addAll(head.strokeIds);
-      }
-      debugPrint(
-        'note.read section=${placed.sectionId} bar=${placed.barIndex} '
-        'heads=${reading.heads.length} accepted=${accepted.length} '
-        'written=${write.written.length} '
-        'present=${write.alreadyPresent.length} '
-        'refused=${reading.refusals.length} '
-        'ink=${accepted.fold<int>(0, (int sum, MelodyNoteHead head) => sum + head.strokeIds.length)}',
-      );
-      for (final NoteMark note in write.written) {
-        debugPrint(
-          'note.found section=${placed.sectionId} bar=${placed.barIndex} '
-          'x=${note.offsetX.toStringAsFixed(1)} pitch=${note.pitch} '
-          'value=${note.value} accidental=none duration=not-read',
-        );
-      }
-      for (final MelodyNoteRefusal refusal in reading.refusals) {
-        debugPrint(
-          'note.refused section=${placed.sectionId} bar=${placed.barIndex} '
-          'gate=${refusal.reason.token} x=${refusal.x.toStringAsFixed(1)} '
-          'y=${refusal.y.toStringAsFixed(1)}',
-        );
-      }
-      total = MelodyNoteWrite(
-        written: <NoteMark>[...total.written, ...write.written],
-        alreadyPresent: <NoteMark>[
-          ...total.alreadyPresent,
-          ...write.alreadyPresent,
-        ],
-        value: write.value,
-      );
-    }
-    return total;
-  }
-
   // PURPOSE: Give a recognised note its handwriting back with ONE tap, which is the repair the
   //          owner's rule puts on a wrong recognition (D37 rule 2) and the exact counterpart of
   //          [toggleDivisionAt].
   //
-  //          THE TAP LANDS ON THE HANDWRITING, WHICH IS NOT ON SCREEN, and that is deliberate. With
-  //          recognition on the ink is hidden, so a musician cannot point at it — but he CAN point at
-  //          the wrong note he sees, and the ink that produced it lies under that very spot because
-  //          the structure was drawn where the head was read. The hit test therefore runs against the
-  //          DOCUMENT's strokes, exactly as the eraser's does, and the answer is the same one the
-  //          reader gave: this stroke is part of that head.
-  // INPUTS: page — the layout on screen. surfacePoint — where the musician tapped, in the surface
-  //         logical pixels the hit test speaks.
-  // OUTPUTS: `rejected` when a recognised note was deleted and its ink given back, `rejected-none`
-  //          when the head was found but its address held no note (already undone), or null when the
-  //          tap hit no recognised head at all — in which case the tap goes on to mean a selection.
-  //          The deleted note is one `note.delete` event, so undo puts it back; the INK is never
-  //          touched (D37 rule 5) and the address is remembered so no later pass rewrites it.
-  // KEYWORDS: repair, one-action, reject, note, ink-hit-test, d37, undoable
-  /// Rejects the recognised note on the ink at [surfacePoint], and reports what it did.
-  String? rejectRecognisedNoteAt({
-    required PageLayout page,
-    required LayoutOffset surfacePoint,
-  }) {
-    final List<InkStroke> strokes = _session.document.strokes;
-    if (strokes.isEmpty || _noteReadings.isEmpty) {
-      return null;
-    }
-    final InkEraseHit? hit = hitTestInkErase(
-      strokes: strokes,
-      page: page,
-      surfacePoint: surfacePoint,
-    );
-    if (hit == null) {
-      return null;
-    }
-    for (final MelodyNoteReading reading in _noteReadings.values) {
-      for (final MelodyNoteHead head in reading.heads) {
-        if (!head.strokeIds.contains(hit.stroke.id)) {
-          continue;
-        }
-        final bool deleted = _session.deleteNoteNear(
-          sectionId: reading.sectionId,
-          barIndex: reading.barIndex,
-          offsetX: head.offsetX,
-          tolerance: 0,
-        );
-        _rejectedNoteStrokes.addAll(head.strokeIds);
-        _recognisedNoteStrokes.removeAll(head.strokeIds);
-        if (deleted) {
-          _documentEdits++;
-        }
-        debugPrint(
-          'note.rejected id=${hit.stroke.id} section=${reading.sectionId} '
-          'bar=${reading.barIndex} x=${head.offsetX.toStringAsFixed(1)} '
-          'pitch=${head.pitch} deleted=$deleted '
-          'ink=${head.strokeIds.join('+')} seq=${_session.seq}',
-        );
-        return deleted ? 'rejected' : 'rejected-none';
-      }
-    }
-    return null;
-  }
-
-  // PURPOSE: Let a rejection die with the ink that provoked it, so that a musician who rubs out a
-  //          misread note and draws another at the same place is listened to the second time.
-  // INPUTS: strokeId — the stroke the eraser has just removed from the document.
-  // OUTPUTS: Nothing; the layer's own sets are edited. The stroke leaves
-  //          [recognisedNoteStrokeIds] because there is nothing left to hide, and any address whose
-  //          head was made of that stroke leaves [_rejectedNoteAddresses], which is what makes the
-  //          next pass able to read a fresh mark at that spot. A stroke that was part of no head
-  //          changes nothing, so the eraser stays the tool it was.
-  // KEYWORDS: rejection-lifetime, erase, ink-removed, second-chance, one-action-repair
-  void _forgetErasedNoteInk(String strokeId) {
-    _recognisedNoteStrokes.remove(strokeId);
-    final List<String> forgotten = <String>[];
-    for (final MapEntry<String, MelodyNoteReading> entry
-        in _noteReadings.entries) {
-      for (final MelodyNoteHead head in entry.value.heads) {
-        if (!head.strokeIds.contains(strokeId)) {
-          continue;
-        }
-        forgotten.add(
-          '${entry.value.sectionId}#${entry.value.barIndex}'
-          '@${head.offsetX.toStringAsFixed(1)}',
-        );
-      }
-    }
-    if (forgotten.isNotEmpty) {
-      debugPrint(
-        'note.rejection.forgotten ink=$strokeId '
-        'heads=${forgotten.join(',')} '
-        'rejected=${_rejectedNoteStrokes.length}',
-      );
-    }
-  }
-
-  /// The key a bar's reading is filed under, matching the one the reader builds.
-  static String _barKey(String sectionId, int barIndex) =>
-      '$sectionId\u0000$barIndex';
-
-  // PURPOSE: Promote or reject a bar division with ONE tap, which is the repair path the owner's
-  //          rule requires for both of the ways recognition can be wrong.
-  //
-  //          BOTH ERRORS GET THE SAME GESTURE, AND THAT IS THE POINT. A missed division leaves a bar
-  //          too long and a spurious one splits a bar that was whole; each is repaired by pointing
-  //          at the mark and having the application change its mind about THAT mark. A tap on ink
-  //          that is already a division rejects it (and the handwriting comes back into view); a tap
-  //          on ink that is not one makes it a division. One action each way, no menu, no mode.
-  // INPUTS: page — the layout on screen. surfacePoint — where the musician tapped, in the surface
-  //         logical pixels the hit test speaks (the caller converts; see [_select]).
-  // OUTPUTS: What the tap did, as a token for the log and for the screen's own report, or null when
-  //          it hit no ink at all and the tap should go on to mean a selection. The document is
-  //          changed at most once per call, so undo takes the whole repair back in one step.
-  // KEYWORDS: repair, one-action, promote, reject, division, ink-hit-test, both-errors
-  /// Promotes or rejects the division on the ink at [surfacePoint], and reports which.
-  String? toggleDivisionAt({
-    required PageLayout page,
-    required LayoutOffset surfacePoint,
-  }) {
-    final List<InkStroke> strokes = _session.document.strokes;
-    if (strokes.isEmpty) {
-      return null;
-    }
-    final InkEraseHit? hit = hitTestInkErase(
-      strokes: strokes,
-      page: page,
-      surfacePoint: surfacePoint,
-    );
-    if (hit == null) {
-      return null;
-    }
-    final List<BarDivision> divisions = _session.document.divisions;
-    final int existing = divisions.indexWhere(
-      (BarDivision division) => division.cameFrom(hit.stroke.id),
-    );
-    if (existing >= 0) {
-      final List<BarDivision> next = <BarDivision>[
-        for (int index = 0; index < divisions.length; index++)
-          if (index != existing) divisions[index],
-      ];
-      _session.apply(
-        DivisionSetEvent(
-          docId: _session.docId,
-          seq: _session.seq,
-          from: divisions,
-          to: next,
-        ),
-      );
-      _documentEdits++;
-      debugPrint(
-        'barline.rejected id=${hit.stroke.id} from=${divisions.length} '
-        'to=${next.length} seq=${_session.seq}',
-      );
-      return 'rejected';
-    }
-    final List<BarDivision> next = <BarDivision>[
-      ...divisions,
-      BarDivision(
-        id: 'division-${hit.stroke.id}',
-        // DRAWN, not RECOGNISED: the musician said so, and D37 rule 4 requires the application to
-        // be able to tell the two levels apart. Its geometry is still the ink's own, because a
-        // division he points at is the line he drew.
-        source: DivisionSource.drawn,
-        place: AnchoredPlace(
-          anchor: hit.stroke.anchor,
-          offsetX: _centreXOf(hit.stroke),
-          offsetY: _topOf(hit.stroke),
-        ),
-        height: _heightOf(hit.stroke),
-        sourceStrokeId: hit.stroke.id,
-      ),
-    ];
-    _session.apply(
-      DivisionSetEvent(
-        docId: _session.docId,
-        seq: _session.seq,
-        from: divisions,
-        to: next,
-      ),
-    );
-    _documentEdits++;
-    debugPrint(
-      'barline.promoted id=${hit.stroke.id} from=${divisions.length} '
-      'to=${next.length} seq=${_session.seq}',
-    );
-    return 'promoted';
-  }
-
-  /// The horizontal centre of [stroke]'s bounding box, in its anchor-local pixels.
-  static double _centreXOf(InkStroke stroke) {
-    double minX = double.infinity;
-    double maxX = -double.infinity;
-    for (final InkPoint point in stroke.points) {
-      minX = math.min(minX, point.x);
-      maxX = math.max(maxX, point.x);
-    }
-    return (minX + maxX) / 2;
-  }
-
-  /// The top of [stroke]'s bounding box, in its anchor-local pixels.
-  static double _topOf(InkStroke stroke) {
-    double top = double.infinity;
-    for (final InkPoint point in stroke.points) {
-      top = math.min(top, point.y);
-    }
-    return top;
-  }
-
-  /// The height of [stroke]'s bounding box, in its anchor-local pixels.
-  static double _heightOf(InkStroke stroke) {
-    double top = double.infinity;
-    double bottom = -double.infinity;
-    for (final InkPoint point in stroke.points) {
-      top = math.min(top, point.y);
-      bottom = math.max(bottom, point.y);
-    }
-    // A one-point mark cannot divide anything, and a division of no height is a state the model
-    // refuses; the smallest honest line is one nib tall.
-    return math.max(bottom - top, stroke.size > 0 ? stroke.size : 3);
-  }
-
   // PURPOSE: Abandon a drawing contact without committing anything, which is what the platform
   //          means when it cancels a pointer: the contact was taken away rather than finished.
   // INPUTS: pointer — the contact.
@@ -1782,7 +1260,6 @@ class InkCaptureLayer {
       'strokes=${_session.document.strokes.length} '
       'step_px=${InkEraseAim.pathStepPx.toStringAsFixed(1)}',
     );
-    _noteCrossed(pointer: pointer, hits: trail.addSample(position));
   }
 
   // PURPOSE: Offer one more point of the dragging eraser, which is what makes the ink under it go
@@ -1791,7 +1268,14 @@ class InkCaptureLayer {
   // INPUTS: pointer — the contact. position — where it is now, in surface logical pixels.
   // OUTPUTS: Nothing. A move for a contact that is not the armed one is dropped silently, which is
   //          the ordinary case for the first move of a contact the rule refused. What the sample
-  //          crossed is logged and ticked through [_noteCrossed].
+  //          crossed is logged.
+  //
+  //          THE SAMPLE IS WHAT MAKES A DRAG A DRAG, and it was missing: this body returned after
+  //          its guard, so an erase contact collected the point it landed on and the point it lifted
+  //          on and nothing in between, and a rubber dragged across a page of handwriting crossed
+  //          only those two. A tap still erased a stroke, so the loss was invisible to every test
+  //          that erased by tapping. Restored from the commit before the reset; see `docs/sdd.md`
+  //          A84 for the device measurement that found it.
   // KEYWORDS: erase-move, drag-collect, preview, no-writing, silent-when-absent
   /// Offers one more sample of the dragging eraser's path.
   void moveErase({required int pointer, required LayoutOffset position}) {
@@ -1879,51 +1363,11 @@ class InkCaptureLayer {
       return const <InkEraseHit>[];
     }
     final List<InkEraseHit> removed = <InkEraseHit>[];
-    // THE ONE-ACTION REPAIR FOR A DIVISION THE DETECTOR SHOULD NOT HAVE FOUND, and it lives here
-    // because the eraser is the tool a musician already has in his hand when he wants a mark gone.
-    // With recognition ON, a stroke that a division was recognised from is not deleted: the DIVISION
-    // is rejected and the handwriting comes back into view, which is the ink D37 rule 5 requires the
-    // file to keep. It costs one action, it cannot destroy what he wrote as a side effect of
-    // correcting the application, and a second rub removes the ink if that is what he meant.
-    //
-    // With recognition OFF this branch is dead, so the eraser is exactly the tool it was.
-    final Set<String> rejected = <String>{};
     for (int index = 0; index < crossed.length; index++) {
       final InkEraseHit hit = crossed[index];
-      if (recognitionEnabled) {
-        final List<BarDivision> divisions = _session.document.divisions;
-        final int existing = divisions.indexWhere(
-          (BarDivision division) => division.cameFrom(hit.stroke.id),
-        );
-        if (existing >= 0) {
-          _session.apply(
-            DivisionSetEvent(
-              docId: _session.docId,
-              seq: _session.seq,
-              from: divisions,
-              to: <BarDivision>[
-                for (int at = 0; at < divisions.length; at++)
-                  if (at != existing) divisions[at],
-              ],
-            ),
-          );
-          rejected.add(hit.stroke.id);
-          debugPrint(
-            'barline.rejected-by-eraser pointer=$pointer id=${hit.stroke.id} '
-            'divisions=${_session.document.divisions.length} seq=${_session.seq}',
-          );
-          continue;
-        }
-      }
       final bool erased = _session.eraseStroke(hit.stroke.id);
       if (erased) {
         removed.add(hit);
-        // ONLY WHILE NOTES ARE BEING RECOGNISED, so that with the switch off the eraser is exactly
-        // the tool it was: one boolean read and no bookkeeping on the gesture path. The bookkeeping
-        // itself is a set removal and cannot touch the document.
-        if (recognitionEnabled) {
-          _forgetErasedNoteInk(hit.stroke.id);
-        }
       }
       debugPrint(
         'ink.erase.stroke pointer=$pointer order=${index + 1} '
@@ -1932,7 +1376,6 @@ class InkCaptureLayer {
         'strokes=${_session.document.strokes.length} seq=${_session.seq}',
       );
     }
-    _lastEraseRejectedRecognition = rejected.isNotEmpty;
     _lastErase = <String, Object?>{
       'ids': removed.map((InkEraseHit hit) => hit.stroke.id).toList(),
       'count': removed.length,

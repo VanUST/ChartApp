@@ -39,16 +39,11 @@
 import '../key.dart';
 import '../oplog/oplog.dart';
 import '../song/bar.dart';
-import '../song/note.dart';
-import '../song/section.dart';
 import '../song/song.dart';
 import '../spelling_table.dart';
-import 'chart_header.dart';
 import 'geometry.dart';
 import 'layout_style.dart';
-import 'melody_staff.dart';
 import 'page_layout.dart';
-import 'staff_text_display.dart';
 import 'text_metrics.dart';
 
 /// Engraves a song into pages.
@@ -127,7 +122,6 @@ class LayoutEngine {
     }
     final double contentWidth = pageWidth - 2 * style.pageMargin;
     final double contentHeight = pageHeight - 2 * style.pageMargin;
-    final double melodyBand = _melodyBand(song);
     final List<_MeasuredBar> measured = _measureBars(song, cues);
     final List<_SystemPlan> systems = _buildSystems(measured, contentWidth);
     return _buildPages(
@@ -137,8 +131,6 @@ class LayoutEngine {
       pageWidth,
       pageHeight,
       drawScale,
-      melodyBand,
-      _placeChartHeader(song, measured, contentWidth),
     );
   }
 
@@ -168,36 +160,6 @@ class LayoutEngine {
   //          time signature says too.
   // KEYWORDS: chart-header, opening-statement, key-and-meter, first-page-only, no-collision,
   //           section-letter, first-bar-independent
-  PlacedChartHeader? _placeChartHeader(
-    Song song,
-    List<_MeasuredBar> measured,
-    double contentWidth,
-  ) {
-    if (measured.isEmpty) {
-      return null;
-    }
-    final String text = chartOpeningText(
-      song.key,
-      measured.first.bar.timeSignature,
-    );
-    // Measured in the CHORD role, because the line is set in the chord's own style and is read at
-    // the same size as the symbols it governs. The role is also what makes the height a measurement
-    // rather than a constant: the band the page gives up is exactly the line box that fills it.
-    final LayoutSize size = style.textMetrics.measure(
-      text,
-      ChartTextRole.chord,
-    );
-    return PlacedChartHeader(
-      text: text,
-      bounds: LayoutRect.fromLTWH(
-        style.pageMargin,
-        style.pageMargin,
-        contentWidth,
-        size.height,
-      ),
-    );
-  }
-
   // PURPOSE: Report the vertical room a system's melody staff needs, which is a property of the
   //          SONG rather than of a bar: either every bar on the page carries a staff, so that the
   //          five lines run unbroken across each system, or none does.
@@ -233,15 +195,6 @@ class LayoutEngine {
   //          different amount of paper from the page the note is on.
   // KEYWORDS: melody-band, song-level-decision, declared-staff, blank-staff, empty-staff-shallower,
   //           unchanged-chords-only, d29, d32
-  double _melodyBand(Song song) {
-    if (song.staffSet.pitched == null) {
-      return 0;
-    }
-    return _carriesAnyNote(song)
-        ? style.melodyBandHeight
-        : style.melodyEmptyBandHeight;
-  }
-
   // PURPOSE: Answer whether the song holds a pitched note anywhere, which is the one fact that
   //          separates a staff being written on from a staff that is merely there.
   // INPUTS: song — the chart.
@@ -250,17 +203,6 @@ class LayoutEngine {
   //          The walk is bounded by the bar count and allocates nothing, so calling it once per
   //          engraving costs a comparison per bar.
   // KEYWORDS: melody-presence, song-level, no-allocation, band-decision
-  bool _carriesAnyNote(Song song) {
-    for (final Section section in song.sections) {
-      for (final Bar bar in section.bars) {
-        if (bar.melody.isNotEmpty) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
   /// The smallest fraction of the requested page size the FIT mode will shrink to.
   ///
   /// Below this the chord line stops being readable at arm's length on the tablet this is built
@@ -381,8 +323,7 @@ class LayoutEngine {
   // KEYWORDS: bar-measurement, natural-width, minimum-width, key-dependent-width, staff-text,
   //           bar-size, one-implementation
   /// Returns the width [bar] needs when its chords are spelled in [key].
-  double measureBar(Bar bar, Key key) =>
-      _barWidth(bar, key, _measureStaffText(bar));
+  double measureBar(Bar bar, Key key) => _barWidth(bar, key);
 
   // PURPOSE: Answer the width a bar needs, given its already-measured staff-text lines, so that the
   //          width reserved for the words and the box the words are placed in come from ONE
@@ -428,11 +369,7 @@ class LayoutEngine {
   //          gap beside the first mark and leave the middle of the bar exactly as it was.
   // KEYWORDS: bar-width, content-driven, follow-the-content, staff-text-room, single-measurement,
   //           minimum-width, bar-size, width-multiplier, single-source-of-truth, metre-not-read
-  double _barWidth(Bar bar, Key key, List<_MeasuredStaffText> staffLines) {
-    // Half a notehead, because a note's offsetX is its head's centre: the ink of the last note on a
-    // bar's line reaches this far past its own place.
-    final double noteHalfWidth =
-        const MelodyMetrics().noteheadWidth * style.melodyStaffSpace / 2;
+  double _barWidth(Bar bar, Key key) {
     double content = 0;
     for (final ChordMark mark in bar.chords) {
       final String text = mark.chord.render(key, spellingTable);
@@ -443,26 +380,10 @@ class LayoutEngine {
         content = right;
       }
     }
-    for (final NoteMark note in bar.melody) {
-      final double right = note.offsetX + noteHalfWidth;
-      if (right > content) {
-        content = right;
-      }
-    }
     final double natural = content + style.barPadding;
-    double widest = 0;
-    for (final _MeasuredStaffText line in staffLines) {
-      if (line.size.width > widest) {
-        widest = line.size.width;
-      }
-    }
-    final double withStaffText = widest == 0
-        ? 0
-        : widest + style.staffTextInset + style.barPadding;
-    final double sized = natural > withStaffText ? natural : withStaffText;
-    final double floored = sized < style.barMinWidth
+    final double floored = natural < style.barMinWidth
         ? style.barMinWidth
-        : sized;
+        : natural;
     // The natural bar is returned untouched rather than multiplied by 1. Multiplication by 1 is
     // exact for every double, but comparing the factors first keeps the promise visible in the code:
     // a chart of unresized bars computes the identical geometry it computed before this property
@@ -480,23 +401,6 @@ class LayoutEngine {
   //          placing a zero-width line would reserve a line height for nothing. An empty input
   //          yields an empty list.
   // KEYWORDS: staff-text, display-form, measurement, empty-skip, single-source
-  List<_MeasuredStaffText> _measureStaffText(Bar bar) {
-    final List<_MeasuredStaffText> lines = <_MeasuredStaffText>[];
-    for (final String stored in bar.staffText) {
-      final String text = displayStaffText(stored);
-      if (text.isEmpty) {
-        continue;
-      }
-      lines.add(
-        _MeasuredStaffText(
-          text: text,
-          size: style.textMetrics.measure(text, ChartTextRole.staffText),
-        ),
-      );
-    }
-    return lines;
-  }
-
   // PURPOSE: Place a bar's melody notes on the staff band beneath its chord line, each notehead at
   //          the x its own place names, so that the five staff lines run unbroken across the whole
   //          system and every note is drawn where the musician wrote it.
@@ -517,33 +421,6 @@ class LayoutEngine {
   //          This is the property the whole change exists for — one answer to "where is this note",
   //          and it is the same number the model stores and the reader measured.
   // KEYWORDS: melody-placement, coordinate-driven, staff-lines, empty-when-no-band, no-cells
-  PlacedMelodyStaff _placeMelody(
-    _MeasuredBar measured,
-    LayoutRect barBounds,
-    double melodyTop,
-    double melodyBand, {
-    required bool opensSystem,
-  }) {
-    if (melodyBand <= 0) {
-      return PlacedMelodyStaff.empty;
-    }
-    // The staff's middle line is the centre of the band. The band is a fixed height for the whole
-    // song, so a system whose bars hold no note still draws its lines exactly where its neighbours
-    // do and the music reads as one staff rather than as a set of islands.
-    final double middleLine = melodyTop + melodyBand / 2;
-    return placeMelodyStaff(
-      bar: measured.bar,
-      left: barBounds.left,
-      width: barBounds.size.width,
-      staffMiddleLineY: middleLine,
-      staffSpace: style.melodyStaffSpace,
-      clef: measured.clef,
-      // The clef is printed on the bar that opens a system and on no other: it names the staff, and
-      // one staff does not need naming nine times on a line of nine bars.
-      includeClef: opensSystem,
-    );
-  }
-
   // PURPOSE: Turn the bar's measured staff-text lines into placed boxes, stacked upward from the
   //          bar's bottom edge so several phrases stay inside the bar instead of running past the
   //          system below. The painter draws these boxes and nothing else, which is what makes the
@@ -553,29 +430,6 @@ class LayoutEngine {
   //          its box. The first sits [LayoutStyle.staffTextBottomInset] above the bar's bottom and
   //          each later one is stacked above it. An empty input yields an empty list.
   // KEYWORDS: staff-text, placement, stacking, display-form, painter-contract
-  List<PlacedStaffText> _placeStaffText(
-    List<_MeasuredStaffText> lines,
-    LayoutRect bounds,
-  ) {
-    final List<PlacedStaffText> placed = <PlacedStaffText>[];
-    double y = bounds.bottom - style.staffTextBottomInset;
-    for (final _MeasuredStaffText line in lines) {
-      y -= line.size.height;
-      placed.add(
-        PlacedStaffText(
-          text: line.text,
-          bounds: LayoutRect.fromLTWH(
-            bounds.left + style.staffTextInset,
-            y,
-            line.size.width,
-            line.size.height,
-          ),
-        ),
-      );
-    }
-    return placed;
-  }
-
   // THE CELL DIVISION IS GONE, AND ITS REMOVAL ATE FOUR FUNCTIONS AT ONCE. `_cellWidths` decided
   // how wide each beat's column had to be, `_cellOffsets` turned those columns into x positions
   // inside the bar, `_placeCells` published them as hit targets and `_placeBeatMarkers` drew them.
@@ -597,19 +451,13 @@ class LayoutEngine {
     for (final section in song.sections) {
       for (int index = 0; index < section.bars.length; index++) {
         final Bar bar = section.bars[index];
-        // The staff text is measured once here and handed to both the width that reserves room for
-        // it and the placement that draws it, so the bar cannot be sized for one string and drawn
-        // with another.
-        final List<_MeasuredStaffText> staffText = _measureStaffText(bar);
         measured.add(
           _MeasuredBar(
             sectionId: section.id,
             barIndex: index,
             bar: bar,
             key: song.key,
-            clef: song.staffSet.pitched?.clef ?? 'treble',
-            width: _barWidth(bar, song.key, staffText),
-            staffText: staffText,
+            width: _barWidth(bar, song.key),
             textCues: _measureTextCues(
               cuesByBar[_barKey(section.id, index)] ?? const <TextCue>[],
             ),
@@ -749,20 +597,10 @@ class LayoutEngine {
     double pageWidth,
     double pageHeight,
     double drawScale,
-    double melodyBand,
-    PlacedChartHeader? header,
   ) {
     final List<PageLayout> pages = <PageLayout>[];
     List<PlacedSystem> currentSystems = <PlacedSystem>[];
-    // THE HEADER COSTS THE FIRST PAGE ITS LINE AND ITS GAP, AND NO OTHER PAGE ANYTHING. The band is
-    // taken out of the content height before the first system is packed, so a chart that only just
-    // fitted one page before may now need two — the cost is paid in paper and it is stated here
-    // rather than discovered by a page count going up. A fitted page pays it in scale instead,
-    // because `fitToPage` re-engraves at each scale it tests and the band is inside that arithmetic.
-    final double headerBand = header == null
-        ? 0
-        : header.bounds.size.height + style.chartHeaderGap;
-    double y = style.pageMargin + headerBand;
+    double y = style.pageMargin;
     int pageIndex = 0;
     bool firstOnPage = true;
 
@@ -775,9 +613,6 @@ class LayoutEngine {
           index: pageIndex,
           size: LayoutSize(pageWidth, pageHeight),
           systems: currentSystems,
-          // The header belongs to the page the music BEGINS on and to no other: it states what the
-          // chart is written in, which a reader needs once.
-          header: pageIndex == 0 ? header : null,
           scale: drawScale,
         ),
       );
@@ -788,7 +623,7 @@ class LayoutEngine {
     }
 
     for (final _SystemPlan plan in systems) {
-      final double height = _systemHeight(plan, drawScale, melodyBand);
+      final double height = _systemHeight(plan, drawScale);
       final double spacing = firstOnPage ? 0 : style.systemSpacing;
       // A system that does not fit this page, and a page that already holds one, means a new page.
       if (!firstOnPage &&
@@ -810,13 +645,13 @@ class LayoutEngine {
       // the system then reaches over. Nothing is more honest available: a page that cannot hold one
       // line of music has no room to state anything about the music, and drawing the header over the
       // chord line would hide the very thing the page exists to show.
-      final double musicHeight = _musicHeight(drawScale, melodyBand);
+      final double musicHeight = style.barHeight;
       final bool overflowsPage =
           height > contentHeight && musicHeight <= contentHeight;
       final double top = overflowsPage
           ? style.pageMargin + contentHeight - height
           : (firstOnPage ? y : y + spacing);
-      currentSystems.add(_placeSystem(plan, top, drawScale, melodyBand));
+      currentSystems.add(_placeSystem(plan, top, drawScale));
       y = top + height;
       firstOnPage = false;
     }
@@ -833,22 +668,19 @@ class LayoutEngine {
   //          [LayoutStyle.barHeight], which is the number the overflow rule compared before a
   //          melody staff existed.
   // KEYWORDS: music-height, overflow-floor, stave, melody-band, unchanged-chords-only
-  double _musicHeight(double drawScale, double melodyBand) =>
-      style.barHeight + melodyBand;
+  double _musicHeight(double drawScale) => style.barHeight;
 
   // PURPOSE: Report how tall a system is, which is the band reserved for its cues plus its heading
-  //          plus its music: one chord stave and, when the song carries melody, one melody staff.
+  //          plus its music.
   // INPUTS: plan — the system. drawScale — the page scale the engraved coordinates will be
   //         multiplied by, which is what turns a cue's surface-sized letters into engraved room.
-  //         melodyBand — the room the melody staff needs, from [_melodyBand].
-  // OUTPUTS: The system's height. A system with no cue, no heading and no melody is exactly the
-  //          style's stave height, which is what keeps every chords-only page laid out as it was
-  //          before a melody staff existed.
-  // KEYWORDS: system-height, cue-band, section-label, stave, melody-band, unchanged-when-empty
-  double _systemHeight(_SystemPlan plan, double drawScale, double melodyBand) =>
+  // OUTPUTS: The system's height. A system with no cue and no heading is exactly the style's stave
+  //          height, which is what keeps a page of plain bars laid out as it always was.
+  // KEYWORDS: system-height, cue-band, section-label, stave, unchanged-when-empty
+  double _systemHeight(_SystemPlan plan, double drawScale) =>
       (plan.sectionLabel == null ? 0 : style.sectionLabelHeight) +
       _cueBandHeight(plan, drawScale) +
-      _musicHeight(drawScale, melodyBand);
+      _musicHeight(drawScale);
 
   // PURPOSE: Report the vertical room one system must give up for the cues of the bars on it, which
   //          is the tallest stack any one of its bars needs.
@@ -904,21 +736,14 @@ class LayoutEngine {
   double _cueLetterScale(double drawScale) =>
       drawScale < textCueMinLegibleScale ? textCueMinLegibleScale : drawScale;
 
-  PlacedSystem _placeSystem(
-    _SystemPlan plan,
-    double top,
-    double drawScale,
-    double melodyBand,
-  ) {
+  PlacedSystem _placeSystem(_SystemPlan plan, double top, double drawScale) {
     final double labelHeight = plan.sectionLabel == null
         ? 0
         : style.sectionLabelHeight;
     final double cueBand = _cueBandHeight(plan, drawScale);
     final double staveTop = top + labelHeight + cueBand;
-    final double melodyTop = staveTop + style.barHeight;
     final List<PlacedBar> bars = <PlacedBar>[];
     double x = style.pageMargin;
-    bool firstInSystem = true;
     for (final _MeasuredBar measured in plan.bars) {
       final LayoutRect bounds = LayoutRect.fromLTWH(
         x,
@@ -931,19 +756,6 @@ class LayoutEngine {
           sectionId: measured.sectionId,
           barIndex: measured.barIndex,
           bounds: bounds,
-          chords: _placeChords(measured, bounds),
-          staffText: _placeStaffText(measured.staffText, bounds),
-          // The melody staff sits BELOW the bar's own rectangle, which is what keeps the chord band
-          // — and therefore every tap on the chord line — exactly where it was on a chart that has
-          // no melody. Its notes are placed from their own places, so a note is at the x the model
-          // stores and nowhere else.
-          melody: _placeMelody(
-            measured,
-            bounds,
-            melodyTop,
-            melodyBand,
-            opensSystem: firstInSystem,
-          ),
           // A cue carries its own x, so placing it needs the bar's left edge and nothing else.
           textCues: _placeTextCues(
             measured.textCues,
@@ -954,14 +766,13 @@ class LayoutEngine {
         ),
       );
       x += measured.width;
-      firstInSystem = false;
     }
     return PlacedSystem(
       bounds: LayoutRect.fromLTWH(
         style.pageMargin,
         top,
         x - style.pageMargin,
-        labelHeight + cueBand + _musicHeight(drawScale, melodyBand),
+        labelHeight + cueBand + _musicHeight(drawScale),
       ),
       bars: bars,
       sectionId: plan.sectionId,
@@ -1046,7 +857,7 @@ class LayoutEngine {
 
   // PURPOSE: Place each of a bar's chords at the coordinate the model stores, so that a symbol is
   //          engraved where the musician wrote it and nowhere the engraving chose.
-  // INPUTS: measured вЂ” the bar with its model, key and address. barBounds вЂ” the bar's rectangle,
+  // INPUTS: measured — the bar with its model, key and address. barBounds — the bar's rectangle,
   //         which is also its chord band.
   // OUTPUTS: One placed chord per mark, ordered by its place along the bar, each carrying the mark's
   //          own [AnchoredPlace] so a caller can match a placement to the model value it came from
@@ -1054,11 +865,11 @@ class LayoutEngine {
   //
   //          THE VERTICAL PLACE, AND WHY ZERO MEANS THE MIDDLE. A chord's `offsetY` is its own place
   //          on the chord line, added to the line's centre. Zero therefore means "on the line", which
-  //          is where every chord written before this stage sits вЂ” so a chart engraved today draws
+  //          is where every chord written before this stage sits — so a chart engraved today draws
   //          its symbols at exactly the height it drew them at yesterday, and a musician who put one
   //          higher wrote a different number. The band is the bar's own rectangle: the symbol may not
   //          escape it, because the owner ruled that above the staff is a chord and below the bar is
-  //          neither (В«РђРєРєРѕСЂРґС‹ РЅР°РґРѕ Р·Р°РїСЂРµС‚РёС‚СЊ РЅРёР¶Рµ С‚Р°РєС‚Р°В»).
+  //          neither («Аккорды надо запретить ниже такта»).
   //
   //          WHAT HAPPENS TO A CHORD FROM A FILE THAT SAYS OTHERWISE. It is CLAMPED into the band
   //          rather than dropped, and [PlacedChord.clampedIntoBand] says so. Dropping it would make a
@@ -1066,56 +877,12 @@ class LayoutEngine {
   //          cannot hold one, and the ink reader would then find notes there. Clamping keeps the
   //          symbol visible, keeps it inside the band, and leaves a fact a probe can print.
   //
-  //          NO PACKING ANY MORE. Two marks may legitimately stand at the same x вЂ” the reducer no
-  //          longer separates them, because a place is a coordinate and the musician's pen made it вЂ”
+  //          NO PACKING ANY MORE. Two marks may legitimately stand at the same x — the reducer no
+  //          longer separates them, because a place is a coordinate and the musician's pen made it —
   //          so the engine draws them where they say and lets them overlap. The layout does not
   //          arbitrate a position the musician chose.
   // KEYWORDS: chord-placement, coordinate-driven, chord-band, clamping, clampedIntoBand,
   //           no-packing, drawn-where-written
-  List<PlacedChord> _placeChords(_MeasuredBar measured, LayoutRect barBounds) {
-    final Bar bar = measured.bar;
-    if (bar.chords.isEmpty) {
-      return const <PlacedChord>[];
-    }
-    final List<ChordMark> ordered = bar.chords.toList()
-      ..sort((ChordMark a, ChordMark b) => a.offsetX.compareTo(b.offsetX));
-    final List<PlacedChord> placed = <PlacedChord>[];
-    for (final ChordMark mark in ordered) {
-      final String text = mark.chord.render(measured.key, spellingTable);
-      final LayoutSize textSize = style.textMetrics.measure(
-        text,
-        ChartTextRole.chord,
-      );
-      // The band a chord may occupy, expressed as the travel its own box has inside the bar: half
-      // of the bar's height less half of the symbol is how far the CENTRE may move either way.
-      final double boxTop = barBounds.top;
-      final double boxBottom = barBounds.bottom - textSize.height;
-      final double centre = barBounds.top + barBounds.size.height / 2;
-      double chordY = centre - textSize.height / 2 + mark.place.offsetY;
-      bool clamped = false;
-      if (chordY < boxTop) {
-        chordY = boxTop;
-        clamped = true;
-      } else if (chordY > boxBottom) {
-        chordY = boxBottom > boxTop ? boxBottom : boxTop;
-        clamped = true;
-      }
-      placed.add(
-        PlacedChord(
-          chord: mark.chord,
-          place: mark.place,
-          bounds: LayoutRect.fromLTWH(
-            barBounds.left + mark.offsetX,
-            chordY,
-            textSize.width,
-            textSize.height,
-          ),
-          clampedIntoBand: clamped,
-        ),
-      );
-    }
-    return placed;
-  }
 }
 
 /// The result of asking the engine to put a whole song on one page.
@@ -1153,9 +920,7 @@ class _MeasuredBar {
     required this.barIndex,
     required this.bar,
     required this.key,
-    required this.clef,
     required this.width,
-    required this.staffText,
     required this.textCues,
     required this.startsSection,
     required this.sectionLabel,
@@ -1170,19 +935,7 @@ class _MeasuredBar {
   /// the same spelling and a bar cannot be measured as `Bb` and drawn as `A#`.
   final Key key;
 
-  /// The clef the bar's melody is written in, from the song's own [StaffSet].
-  ///
-  /// Carried per bar because a bar is the unit this pipeline passes around and because the clef
-  /// decides a melody note's HEIGHT, so a bar measured under one clef and drawn under another would
-  /// move its music by an octave. It is resolved once, while the bars are measured, rather than
-  /// read again where the melody is placed.
-  final String clef;
-
   final double width;
-
-  /// The bar's staff text in display form, with the size each line measured to. Measured once and
-  /// carried so that the width reserved for it and the box it is placed in are the same value.
-  final List<_MeasuredStaffText> staffText;
 
   /// The document's cues that hang on this bar, in document order, with their measured size.
   /// Measured once and carried so that the row reserved above the bar and the box drawn in it are
@@ -1197,17 +950,6 @@ class _MeasuredBar {
   /// the bar it belongs to are decided once: a layout that read the marks later would be a second
   /// place that had to agree with this one about what a break is.
   final bool breaksLine;
-}
-
-/// One line of a bar's staff text in display form, with the size it measured to.
-class _MeasuredStaffText {
-  const _MeasuredStaffText({required this.text, required this.size});
-
-  /// The words to draw, with the `*NN` prefix and padding already removed.
-  final String text;
-
-  /// The box the line occupies, from the style's text metrics.
-  final LayoutSize size;
 }
 
 /// One text cue of the document that hangs on a bar, with the size its words measured to.

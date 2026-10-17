@@ -111,7 +111,6 @@ const String chartIdentityPrefix = 'song-v1-';
 /// not an error.
 Map<String, Object?> canonicalChartContent(Song song) => <String, Object?>{
   'key': ModelJson.key(song.key),
-  'staffSet': ModelJson.staffSet(song.staffSet),
   'sections': <Object?>[
     for (final Section section in song.sections)
       <String, Object?>{

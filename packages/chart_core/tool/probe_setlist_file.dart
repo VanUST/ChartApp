@@ -232,7 +232,6 @@ Song _songWithId(String id) {
     key: base.key,
     tempo: base.tempo,
     sections: base.sections,
-    staffSet: base.staffSet,
   );
 }
 
@@ -247,7 +246,6 @@ Song _songWithMetadata(String composer, String style, int tempo) {
     key: base.key,
     tempo: tempo,
     sections: base.sections,
-    staffSet: base.staffSet,
   );
 }
 
@@ -278,7 +276,6 @@ Song _songEdited() {
         ],
       ),
     ],
-    staffSet: base.staffSet,
   );
 }
 

@@ -458,156 +458,6 @@ void main() {
       expect(pages.single.bars.single.bounds.size.width, greaterThan(120));
     });
   });
-
-  group('chord placement', () {
-    test('the first chord sits one padding inside the bar', () {
-      // Page margin 24, bar padding 8, so the chord starts at x = 32.
-      final Song song = Song(
-        title: 'Placement',
-        sections: <Section>[
-          Section(
-            id: 'sec-a',
-            label: const SectionLabel.letter('A'),
-            bars: <Bar>[oneChordBar(0)],
-          ),
-        ],
-      );
-      final PlacedBar bar = engine
-          .layout(song, pageWidth: 400, pageHeight: 600)
-          .single
-          .bars
-          .single;
-
-      expect(bar.bounds.left, 24);
-      // THE BAR IS AS WIDE AS THE ROOM TO WRITE IN IT, because one short chord's own content — 8 of
-      // place plus 8 of symbol = 16 — is less than that room. The width is taken from the style's
-      // floor rather than restated as a number: the number itself is pinned once, by
-      // `measureBar`'s floor cases, and a bar's placement should not fail when it changes.
-      //
-      // THE OLD ASSERTION, QUOTED: expect(bar.bounds.size.width, 88); — four cells of 18 plus 16 of
-      // padding. What this test is FOR is the line below it, the chord starting one padding inside
-      // the bar, and that claim survives the grid's removal untouched.
-      expect(bar.bounds.size.width, engine.style.barMinWidth);
-      expect(bar.chords.single.bounds.left, 32);
-      expect(
-        bar.chords.single.bounds.size.width,
-        8,
-        reason: 'one character at 8 per char',
-      );
-    });
-
-    test('a chord written further along the bar is engraved further along it', () {
-      // The chord is written on fixture slot 2 — 8 + 2×18 = 44 from the bar's left edge — so it is
-      // engraved at 24 + 44 = 68. Nothing between the barline and the chord moves it: there are no
-      // cells before it to be offset by, only the one number the model stores.
-      //
-      // THE OLD DERIVATION AND NAME, QUOTED: the test was 'a chord on a later beat is offset by the
-      // cells before it', with "Cell widths are 18, 18, 18 and 18 — the third cell holds the chord —
-      // so the offsets are 8, 26, 44 and 62 from the bar's left edge". There are no cells; the
-      // offset is the place the mark was written at, and the property a reader can check — a mark
-      // further along the bar is drawn further along it — is the same property.
-      final Song song = Song(
-        title: 'Placement',
-        sections: <Section>[
-          Section(
-            id: 'sec-a',
-            label: const SectionLabel.letter('A'),
-            bars: <Bar>[chordOnBeat(0, 2)],
-          ),
-        ],
-      );
-      final PlacedChord chord = engine
-          .layout(song, pageWidth: 400, pageHeight: 600)
-          .single
-          .bars
-          .single
-          .chords
-          .single;
-
-      // THE CHORD IS WHERE IT WAS WRITTEN. This used to read `expect(chord.beat, 2)` and check the
-      // column the metre gave the third beat. A chord has no beat; its place is its x, so the
-      // assertion is that the engraved box starts at the bar's left edge plus the place the fixture
-      // wrote — a number the model chose rather than one the engraver invented.
-      expect(chord.place.offsetX, fixtureX(2));
-      expect(chord.bounds.left, 24 + fixtureX(2));
-    });
-
-    test('two chords packed onto one beat are laid out side by side', () {
-      // The comma-packed case: both are written at the same place, so they are two marks 1.125 of a
-      // pixel apart — the fixture's own sub-slot spacing — and the engraving separates them so that
-      // neither hides the other. (Before the grid was removed they "differed only by step"; a step
-      // is now simply the sub-slot distance the fixture chose, and the property this test exists for
-      // is that two chords at one place are still two readable symbols.)
-      final Bar packed = Bar(
-        chords: <ChordMark>[
-          ChordMark(
-            place: placeAt(0),
-            chord: Chord(root: ChordRoot(0)),
-          ),
-          ChordMark(
-            place: placeAt(0, 1),
-            chord: Chord(root: ChordRoot(7)),
-          ),
-        ],
-      );
-      final Song song = Song(
-        title: 'Packed',
-        sections: <Section>[
-          Section(
-            id: 'sec-a',
-            label: const SectionLabel.letter('A'),
-            bars: <Bar>[packed],
-          ),
-        ],
-      );
-      final List<PlacedChord> chords = engine
-          .layout(song, pageWidth: 400, pageHeight: 600)
-          .single
-          .bars
-          .single
-          .chords;
-
-      expect(chords.length, 2);
-      // THE TWO MARKS KEEP THE PLACES THEY WERE WRITTEN AT, and the old assertion that they were
-      // steps 0 and 1 of one cell is now the two x values themselves: the engraver no longer lays a
-      // packed pair out side by side, because it does not own the second position — the musician's
-      // pen does. They stand one sub-slot apart, which is what the fixture asked for.
-      expect(chords[0].place.offsetX, fixtureX(0));
-      expect(chords[1].place.offsetX, fixtureX(0, 1));
-      expect(chords[0].bounds.left, 24 + fixtureX(0));
-      expect(chords[1].bounds.left, 24 + fixtureX(0, 1));
-    });
-
-    test(
-      'a placed chord carries the address that identifies it in the song',
-      () {
-        // The property that lets an annotation anchored in the song model be drawn at the right
-        // place: the layout reports the same bar address the anchor holds.
-        final Song song = Song(
-          title: 'Address',
-          sections: <Section>[
-            Section(
-              id: 'sec-a',
-              label: const SectionLabel.letter('A'),
-              bars: <Bar>[oneChordBar(0), chordOnBeat(7, 3)],
-            ),
-          ],
-        );
-        final PageLayout page = engine
-            .layout(song, pageWidth: 400, pageHeight: 600)
-            .single;
-        final PlacedBar second = page.bars[1];
-
-        expect(second.sectionId, 'sec-a');
-        expect(second.barIndex, 1);
-        expect(
-          song.barAt(second.sectionId, second.barIndex),
-          song.sections.first.bars[1],
-        );
-      },
-    );
-  });
-
   group('hit testing', () {
     test('a point inside a chord is contained by that chord and not by its neighbour', () {
       final Song song = Song(
@@ -625,8 +475,8 @@ void main() {
           .single
           .bars;
 
-      // The first chord occupies x in [32, 40] on the first bar's stave.
-      final LayoutRect first = bars[0].chords.single.bounds;
+      // The first bar's own rectangle is what a touch on the page is measured against.
+      final LayoutRect first = bars[0].bounds;
       expect(
         first.contains(LayoutOffset(first.left + 1, first.top + 1)),
         isTrue,
@@ -635,9 +485,11 @@ void main() {
         first.contains(LayoutOffset(first.right + 5, first.top + 1)),
         isFalse,
       );
-      // The second bar starts 76 points later, so its chord is well outside the first bar.
+      // The second bar sits to the right of the first, so a point inside it is outside the first.
       expect(
-        bars[0].bounds.contains(bars[1].chords.single.bounds.origin),
+        bars[0].bounds.contains(
+          LayoutOffset(bars[1].bounds.left + 1, bars[1].bounds.top + 1),
+        ),
         isFalse,
       );
     });

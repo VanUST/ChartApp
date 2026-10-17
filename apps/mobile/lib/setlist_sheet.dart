@@ -255,15 +255,7 @@ class _SetlistSheetState extends State<SetlistSheet> {
   //          catalogue's abbreviation, and the note itself is the musician's own data and is printed
   //          exactly as written.
   // KEYWORDS: subtitle, interval-label, notes, reading-order, localized
-  String _subtitleFor(SetlistItem item) {
-    final AppLocalizations l10n = AppLocalizations.of(context);
-    final String interval = item.transposeSem == 0
-        ? l10n.keyGridWritten
-        : localizedSemitoneInterval(l10n, item.transposeSem);
-    return item.notes.isEmpty
-        ? interval
-        : l10n.setlistEntrySubtitle(interval, item.notes);
-  }
+  String _subtitleFor(SetlistItem item) => item.notes;
 
   @override
   Widget build(BuildContext context) {
@@ -518,7 +510,6 @@ class _SetlistSheetState extends State<SetlistSheet> {
   ) async {
     final TextEditingController notes = TextEditingController(text: item.notes);
     final AppLocalizations l10n = AppLocalizations.of(context);
-    int semitones = item.transposeSem;
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
@@ -533,38 +524,6 @@ class _SetlistSheetState extends State<SetlistSheet> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    l10n.setlistTranspositionHint,
-                    style: const TextStyle(
-                      color: sheetMutedColor,
-                      fontSize: 12,
-                    ),
-                  ),
-                  Row(
-                    children: <Widget>[
-                      IconButton(
-                        key: const ValueKey<String>('setlist-transpose-down'),
-                        icon: const Icon(Icons.remove),
-                        color: sheetOnPanelColor,
-                        onPressed: () => setDialogState(() => semitones -= 1),
-                      ),
-                      Text(
-                        localizedSemitoneInterval(l10n, semitones),
-                        key: const ValueKey<String>('setlist-transpose-value'),
-                        style: const TextStyle(
-                          color: sheetAccentColor,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      IconButton(
-                        key: const ValueKey<String>('setlist-transpose-up'),
-                        icon: const Icon(Icons.add),
-                        color: sheetOnPanelColor,
-                        onPressed: () => setDialogState(() => semitones += 1),
-                      ),
-                    ],
-                  ),
                   TextField(
                     key: const ValueKey<String>('setlist-notes'),
                     controller: notes,
@@ -590,13 +549,12 @@ class _SetlistSheetState extends State<SetlistSheet> {
             ),
       ),
     );
-    final int chosen = semitones;
     final String written = notes.text;
     notes.dispose();
     if (confirmed != true) {
       return;
     }
-    _after(_session.updateItem(index, transposeSem: chosen, notes: written));
+    _after(_session.updateItem(index, notes: written));
   }
 
   // PURPOSE: Put a chart from the library into the programme, chosen from the loaded songs.

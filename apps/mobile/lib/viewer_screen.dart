@@ -154,7 +154,6 @@ import 'package:flutter/material.dart' hide Key;
 
 import 'chart_document.dart';
 import 'chart_file_bar.dart';
-import 'chord_palette_sheet.dart';
 import 'document_file_name.dart';
 import 'ink_capture_surface.dart';
 import 'ink_layer.dart';
@@ -162,10 +161,7 @@ import 'ink_pointer_probe.dart';
 import 'ink_pointer_probe_contract.dart';
 import 'ireal_library.dart';
 import 'ireal_source.dart';
-import 'key_grid.dart';
 import 'l10n/app_localizations.dart';
-import 'new_chart_dialog.dart';
-import 'note_palette_sheet.dart';
 import 'pan_gesture.dart';
 import 'scene_bar.dart';
 import 'setlist_import.dart';
@@ -173,8 +169,6 @@ import 'setlist_resolution.dart';
 import 'setlist_sheet.dart';
 import 'settings_contract.dart';
 import 'settings_sheet.dart';
-import 'sheet_surface.dart';
-import 'song_form_sheet.dart';
 import 'song_metadata_sheet.dart';
 import 'text_cue_sheet.dart';
 import 'two_finger_view_gesture.dart';
@@ -280,9 +274,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       sectionLabelHeight: 26,
     ),
   );
-
-  /// The spelling rule the twelve-key grid uses.
-  static const TranspositionGrid _grid = TranspositionGrid();
 
   /// The width of the song list when it stands as a permanent column.
   ///
@@ -415,41 +406,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   /// old position. Cleared when a different song or library is shown, because a section id and a
   /// bar index then name different music.
   ChartHit? _selection;
-
-  /// The OTHER end of the selection when the musician selected a RUN, or null for a single hit.
-  ///
-  /// A selection is an ADDRESS in the interface, not an entity of the document (D36), so it lives
-  /// here and nowhere else: it is not stored in the `.chart` file, it is not an entry in the log and
-  /// it cannot be undone. Two hits — an anchor and a focus — are the whole of it, and the run is
-  /// DERIVED from them by [_selectionRange], so there is no second value that could disagree with the
-  /// first about what is selected. Cleared with [_selection], for the same reason: a section id and a
-  /// bar index name different music once a different song is shown.
-  ChartHit? _selectionEnd;
-
-  /// Whether the next tap finishes a run rather than starting a new selection.
-  ///
-  /// This is the state of the "until here" action in the selection line, and it is the only reason
-  /// the second tap of a run means something different from the first: a musician presses the word,
-  /// the line says what the next tap will do, and the tap names the other end. It is not a mode that
-  /// survives the tap that uses it.
-  bool _extendPending = false;
-
-  /// What the copy action took, or null before anything was copied.
-  ///
-  /// Interface state, like the selection: copying writes no event, so this is not in the document and
-  /// not in the log. It is what the paste action reads. It is deliberately NOT cleared when a
-  /// different song or library is shown: a clipboard is not part of the document, and pasting bars
-  /// copied from one chart into another is a legal edit on ordinary [Bar] values — the paste names
-  /// its own section, and the ink it carries is re-anchored to the bars it lands on.
-  ChartClip? _clip;
-
-  /// The result of the last action on the selection, as words, for the line beside the chart.
-  ///
-  /// One sentence, built from the catalogue when the action ran, so it can name what happened
-  /// ("pasted after bar 20", "moved up a semitone: 4 of 16 bars") instead of leaving the musician to
-  /// work it out from the picture. Cleared whenever the selection changes, because a message about a
-  /// selection that no longer exists is a lie.
-  String? _selectionStatus;
 
   /// The editing session of each loaded song, by [IRealSong.index].
   ///
@@ -670,16 +626,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          on a single contact is a stroke (A61) and a drag cannot mean two things at once.
   // KEYWORDS: select-tool, ink-mode-off, pan-owner, one-tool-at-a-time, d34-compatible
   bool get _selectTool => !_inkOn && !_eraserOn;
-
-  /// Whether recognition is switched on for the chart on screen.
-  ///
-  /// OFF UNTIL THIS SESSION TURNS IT ON, which is the owner's rule 1 for recognition (D37): a
-  /// musician whose recognition works badly turns it off and keeps working, and every musician
-  /// starts there. It is deliberately NOT persisted: a preference nobody asked to keep would make
-  /// "the switch is off after a restart" impossible, and the rule that matters is that the app never
-  /// reads a chart it was not asked to read. See [IRealViewerScreen._toggleRecognition].
-  bool _recognitionOn = false;
-
   // PURPOSE: Return the ink layer of the song on screen WITHOUT creating one, which is what a
   //          read-only control needs: listing a chart must not open a capture layer, and an absent
   //          layer and a layer that is off must both read as "not on" rather than as two states.
@@ -1620,7 +1566,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         // A section id and a bar index from the previous library name different music here, so a
         // selection carried across a load would point at whatever happens to sit at that address.
         _selection = null;
-        _selectionEnd = null;
         _loading = false;
       });
       debugPrint(
@@ -1689,68 +1634,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     );
   }
 
-  // PURPOSE: Give the musician the twelve keys and remember the one they pick, which is the whole
-  //          two-tap transposition path: this is the second tap.
-  // INPUTS: entry — the song being transposed, whose written key is what the grid spells from.
-  // OUTPUTS: A future that completes when the grid closes. Picking a key stores its interval for
-  //          this song and rebuilds, so the chart, the key badge and the page are re-rendered in
-  //          the new key. A dismissed grid, an unavailable target, or a grid closed after the
-  //          screen is gone changes nothing.
-  // KEYWORDS: transposition, key-grid, two-taps, state-update, structured-log
-  Future<void> _chooseKey(IRealSong entry) async {
-    final int current = _semitonesBySong[entry.index] ?? 0;
-    final Key shownKey = _keyFor(entry.song.key, current);
-    final TranspositionTarget? picked = await showKeyGrid(
-      context,
-      writtenKey: entry.song.key,
-      currentPitchClass: shownKey.tonicPitchClass,
-    );
-    if (!mounted || picked == null || !picked.available) {
-      debugPrint(
-        'viewer.transpose.cancelled song="${_rawTitleFor(entry)}" '
-        'picked=${picked == null ? 'none' : picked.key}',
-      );
-      return;
-    }
-    setState(() => _semitonesBySong[entry.index] = picked.semitones);
-    debugPrint(
-      'viewer.transpose.ok song="${_rawTitleFor(entry)}" written=${entry.song.key} '
-      'shown=${picked.key} semitones=${picked.semitones}',
-    );
-  }
-
-  // PURPOSE: Find the target that reaches a stored interval, so a key remembered as a number is
-  //          rendered with the same practical spelling the grid offered.
-  // INPUTS: written — the key the chart is written in. semitones — the stored interval, in the
-  //         grid's own `[-5, 6]` range.
-  // OUTPUTS: The target's key. Every interval in that range is produced by exactly one of the
-  //          twelve targets, so the lookup always succeeds; a value outside the range (which
-  //          nothing in this screen produces) falls back to the written key rather than throwing.
-  // KEYWORDS: lookup, interval, key-spelling, fallback
-  Key _keyFor(Key written, int semitones) {
-    for (final TranspositionTarget target in _grid.targets(written)) {
-      if (target.semitones == semitones) {
-        return target.key;
-      }
-    }
-    return written;
-  }
-
-  // PURPOSE: Produce the chart to show for one song, which is the EDITED chart moved by the
-  //          interval the musician chose, or the edited chart itself when they chose nothing.
-  // INPUTS: entry — the song as loaded. semitones — the stored interval.
-  // OUTPUTS: The displayed song. The base is the session's document rather than the loaded song,
-  //          because the session is where an edit lives; at zero semitones it is returned
-  //          unchanged, so the common case does no work and the drawn result is identical to the
-  //          edited one.
-  // KEYWORDS: display-song, session-document, transposition, identity-fast-path
-  Song _displayedSong(IRealSong entry, int semitones) {
-    final Song song = _sessionFor(entry).song;
-    return semitones == 0
-        ? song
-        : transposeSong(song, semitones, toKey: _keyFor(song.key, semitones));
-  }
-
   // PURPOSE: Find the loaded chart one programme entry names, which is the ONE place the join
   //          between a programme and a library is decided — so the play action, the scene meaning,
   //          the row's title and the missing-chart report cannot disagree about which chart an
@@ -1768,43 +1651,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     return library == null ? null : resolveSetlistItem(library, item);
   }
 
-  // PURPOSE: Return the programme entry being played for one song, or null when the song is being
-  //          read on its own. This is the one place that decides whether the SCENE meaning of D14 is
-  //          in force, so the display, the song list and the scene bar cannot disagree about it.
-  // INPUTS: entry — the loaded song whose pane is being drawn.
-  // OUTPUTS: The entry at [_sceneIndex] when it names [entry]'s chart, resolved through
-  //          [_songForItem]; null otherwise. The resolution and not a raw id comparison, because a
-  //          library replacement renumbers document ids and only the identity survives it.
-  // KEYWORDS: scene-entry, document-identity-match, single-decision, d14
-  SetlistItem? _playingItemFor(IRealSong entry) {
-    final SetlistSession? setlist = _setlist;
-    final int? index = _sceneIndex;
-    if (setlist == null || index == null) {
-      return null;
-    }
-    final SetlistItem? item = setlist.itemAt(index);
-    if (item == null) {
-      return null;
-    }
-    return _songForItem(item)?.index == entry.index ? item : null;
-  }
-
-  // PURPOSE: Report how far the chart on screen is shown from its written key, taking the scene
-  //          interval of the programme entry when the song was reached from the programme and the
-  //          editor interval remembered for the song otherwise.
-  // INPUTS: entry — the loaded song.
-  // OUTPUTS: The signed interval in semitones. In the programme it is the entry's stored interval
-  //          exactly, so a `+2` entry shows a chart two semitones up; otherwise it is the interval
-  //          the key grid stored for that song, or zero.
-  // KEYWORDS: shown-interval, scene-vs-editor, d14, single-source
-  int _shownSemitones(IRealSong entry) {
-    final SetlistItem? playing = _playingItemFor(entry);
-    if (playing != null) {
-      return playing.transposeSem;
-    }
-    return _semitonesBySong[entry.index] ?? 0;
-  }
-
   // PURPOSE: Produce the chart to draw for one song, in whichever meaning of D14 is in force.
   // INPUTS: entry — the loaded song.
   // OUTPUTS: The displayed song. When the song is being played from the programme it is
@@ -1812,36 +1658,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          labelled with a practical key, and the document itself untouched. Otherwise it is the
   //          edited chart moved by the editor interval, as before.
   // KEYWORDS: shown-song, scene-resolution, editor-transposition, document-preserved
-  Song _shownSong(IRealSong entry) {
-    final SetlistItem? playing = _playingItemFor(entry);
-    if (playing != null) {
-      return setlistSceneFor(
-        entry: playing,
-        written: _sessionFor(entry).song,
-      ).shown;
-    }
-    return _displayedSong(entry, _semitonesBySong[entry.index] ?? 0);
-  }
-
-  // PURPOSE: Report the key the chart on screen is labelled with, so the song list can state the
-  //          move without building the whole transposed chart for every row.
-  // INPUTS: entry — the loaded song.
-  // OUTPUTS: The shown key. In the programme it is the scene resolution's practical spelling;
-  //          otherwise the editor interval's target from the twelve-key grid.
-  // KEYWORDS: shown-key, scene-vs-editor, cheap-read, list-subtitle
-  Key _shownKeyFor(IRealSong entry) {
-    final SetlistItem? playing = _playingItemFor(entry);
-    if (playing != null) {
-      return setlistSceneFor(
-        entry: playing,
-        written: _sessionFor(entry).song,
-      ).shownKey;
-    }
-    return _keyFor(
-      _sessionFor(entry).song.key,
-      _semitonesBySong[entry.index] ?? 0,
-    );
-  }
+  Song _shownSong(IRealSong entry) => _sessionFor(entry).song;
 
   // PURPOSE: Describe the programme and the chart it is playing for the verification handoff, so a
   //          browser-driving tool that cannot reach a Dart object can still check what the scene
@@ -1871,7 +1688,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         ? _selectedSong
         : 0;
     final IRealSong entry = library.songs[songIndex];
-    final SetlistItem? playing = _playingItemFor(entry);
     final Song written = _sessionFor(entry).song;
     // WHAT EACH ENTRY RESOLVES TO, reported beside the entries themselves rather than inside them:
     // a headless driver cannot reach `_songForItem`, and "the programme names music this library
@@ -1914,16 +1730,11 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       ],
       'entryCharts': entryCharts,
       'missingCharts': missing,
-      'playingDocumentId': playing?.documentId,
+      'playingDocumentId': null,
       'writtenSongId': written.id,
       'writtenKey': written.key.toString(),
-      'shownSemitones': playing?.transposeSem,
-      'shownKey': playing == null
-          ? written.key.toString()
-          : setlistSceneFor(
-              entry: playing,
-              written: written,
-            ).shownKey.toString(),
+      'shownSemitones': 0,
+      'shownKey': written.key.toString(),
     };
   }
 
@@ -1960,7 +1771,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       _sceneIndex = index;
       _selectedSong = found.index;
       _selection = null;
-      _selectionEnd = null;
       _chosenPageMode = PageMode.pages;
     });
     debugPrint(
@@ -1998,49 +1808,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       onChanged: () => setState(() {}),
       initialFilePath: setlistPathBeside(widget.initialPath),
       onOpenedFile: _adoptOpenedSetlist,
-    );
-  }
-
-  // PURPOSE: Give the key badge a second meaning in the programme: tapping it while a setlist entry
-  //          is playing edits THAT entry's interval through the setlist log, which is D14's scene
-  //          transposition at D9's two-tap budget.
-  // INPUTS: entry — the loaded song on screen, whose session holds the WRITTEN chart the grid must
-  //         spell from.
-  // OUTPUTS: A future that completes when the grid closes. A picked key is stored on the entry as
-  //          its interval, so the chart shows the new key while the document's own key is untouched;
-  //          a dismissed grid, an unavailable target or a closed screen changes nothing. The grid is
-  //          built from the chart's written key, not from the shown one, so the spelling is chosen
-  //          the same way the editor path chooses it.
-  // KEYWORDS: scene-transposition, key-grid, setlist-entry-edit, two-taps, written-key-source
-  Future<void> _chooseSceneKey(IRealSong entry) async {
-    final SetlistSession? setlist = _setlist;
-    final int? index = _sceneIndex;
-    if (setlist == null || index == null) {
-      return;
-    }
-    final SetlistItem? item = setlist.itemAt(index);
-    if (item == null || _songForItem(item)?.index != entry.index) {
-      return;
-    }
-    final Song written = _sessionFor(entry).song;
-    final Key shown = setlistSceneFor(entry: item, written: written).shownKey;
-    final TranspositionTarget? picked = await showKeyGrid(
-      context,
-      writtenKey: written.key,
-      currentPitchClass: shown.tonicPitchClass,
-    );
-    if (!mounted || picked == null || !picked.available) {
-      debugPrint(
-        'viewer.setlist.scene.transpose.cancelled index=$index '
-        'picked=${picked == null ? 'none' : picked.key}',
-      );
-      return;
-    }
-    setState(() => setlist.updateItem(index, transposeSem: picked.semitones));
-    debugPrint(
-      'viewer.setlist.scene.transpose index=$index '
-      'written=${written.key} shown=${picked.key} '
-      'semitones=${picked.semitones}',
     );
   }
 
@@ -2469,21 +2236,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   List<Widget> _sheetActions(BuildContext context, EditSession? session) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     return <Widget>[
-      // --- BARS AND SECTIONS (form editing, owner decision D17) -----------------------------------
-      // An action rather than a row in the body: a body row costs the chart height, and D13's FIT
-      // refuses to shrink a chart past the legible floor (the `.chart` control's move into this
-      // bar, in `chart_file_bar.dart`, is that mistake measured). It is disabled until a bar is
-      // selected, because every operation in its sheet acts on the selected bar's section and
-      // index. This button, the `_openSongForm` method below `_redo`, and the bar-level branch of
-      // `_buildSelectionLine` are the whole of this feature's footprint in this file.
-      IconButton(
-        key: const ValueKey<String>('viewer-form'),
-        icon: const Icon(Icons.segment),
-        tooltip: l10n.tooltipForm,
-        onPressed: session == null || _selection == null
-            ? null
-            : () => _openSongForm(context, session),
-      ),
       // --- WORDS ON THE CHART (text cues, `textcue.*`) --------------------------------------------
       // Placed beside the form action because both act on the bar the page's hit test named, and
       // disabled under the same condition: a cue is anchored to an address, so there is nothing to
@@ -2543,7 +2295,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         // attention already is, and a fourth control beside the save/open button costs no width in
         // an app bar whose width A49 measured as the scarce resource. On a phone this dialog is
         // reached from the overflow menu, so both shells get it without a new toolbar row.
-        onNew: () => unawaited(_newChart(context)),
       ),
       // --- SETTINGS, AND WHY IT IS HERE ------------------------------------------------
       // The language switch is the one SETTING this application has, and a setting belongs
@@ -2559,28 +2310,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         icon: const Icon(Icons.settings),
         tooltip: l10n.tooltipSettings,
         onPressed: () => unawaited(_openSettings(context)),
-      ),
-      // --- RECOGNITION OF BAR DIVISIONS (owner decision D37) ------------------------
-      // THE SWITCH THE OWNER ASKED FOR, and the reason it is a switch rather than a feature that is
-      // simply on: a musician whose recognition works badly turns it off and keeps working, and
-      // that is what makes a wrong recognition survivable. It therefore starts OFF, its icon states
-      // the state in force (a dashed line reads as "a division the application drew", a pencil-line
-      // reads as "your own hand"), and its tooltip says what is drawn in words rather than leaving
-      // the glyph to be guessed — the same rule the pen and the eraser follow here.
-      IconButton(
-        key: const ValueKey<String>('viewer-recognition-toggle'),
-        // THE GLYPH NO LONGER NAMES A BARLINE, AND THAT IS THE POINT. It was `border_vertical` when
-        // the switch was on and `linear_scale` when it was off — a barline and three dashes — while
-        // the switch now governs RECOGNITION of the page as a whole. A picture narrower than its
-        // meaning is how a control teaches the wrong thing, and the owner's own vocabulary for this
-        // one is «Распознавание: ВКЛ/ВЫКЛ»: the scanner is that word in a picture, and the state is
-        // carried by `isSelected` and by the tooltip's sentence rather than by a second glyph.
-        icon: const Icon(Icons.document_scanner),
-        isSelected: _recognitionOn,
-        tooltip: _recognitionOn
-            ? l10n.tooltipRecognitionOn
-            : l10n.tooltipRecognitionOff,
-        onPressed: session == null ? null : _toggleRecognition,
       ),
     ];
   }
@@ -2602,9 +2331,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       key: const ValueKey<String>('viewer-phone-menu'),
       tooltip: l10n.tooltipOverflowMenu,
       onSelected: (String picked) {
-        if (picked == 'form' && session != null) {
-          _openSongForm(context, session);
-        } else if (picked == 'cues' && session != null) {
+        if (picked == 'cues' && session != null) {
           _openTextCueSheet(context, session);
         } else if (picked == 'setlist') {
           unawaited(_openSetlist(context));
@@ -2621,21 +2348,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               // The phone's way to the same action the tablet's app-bar file dialog offers. It is
               // passed rather than made a menu row of its own so that "New chart" means one thing
               // on both shells and sits beside Save and Open wherever a musician finds either.
-              onNew: () => unawaited(_newChart(context)),
             ),
           );
         } else if (picked == 'settings') {
           unawaited(_openSettings(context));
-        } else if (picked == 'recognition') {
-          _toggleRecognition();
         }
       },
       itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
-          value: 'form',
-          enabled: session != null && _selection != null,
-          child: Text(l10n.menuForm),
-        ),
         PopupMenuItem<String>(
           value: 'cues',
           enabled: session != null && _selection != null,
@@ -2647,16 +2366,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           child: Text(l10n.menuSetlist),
         ),
         PopupMenuItem<String>(value: 'file', child: Text(l10n.menuChartFile)),
-        // The recognition row STATES the state in force rather than naming the action, because a
-        // feature that is off is invisible otherwise: a musician looking for the barline recognition
-        // he was told about finds "OFF" and knows it exists and that he can have it.
-        PopupMenuItem<String>(
-          value: 'recognition',
-          enabled: session != null,
-          child: Text(
-            _recognitionOn ? l10n.menuRecognitionOn : l10n.menuRecognitionOff,
-          ),
-        ),
         // The settings row stands last, for the same reason its app-bar twin does: the rows above
         // it are the ones a musician opens a chart to reach.
         PopupMenuItem<String>(
@@ -2824,39 +2533,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          nothing the switch does can lose a mark, and the switch itself is the undo for a
   //          recognition the musician does not want.
   //
-  //          THE SWITCH IS NAMED FOR RECOGNITION AS A WHOLE AND READS ONE READER FOR NOW. The glyph
-  //          is a scanner and the row says «Распознавание: ВКЛ/ВЫКЛ», not "bar lines", because the
-  //          control governs recognition as a whole and the note reader hangs off it the moment the
-  //          shape of a recognised note is decided (see `_recogniseWholePage`). A control renamed to
-  //          mean less than it will mean is how a musician turns on the wrong thing.
-  // INPUTS: None; reads the library, the selected song and its layer.
-  // OUTPUTS: Nothing. The layer's own flag and a screen rebuild; the document changes only by the
-  //          `division.set` events the pass appends, each of which undo reverses like any other.
-  // KEYWORDS: recognition-switch, top-menu, default-off, whole-pass, d37-rule-1, undoable
-  void _toggleRecognition() {
-    final IRealLibrary? library = _library;
-    if (library == null || library.songs.isEmpty) {
-      return;
-    }
-    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
-        ? _selectedSong
-        : 0;
-    final IRealSong entry = library.songs[index];
-    final InkCaptureLayer layer = _inkFor(entry);
-    final bool next = !_recognitionOn;
-    setState(() {
-      _recognitionOn = next;
-      layer.recognitionEnabled = next;
-    });
-    final int found = next ? _recogniseWholePage(layer, entry) : 0;
-    _publishInkState();
-    debugPrint(
-      'viewer.recognition.toggle song="${_rawTitleFor(entry)}" on=$next '
-      'found_now=$found divisions=${layer.documentDivisions.length} '
-      'strokes=${layer.strokeCount}',
-    );
-  }
-
   // PURPOSE: Read the ink ALREADY on the page the moment recognition is switched on, so that the
   //          musician sees his chart recognised rather than having to write everything again.
   // INPUTS: layer — the layer of the song on screen. entry — that song, for the page it is drawn on.
@@ -2864,26 +2540,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          whole-page recognition, run against the page the screen is currently showing; with no
   //          page drawn yet there is nothing to read and the number is what the document already had.
   //
-  //          THE NOTE PASS IS NOT PART OF THIS PASS YET, AND THAT IS A DECISION. `recogniseMelodyNotes`
-  //          exists and is measured, but it writes `(beat, step, pitch)` — the representation the
-  //          owner removed as a class — so running it here would write the shape he rejected into
-  //          his file while its replacement is being decided. See `ink_layer.dart`'s `endStroke`,
-  //          where the same decision is recorded at the call site that will be the one to come back.
-  // KEYWORDS: whole-page-pass, on-enable, idempotent, no-crash-without-a-page, note-pass-deferred
-  int _recogniseWholePage(InkCaptureLayer layer, IRealSong entry) {
-    final List<PageLayout> pages = _engraved?.pages ?? const <PageLayout>[];
-    if (pages.isEmpty) {
-      return layer.documentDivisions.length;
-    }
-    // EVERY PAGE, not just the first: a chart the musician has paged through may hold ink on any of
-    // them, and recognising only the page in front of him would leave the rest of his chart
-    // unstructured with no way to ask for it.
-    for (final PageLayout page in pages) {
-      layer.recogniseBarDivisions(page);
-    }
-    return layer.documentDivisions.length;
-  }
-
   // PURPOSE: Give the save/open action the state a `.chart` file must store as its snapshot, which
   //          is the WRITTEN chart before its own operation tail rather than the chart on screen.
   // INPUTS: None; reads the library and the selection.
@@ -2924,38 +2580,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          [_adoptOpenedSong] that could disagree with the first about any of them. A new chart is
   //          a document, and a document is what that method takes.
   //
-  //          WHAT IS NOT ASKED HERE, AND WHY. The title is not: it is renamed through the song-info
-  //          sheet, which is the same `song.update` a rename of an imported chart goes through, so
-  //          asking for it at creation would be a second naming mechanism. Tempo and style are not:
-  //          both are editable afterwards and neither is required for the page to be read.
-  // KEYWORDS: new-chart, from-scratch, one-adoption-path, empty-tail, d21, structured-log
-  Future<void> _newChart(BuildContext context) async {
-    final NewChartChoice? choice = await showNewChartDialog(context);
-    if (!mounted || choice == null) {
-      debugPrint('viewer.chart.new.cancelled');
-      return;
-    }
-    final Song song = newChartSong(
-      key: choice.key,
-      timeSignature: choice.timeSignature,
-    );
-    // The identity is printed here and not only computed inside the adoption, because it is the
-    // answer to a question this feature raises and nothing else can show: two charts made with the
-    // same key and meter hold identical MUSIC, and an identity that names music must therefore be
-    // identical too. A reader of this line can see that happen rather than have it asserted.
-    debugPrint(
-      'viewer.chart.new.created key=${song.key} '
-      'meter=${song.sections.first.bars.first.timeSignature} '
-      'bars=${song.writtenBarCount} '
-      'sections=${song.sections.length} '
-      'identity=${chartIdentityOf(song)}',
-    );
-    _adoptOpenedSong((
-      document: DocumentState(song: song),
-      events: const <ChartEvent>[],
-    ));
-  }
-
   // PURPOSE: Replace the shown library with the one song a `.chart` file produced, so the chart the
   //          file describes is the one on screen, and seed its session from the operation tail the
   //          file carried.
@@ -3014,7 +2638,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       // must not survive: a stroke appended through it would go to a document nothing is showing.
       _inkLayers.clear();
       _selection = null;
-      _selectionEnd = null;
       _error = null;
     });
   }
@@ -3200,23 +2823,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(prompt, textAlign: TextAlign.center),
-              // THE ONE GESTURE. A musician who opens the application to write a tune has nothing
-              // else to look at on this screen, so the action that starts a chart stands ON the
-              // empty state rather than in the app bar or behind the overflow menu: those are the
-              // places a musician with a chart already open looks, and this is the place a musician
-              // with nothing looks. It is a button and not a sentence about a button, because the
-              // empty state already carries one instruction — how to open an export — and a second
-              // paragraph about writing would be read as part of the first.
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                key: const ValueKey<String>('viewer-new-chart'),
-                onPressed: () => unawaited(_newChart(context)),
-                icon: const Icon(Icons.add),
-                label: Text(l10n.newChart),
-              ),
-            ],
+            children: <Widget>[Text(prompt, textAlign: TextAlign.center)],
           ),
         ),
       );
@@ -3280,11 +2887,7 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       itemCount: library.songs.length,
       itemBuilder: (BuildContext context, int index) {
         final IRealSong entry = library.songs[index];
-        final int semitones = _shownSemitones(entry);
-        final String writtenName = localizedKeyName(l10n, entry.song.key);
-        final String keyLabel = semitones == 0
-            ? writtenName
-            : '$writtenName → ${localizedKeyName(l10n, _shownKeyFor(entry))}';
+        final String keyLabel = localizedKeyName(l10n, entry.song.key);
         final Song summarySong = _sessions[entry.index]?.song ?? entry.song;
         final String subtitle =
             '${l10n.barCount(summarySong.writtenBarCount)} · $keyLabel'
@@ -3312,7 +2915,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
               // A selection belongs to the song it was made in; another song's bar at the same
               // address is a different bar.
               _selection = null;
-              _selectionEnd = null;
             });
             if (closeAfterPick) {
               Scaffold.of(context).closeDrawer();
@@ -3345,33 +2947,14 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     int songIndex,
   ) {
     final IRealSong entry = library.songs[songIndex];
-    final SetlistItem? playing = _playingItemFor(entry);
-    final int semitones = _shownSemitones(entry);
     final Song displayed = _shownSong(entry);
     // In the programme the POS field reports the running order, not the library order: a setlist
     // that dropped two tunes and moved a third makes those two numbers different, and the position a
     // performer needs is the one in the programme they are playing from.
-    final int position = playing == null
-        ? songIndex + 1
-        : (_sceneIndex ?? 0) + 1;
-    final int songCount = playing == null
-        ? library.songs.length
-        : (_setlist?.items.length ?? library.songs.length);
     final EditSession session = _sessionFor(entry);
-    // The strokes come from the document the SESSION holds, which is the written chart, and they are
-    // placed by address against the page on screen. A transposition therefore moves the music and
-    // the ink together without either being transformed.
     final InkCaptureLayer layer = _inkFor(entry);
     final List<InkStroke> strokes = session.document.strokes;
-    // The cues come from the same document and are placed the same way: by address, against the
-    // page on screen, so a transposition moves the music and the words together. They are read
-    // here rather than inside the painter for the same reason the strokes are.
     final List<TextCue> textCues = session.document.textCues;
-    // The mode follows the PANE the chart is drawn in, not the window. The song list takes a fixed
-    // slice off the left, so a window the mode would call a tablet can leave a chart area narrower
-    // than the default assumes — on the owner's tablet that is 824 logical pixels of window against
-    // 564 of pane, either side of the 600 threshold. Measuring the pane rather than deriving it
-    // from the window is what keeps the two from drifting apart when the pane's width changes.
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final PageMode mode = _pageModeFor(constraints.maxWidth);
@@ -3388,54 +2971,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           children: <Widget>[
             if (!_chromeHidden) ...<Widget>[
               SceneBar(
-                position: position,
-                songCount: songCount,
-                song: displayed,
-                semitones: semitones,
-                pageMode: mode,
-                // The bar's FORM follows the SHELL's decision about the surface, taken from the
-                // WINDOW by [_isBarCompact] — not from the pane this bar is drawn in. The pane is the
-                // right measure for the page mode above and the wrong one here: the owner's tablet has
-                // a 564-pixel pane, so a bar that called itself narrow on that number would drop STYLE
-                // and REPEATS on the owner's own device while the shell around it was still the
-                // tablet's. The window is read on BOTH axes, and the height is the one that matters on
-                // a phone held sideways: see [_isBarCompact] and A49.
-                compact: _isBarCompact(MediaQuery.sizeOf(context)),
-                // The key badge keeps its two-tap meaning in BOTH senses of D14: on a chart read on
-                // its own it edits the editor interval, and while a programme entry is playing it
-                // edits that entry's scene interval through the setlist log. Which one is in force is
-                // the same `_playingItemFor` answer the display used, so the badge and the page can
-                // never disagree about which document is being changed.
-                onOpenKeyGrid: () => unawaited(
-                  playing == null ? _chooseKey(entry) : _chooseSceneKey(entry),
-                ),
-                onPageModeChanged: (PageMode picked) =>
-                    setState(() => _chosenPageMode = picked),
-                // THE VIEW THE MUSICIAN HAS ON THE CHART, shown and driven where he reads. D33 asks
-                // for a zoom reachable from the interface beside the touch gesture, and D34 gives the
-                // GESTURE to two fingers; these three controls are the interface half, and the middle
-                // one is how he gets back to a known view after a pan he cannot see the edges of.
-                //
-                // The number reported is the magnification that is ON THE GLASS, not the stored one:
-                // while the view is locked the zoom is derived from the engraving (see [_viewed]),
-                // and a reading that showed the stored value would say ×1.0 over a chart drawn at
-                // ×1.4. The fourth control fixes that number, and it stands HERE — with the scale it
-                // fixes — as well as in the always-visible bars, because this is where a musician
-                // reads the scale and therefore where he looks for the control that pins it.
                 zoom: _effectiveZoom,
                 zoomLocked: _viewLocked,
+                compact: _isBarCompact(MediaQuery.sizeOf(context)),
                 onZoomIn: () => _zoomBy(1.25),
                 onZoomOut: () => _zoomBy(0.8),
                 onZoomReset: _resetView,
-                // The tempo and the style are edited where they are shown. The sheet is one surface
-                // for all four facts and opens with the tapped field focused, so the tempo a musician
-                // pressed is the tempo the cursor is in.
-                onEditTempo: () =>
-                    _openSongInfo(context, session, SongMetadataField.tempo),
-                onEditStyle: () =>
-                    _openSongInfo(context, session, SongMetadataField.style),
               ),
-              _buildSelectionLine(context, displayed),
             ],
             // THE DOCUMENT IS FRAMED BY THE SHELL AND NOT BY ITSELF. One rounded field behind the
             // music, drawn from the same corner radius as every other framed surface, is what makes
@@ -3702,10 +3244,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
             page: page,
             metrics: _metrics,
             selection: _selection,
-            // The RUN the musician selected, so sixteen bars look like sixteen bars. It is the same
-            // address the copy, paste and transpose actions read, so what is highlighted and what an
-            // operation acts on cannot come apart.
-            selectionRange: _selectionRange,
           ),
           child: const SizedBox.expand(),
         ),
@@ -3731,23 +3269,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
           ),
           child: const SizedBox.expand(),
         ),
-        // --- RECOGNISED DIVISIONS, DRAWN AS STRUCTURE (owner decision D37) ---------------
-        // THE LAYER THAT MAKES "recognised" VISIBLE, and it is drawn ABOVE the ink and BELOW
-        // nothing, because while recognition is on the ink it came from is not drawn at all: see
-        // [_inkStrokes]. It is added to the stack only when recognition is on, so with the switch
-        // off this widget is not built and the page is composed exactly as it was before this
-        // feature existed — the property the owner's rule 1 requires of everything that worked
-        // before there was any recognition.
-        if (_recognitionOn)
-          CustomPaint(
-            painter: BarlinePainter(
-              divisions: _resolveDivisions(page, layer.documentDivisions),
-              pageScale: page.scale,
-              pageZoom: page.zoom,
-              pagePan: page.pan,
-            ),
-            child: const SizedBox.expand(),
-          ),
       ],
     );
   }
@@ -3795,47 +3316,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
     // the switch is on, and both are decisions made once per frame rather than changes to the
     // document — so turning the switch off puts every stroke back with nothing to undo, which is the
     // property D37 rule 1 rests on.
-    final Set<String> recognised = _recognitionOn
-        ? <String>{
-            for (final BarDivision division in layer.documentDivisions)
-              if (division.sourceStrokeId.isNotEmpty) division.sourceStrokeId,
-            ...layer.recognisedNoteStrokeIds,
-          }
-        : const <String>{};
     return <ResolvedInkStroke>[
       ..._resolveStrokes(page, layer.documentStrokes).where(
         (ResolvedInkStroke resolved) =>
-            !erasedPreview.contains(resolved.stroke.id) &&
-            !recognised.contains(resolved.stroke.id),
+            !erasedPreview.contains(resolved.stroke.id) && true,
       ),
       ...layer.liveStrokes.where(
         (ResolvedInkStroke resolved) => _isOnPage(page, resolved),
       ),
     ];
-  }
-
-  // PURPOSE: Turn every division of the document into the pair the barline painter needs, skipping
-  //          the ones this page cannot place.
-  // INPUTS: page — the page being drawn. divisions — the document's divisions, in render order.
-  // OUTPUTS: The divisions whose anchor this page resolves, with the anchor's origin. A division on
-  //          another page of a paginated document is simply not drawn here, which is the same rule
-  //          the ink follows and the same call (`resolveEventAnchor`) that resolves it.
-  // KEYWORDS: division-placement, anchor-resolution, page-filter, one-resolver
-  List<ResolvedDivision> _resolveDivisions(
-    PageLayout page,
-    List<BarDivision> divisions,
-  ) {
-    final List<ResolvedDivision> resolved = <ResolvedDivision>[];
-    for (final BarDivision division in divisions) {
-      final InkPlacement? placement = resolveEventAnchor(page, division.anchor);
-      if (placement == null) {
-        continue;
-      }
-      resolved.add(
-        ResolvedDivision(division: division, origin: placement.origin),
-      );
-    }
-    return resolved;
   }
 
   // PURPOSE: Turn every committed stroke into the pair a painter needs, skipping the ones this page
@@ -4009,82 +3498,10 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
       localPosition.dx,
       localPosition.dy,
     );
-    // THE ONE-ACTION REPAIR FOR RECOGNITION, AND IT IS TRIED BEFORE ANYTHING ELSE. With recognition
-    // on and the pen off, a tap that lands ON INK changes the application's mind about that ink:
-    // a stroke that is a division is rejected (and the handwriting comes back into view), and a
-    // stroke that is not one becomes a division. Both errors are repaired exactly here, by one tap
-    // on the mark itself, which is the price the owner's rule puts on a wrong recognition.
-    //
-    // It costs nothing when the tap misses the ink — the layer answers null and the tap goes on to
-    // select the bar under it — and it cannot fire at all with recognition off, so the tap that
-    // selects a cell is the tap it always was.
-    if (_recognitionOn) {
-      final InkCaptureLayer? layer = _selectedInkLayer;
-      final String? repaired = layer?.toggleDivisionAt(
-        page: page,
-        surfacePoint: surface,
-      );
-      if (repaired != null) {
-        setState(() {});
-        publishInkStateWhenIdle();
-        debugPrint(
-          'viewer.select.repaired page=${page.index} what=$repaired '
-          'divisions=${layer?.documentDivisions.length}',
-        );
-        return;
-      }
-      // AND THE SAME GESTURE FOR A NOTE, because the reader is the second thing this switch turns
-      // on and a wrong recognition has to cost one or two actions whichever reader made it. A tap
-      // that lands on the ink of a recognised head deletes that note and gives the handwriting back;
-      // a tap that lands on nothing recognised falls through to the selection below, so the tap that
-      // names a bar or a beat is the tap it always was.
-      final String? note = layer?.rejectRecognisedNoteAt(
-        page: page,
-        surfacePoint: surface,
-      );
-      if (note != null) {
-        setState(() {});
-        publishInkStateWhenIdle();
-        debugPrint(
-          'viewer.select.repaired page=${page.index} what=$note '
-          'notes_ink=${layer?.recognisedNoteStrokeIds.length}',
-        );
-        return;
-      }
-    }
     final LayoutOffset pagePoint = page.pagePointOf(surface);
-    final ChartHit? staffHit = hitTestMelodyStaff(page, pagePoint);
-    // THE SECOND TAP OF A RUN IS NOT ANOTHER SELECTION, AND IT OPENS NOTHING. While the "until here"
-    // action is armed, the next touch names the OTHER END of the run: it must not open the note
-    // palette, because the musician is pointing at a bar and not at a beat to write into, and it must
-    // not replace the anchor, because that is the end he already named.
-    if (_extendPending) {
-      _extendTo(page, staffHit ?? hitTestPage(page, pagePoint));
-      return;
-    }
-    if (staffHit != null) {
-      setState(() {
-        _selection = staffHit;
-        _selectionEnd = null;
-        _selectionStatus = null;
-      });
-      debugPrint(
-        'viewer.select staff page=${page.index} scale=${page.scale} '
-        'surface=(${surface.x.toStringAsFixed(1)},${surface.y.toStringAsFixed(1)}) '
-        'page_point=(${pagePoint.x.toStringAsFixed(1)},'
-        '${pagePoint.y.toStringAsFixed(1)}) '
-        'hit=${staffHit.sectionId}#${staffHit.barIndex} '
-        'x=${staffHit.local.x.toStringAsFixed(1)} '
-        'y=${staffHit.local.y.toStringAsFixed(1)}',
-      );
-      _editNoteSelection(context);
-      return;
-    }
     final ChartHit? hit = hitTestPage(page, pagePoint);
     setState(() {
       _selection = hit;
-      _selectionEnd = null;
-      _selectionStatus = null;
     });
     debugPrint(
       'viewer.select page=${page.index} scale=${page.scale} '
@@ -4106,317 +3523,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          The run is DERIVED and never stored: there is one value here and no second copy of the
   //          selection that could disagree with it.
   //
-  //          WHY THE DEPTH IS THE HIT'S AND NOT A SEPARATE CHOICE. A musician who touched a cell has
-  //          already said "this beat"; one who touched the bar's padding said "this bar". Reading the
-  //          depth from the touch is what keeps the interface from asking a question the gesture
-  //          already answered (D36's whole point: a selection can be finer than a bar).
-  // KEYWORDS: selection-range, derived-address, depth-from-touch, ui-state-not-document-state, d35,
-  //           d36
-  ChartSelection? get _selectionRange {
-    final ChartHit? anchor = _selection;
-    if (anchor == null) {
-      return null;
-    }
-    final ChartHit? focus = _selectionEnd;
-    if (focus == null) {
-      // A SINGLE TAP NAMES THE BAR. It used to name a beat when it landed on one, and a beat was a
-      // column the layout published; with the grid gone the tap's own point is a coordinate rather
-      // than a cell, so the smallest fragment one touch can mean is the bar it landed in. A run
-      // INSIDE one bar is made by the second tap (see below), which is the gesture that can say
-      // "from here to there".
-      return ChartSelection.bars(
-        sectionId: anchor.sectionId,
-        firstBar: anchor.barIndex,
-        lastBar: anchor.barIndex,
-      );
-    }
-    // TWO TOUCHES IN ONE BAR NAME A WINDOW, and the two ends are their own x values — the numbers
-    // the model stores. Two touches in different bars name the run of bars between them and drop
-    // the x values, which `ChartSelection.span` decides in one place.
-    return ChartSelection.span(
-      sectionId: anchor.sectionId,
-      firstBar: anchor.barIndex,
-      firstX: anchor.local.x,
-      lastBar: focus.barIndex,
-      lastX: focus.local.x,
-    );
-  }
-
-  // PURPOSE: Finish a run with the bar the musician just pointed at, and say what was selected, so the
-  //          highlight he sees is the address the next operation will act on.
-  // INPUTS: page — the page the touch landed on, for the log. hit — the bar and cell it named, or null
-  //         for a touch that hit nothing.
-  // OUTPUTS: Nothing. Sets [_selectionEnd] and clears [_extendPending], or — on a miss, or on a bar of
-  //          another section — clears the pending state and says why in the log rather than building a
-  //          run that spans two sections. A run inside one section is the only run this model has: an
-  //          address is `(section, bar)` and bars of two sections are not a contiguous run of anything.
-  // KEYWORDS: selection-extend, range-finish, one-section, miss-refusal, structured-log
-  void _extendTo(PageLayout page, ChartHit? hit) {
-    final ChartHit? anchor = _selection;
-    if (hit == null || anchor == null) {
-      setState(() => _extendPending = false);
-      debugPrint(
-        'viewer.selection.extend.skipped reason=${hit == null ? 'miss' : 'no-anchor'} '
-        'page=${page.index}',
-      );
-      return;
-    }
-    if (hit.sectionId != anchor.sectionId) {
-      setState(() => _extendPending = false);
-      debugPrint(
-        'viewer.selection.extend.skipped reason=other-section '
-        'anchor=${anchor.sectionId}#${anchor.barIndex} '
-        'hit=${hit.sectionId}#${hit.barIndex}',
-      );
-      return;
-    }
-    setState(() {
-      _selectionEnd = hit;
-      _extendPending = false;
-      _selectionStatus = null;
-    });
-    final ChartSelection? range = _selectionRange;
-    debugPrint(
-      'viewer.selection.extend page=${page.index} '
-      'anchor=${anchor.sectionId}#${anchor.barIndex} '
-      'x=${anchor.local.x.toStringAsFixed(1)} '
-      'focus=${hit.sectionId}#${hit.barIndex} '
-      'x=${hit.local.x.toStringAsFixed(1)} '
-      'range=${range?.toString() ?? 'none'} bars=${range?.barCount ?? 0} '
-      'window=${range?.windowWidth.toStringAsFixed(1) ?? '0'}',
-    );
-  }
-
-  // PURPOSE: Arm the "until here" action, so the next tap names the other end of the run rather than
-  //          starting a new selection.
-  // INPUTS: context — for the catalogue, which states what the next tap will do.
-  // OUTPUTS: Nothing. Only meaningful with a selection; with none there is no anchor to extend from
-  //          and the action is disabled.
-  // KEYWORDS: selection-extend, arm, next-tap, discoverable-state
-  void _armExtend(BuildContext context) {
-    setState(() {
-      _extendPending = true;
-      _selectionStatus = null;
-    });
-    debugPrint(
-      'viewer.selection.extend.armed '
-      'search=${_selection == null ? 'none' : '${_selection!.sectionId}'
-                '#${_selection!.barIndex}'}',
-    );
-  }
-
-  // PURPOSE: Take a copy of what is selected, so the musician can paste it at another address —
-  //          including when nothing on it was ever recognised as music.
-  // INPUTS: context — for the catalogue.
-  // OUTPUTS: Nothing. The clip is held in [_clip] and NOTHING is written to the log, because copying
-  //          changes no document (D36: only the result of an operation reaches the op-log). The line
-  //          beside the chart says what was taken, with the numbers that make it checkable: how many
-  //          bars, how many of them carried structure, and how many strokes came with them.
-  // KEYWORDS: copy, clipboard, no-event, ink-carried, numbers-stated, d35
-  void _copySelection(BuildContext context) {
-    final EditSession? session = _currentSession;
-    final ChartSelection? range = _selectionRange;
-    final AppLocalizations l10n = AppLocalizations.of(context);
-    if (session == null || range == null) {
-      debugPrint('viewer.selection.copy.skipped reason=no-selection');
-      return;
-    }
-    final ChartClip? clip = session.copySelection(range);
-    final SelectionReport report = selectionReportOf(
-      song: session.song,
-      strokes: session.document.strokes,
-      selection: range,
-    );
-    if (clip == null) {
-      setState(() => _selectionStatus = l10n.selectionCopyNothing);
-      debugPrint('viewer.selection.copy.skipped reason=no-bars range=$range');
-      return;
-    }
-    setState(() {
-      _clip = clip;
-      _selectionStatus = l10n.selectionCopied(
-        range.barCount,
-        // The MUSICIAN's number, counted across the sections from the top of the chart, exactly as
-        // the selection label counts it: the log may keep the model's zero-based index, but a
-        // sentence a musician reads must not.
-        _writtenBarOrdinal(session.song, range.sectionId, range.firstBar),
-      );
-    });
-    debugPrint(
-      'viewer.selection.copy range=$range depth=${range.depth.name} '
-      'bars=${clip.barCount} window=${clip.windowWidth.toStringAsFixed(1)} '
-      'strokes=${clip.strokes.length} '
-      'structured=${report.structuredBars} minimal=${report.minimalBars} '
-      'ink_area=${report.inkArea.toStringAsFixed(1)}',
-    );
-  }
-
-  // PURPOSE: Put the copied fragment after the selected bar (or into the selected cell), as ONE edit.
-  // INPUTS: context — for the catalogue.
-  // OUTPUTS: Nothing. Appends at most one event, rebuilds the page, and states the outcome in words —
-  //          including every refusal, because a paste that silently did nothing is the defect the
-  //          outcome value exists to prevent.
-  // KEYWORDS: paste, one-undo, outcome-stated, refusal-logged, d35, d36
-  void _pasteSelection(BuildContext context) {
-    final EditSession? session = _currentSession;
-    final ChartSelection? range = _selectionRange;
-    final ChartClip? clip = _clip;
-    final AppLocalizations l10n = AppLocalizations.of(context);
-    if (session == null || range == null || clip == null) {
-      debugPrint(
-        'viewer.selection.paste.skipped '
-        'session=${session == null ? 'none' : 'ok'} '
-        'range=${range == null ? 'none' : 'ok'} '
-        'clip=${clip == null ? 'none' : 'ok'}',
-      );
-      return;
-    }
-    // THE COUNT AND THE ORDINALS ARE READ BEFORE THE PASTE, because after it the questions have
-    // different answers: a log line that printed the same number twice would be a line nobody could
-    // check. The insertion moves nothing before its own address, so the ordinals read here are still
-    // the ones the sentence means.
-    final int before =
-        session.document.song.sectionById(range.sectionId)?.bars.length ?? 0;
-    final ClipPasteOutcome outcome = session.pasteClip(at: range, clip: clip);
-    // The numbers the sentence needs, in the musician's own counting.
-    final int targetOrdinal = _writtenBarOrdinal(
-      session.song,
-      range.sectionId,
-      range.lastBar,
-    );
-    final int cellBarOrdinal = _writtenBarOrdinal(
-      session.song,
-      range.sectionId,
-      range.firstBar,
-    );
-    setState(() {
-      _selectionStatus = switch (outcome) {
-        ClipPasteOutcome.pasted =>
-          clip.depth == SelectionDepth.bars
-              ? l10n.selectionPastedAfter(targetOrdinal, clip.barCount)
-              // A WINDOW IS PASTED INTO A BAR and the sentence names that bar. It used to name the
-              // cell the window began at, which was a number the model no longer has.
-              : l10n.selectionPastedIntoBar(cellBarOrdinal),
-        ClipPasteOutcome.needsCell => l10n.selectionPasteNeedsCell,
-        ClipPasteOutcome.windowDoesNotFit => l10n.selectionPasteDoesNotFit,
-        ClipPasteOutcome.noSuchSection ||
-        ClipPasteOutcome.noSuchBar ||
-        ClipPasteOutcome.noSuchRun => l10n.selectionPasteNoBar,
-      };
-      // A PASTED RUN OF BARS MOVES THE ADDRESS THE SELECTION NAMES — the bar the musician was on is
-      // still the bar he was on, and the run landed after it — so the pending range is dropped rather
-      // than left to name bars that have shifted under it.
-      //
-      // AND THE CONSEQUENCE IS NAMED HERE BECAUSE IT COSTS THE MUSICIAN TAPS. The owner's workflow
-      // ends with "транспонировать вставленное", and after this paste the selection is a single bar
-      // again, so the pasted run has to be re-named with two taps and the "До сюда" action before the
-      // transposition can act on it. The alternative — leaving the pasted run selected — was tried and
-      // reverted: a selection here is a `ChartHit`, which holds a `PlacedBar` from the page that is on
-      // screen, and the pasted bars exist only in the engraving the NEXT build produces. Selecting
-      // them would mean a second, address-shaped copy of the selection kept beside this one until that
-      // build ran, which is exactly the duplicated selection D36 forbids.
-      if (outcome == ClipPasteOutcome.pasted &&
-          clip.depth == SelectionDepth.bars) {
-        _selectionEnd = null;
-      }
-    });
-    debugPrint(
-      'viewer.selection.paste outcome=${outcome.name} at=$range '
-      'depth=${clip.depth.name} bars=${clip.barCount} '
-      'strokes=${clip.strokes.length} '
-      'undo=${session.undoDepth} bars_before=$before '
-      'bars_after=${session.document.song.sectionById(range.sectionId)?.bars.length ?? 0}',
-    );
-  }
-
-  // PURPOSE: Move the chords and the melody of the selected bars up a semitone, as ONE edit, leaving
-  //          the chart's key and every bar outside the selection alone — and saying out loud what
-  //          happened to the handwriting, which cannot move.
-  // INPUTS: context — for the catalogue.
-  // OUTPUTS: Nothing. Appends at most one event and states the counts: how many of the selected bars
-  //          changed, and how many strokes the selection carries that stay exactly where they were
-  //          drawn. A selection with nothing structured says so instead of writing an empty event.
-  // KEYWORDS: transpose-selection, one-undo, key-unchanged, ink-not-transposed, counts-stated, d35
-  void _transposeSelection(BuildContext context) {
-    final EditSession? session = _currentSession;
-    final ChartSelection? range = _selectionRange;
-    final AppLocalizations l10n = AppLocalizations.of(context);
-    if (session == null || range == null) {
-      debugPrint('viewer.selection.transpose.skipped reason=no-selection');
-      return;
-    }
-    final SelectionTransposition report = session.transposeSelection(
-      selection: range,
-      semitones: 1,
-    );
-    setState(() {
-      _selectionStatus = switch (report.outcome) {
-        SelectionTransposeOutcome.applied => l10n.selectionTransposed(
-          report.barsChanged,
-          report.barsTotal,
-        ),
-        SelectionTransposeOutcome.nothingToTranspose =>
-          l10n.selectionTransposeNothing,
-        SelectionTransposeOutcome.beatsOnly => l10n.selectionTransposeBeats,
-        SelectionTransposeOutcome.noSuchSection => l10n.selectionTransposeNoBar,
-      };
-    });
-    debugPrint(
-      'viewer.selection.transpose outcome=${report.outcome.name} '
-      'range=$range bars_changed=${report.barsChanged} '
-      'bars_total=${report.barsTotal} strokes_kept=${report.strokesKept} '
-      'semitones=${report.semitones} key=${session.song.key} '
-      'undo=${session.undoDepth}',
-    );
-  }
-
-  // PURPOSE: Open the chord palette for the selected cell, which is the second tap of the edit
-  //          budget D2 sets: the first named the cell, this one opens what can be written in it.
-  // INPUTS: context — the build context.
-  // OUTPUTS: Nothing. Does nothing when no cell is selected — a bar-level selection names no cell
-  //          to write into, and a tap in a bar's padding must not silently pick a beat — or when
-  //          nothing is loaded. Otherwise the sheet edits through the session and rebuilds this
-  //          screen after each applied chord, so the page shows the change as it is made.
-  // KEYWORDS: edit-entry, second-tap, cell-required, session, rebuild-on-apply
-  void _editSelection(BuildContext context) {
-    final ChartHit? hit = _selection;
-    final IRealLibrary? library = _library;
-    final EditSession? session = _currentSession;
-    if (hit == null || library == null || session == null) {
-      debugPrint('viewer.edit.skipped hit=${hit ?? 'none'}');
-      return;
-    }
-    final int index = _selectedSong >= 0 && _selectedSong < library.songs.length
-        ? _selectedSong
-        : 0;
-    final IRealSong entry = library.songs[index];
-    // The palette edits the WRITTEN chart — `applyChordToCell` writes the picked chord unchanged —
-    // and only its preview is moved, so it is handed the interval and the key the page is SHOWN in.
-    // In the programme that is the entry's scene interval, which is why a chord picked while playing
-    // an entry is written in the chart's own key and previewed in the key the stage reads.
-    final int semitones = _shownSemitones(entry);
-    final Key shownKey = _shownSong(entry).key;
-    unawaited(
-      showChordPalette(
-        context,
-        session: session,
-        sectionId: hit.sectionId,
-        barIndex: hit.barIndex,
-        // THE TAP'S OWN PLACE, which is where the chord will be written: a chord is placed where
-        // the musician pointed, and `hit.local` is that number in the bar's own frame. The height
-        // is the distance from the chord line's centre, which is what `offsetY` means.
-        offsetX: hit.local.x,
-        offsetY: hit.local.y - hit.bar.bounds.size.height / 2,
-        shownKey: shownKey,
-        semitoneShift: semitones,
-        // The page is drawn from the session, so a rebuild after each applied chord is the whole of
-        // what "show the edit" means here. The selection is deliberately NOT recomputed: the
-        // address did not move, and re-running the hit test would need a point the sheet never had.
-        onChanged: () => setState(() {}),
-      ),
-    );
-  }
-
   // PURPOSE: Open the note palette for the selected cell, which is the third tap of the melodic
   //          edit: the first named the cell, the second opened what can be written in it, and this
   //          one writes a note. It is the entry the note staff had none of — the model, the events,
@@ -4427,41 +3533,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          bar-level selection names nowhere to put one — or when nothing is loaded. Otherwise the
   //          sheet edits through the session and rebuilds this screen after each applied note.
   //
-  //          WHY THE PALETTE IS HANDED THE WRITTEN KEY AND NOT THE SHOWN ONE, which is the one place
-  //          this differs from the chord palette beside it. The chord palette writes a SOUNDING root
-  //          and the page spells it later, so it previews in the shown key; a note's written letter
-  //          and alteration ARE the value that is stored, so a palette that offered the shown key
-  //          would store a pitch the musician did not choose and would quietly transpose the chart's
-  //          own melody while the chart is merely being DISPLAYED in another key. The interval is
-  //          therefore not passed at all: the sheet writes the document, and the document is written
-  //          in its own key.
-  // KEYWORDS: note-edit-entry, cell-required, written-key, session, rebuild-on-apply, melody
-  void _editNoteSelection(BuildContext context) {
-    final ChartHit? hit = _selection;
-    final EditSession? session = _currentSession;
-    if (hit == null || session == null) {
-      debugPrint('viewer.note.skipped hit=${hit ?? 'none'}');
-      return;
-    }
-    debugPrint(
-      'viewer.note.open section=${hit.sectionId} bar=${hit.barIndex} '
-      'x=${hit.local.x.toStringAsFixed(1)} written_key=${session.song.key}',
-    );
-    unawaited(
-      showNotePalette(
-        context,
-        session: session,
-        sectionId: hit.sectionId,
-        barIndex: hit.barIndex,
-        // THE TAP'S OWN PLACE: a new note is written where the musician pointed, and the sheet
-        // opens listing the bar's notes with the nearest one chosen.
-        offsetX: hit.local.x,
-        writtenKey: session.song.key,
-        onChanged: () => setState(() {}),
-      ),
-    );
-  }
-
   // PURPOSE: Reverse the last edit through the session's inverse and show the page it produces.
   // INPUTS: session — the session of the song on screen.
   // OUTPUTS: Nothing. Rebuilds the screen when an edit was reversed. The document afterwards is
@@ -4503,45 +3574,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          Otherwise the sheet edits through the session and the screen rebuilds after every
   //          applied operation.
   //
-  //          WHY THE SELECTION IS DROPPED AND NOT MOVED. The selection is a hit-test result against
-  //          the layout on screen, and a form edit moves the very address that produced it: an
-  //          inserted bar shifts every later index by one, so the hit would go on naming its old
-  //          index and the painter would highlight the bar next door — a highlight that was right
-  //          when it was taken and is wrong now. The sheet keeps its own cursor and prints on its
-  //          own header which bar the next operation acts on, so the address is not lost; only the
-  //          highlight, which is a photograph of an older layout, is.
-  // KEYWORDS: form-entry, bars, sections, selection-drop, rebuild-on-apply, structured-log
-  void _openSongForm(BuildContext context, EditSession session) {
-    final ChartHit? hit = _selection;
-    if (hit == null) {
-      debugPrint('viewer.form.open.skipped reason=no-selection');
-      return;
-    }
-    if (session.song.barAt(hit.sectionId, hit.barIndex) == null) {
-      debugPrint(
-        'viewer.form.open.skipped reason=stale-address '
-        'section=${hit.sectionId} bar=${hit.barIndex}',
-      );
-      return;
-    }
-    debugPrint(
-      'viewer.form.open section=${hit.sectionId} bar=${hit.barIndex} '
-      'x=${hit.local.x.toStringAsFixed(1)}',
-    );
-    unawaited(
-      showSongForm(
-        context,
-        session: session,
-        sectionId: hit.sectionId,
-        barIndex: hit.barIndex,
-        onChanged: () => setState(() {
-          _selection = null;
-          _selectionEnd = null;
-        }),
-      ),
-    );
-  }
-
   // PURPOSE: Open the words sheet for the bar the musician selected, which is where a remark a band
   //          reads — `To Coda`, `D.C. al Fine`, `Solo`, `Vamp`, `4×` — is written, changed, moved
   //          and removed, all through the operation log.
@@ -4614,300 +3646,6 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         onChanged: () => setState(() {}),
       ),
     );
-  }
-
-  // PURPOSE: State the selection in words beside the chart, because a highlight proves that
-  //          SOMETHING is selected and not which thing: a screenshot cannot falsify "the bar I
-  //          touched", and a labelled number can. The line is also the control that reaches the
-  //          edit which fits the selection: the chord palette for a cell, the bars-and-sections
-  //          sheet for a bar.
-  // INPUTS: context — the build context, for the text theme. song — the chart on screen, read to
-  //         number the bar the way a musician counts it.
-  // OUTPUTS: The selection line as ONE TO THREE WRAPPED ROWS. With a selection it reads
-  //          `selected: bar 12 cell 2`; without one it invites a tap. A bar-level selection says so
-  //          instead of inventing a cell number, and it leads to the FORM sheet rather than to the
-  //          chord palette, because a bar and its section are what the form operations act on and a
-  //          bar-level selection names both. The hint beside the label states the affordance in
-  //          words, since a label that changes what it is when touched is not discoverable on its
-  //          own. Nothing here can ellipsize: when the two parts do not share a row the hint moves
-  //          to the next row whole, at full size.
-  // KEYWORDS: selection-label, edit-entry, falsifiable-feedback, musician-numbering, empty-state,
-  //           wrap-not-ellipsis, full-instruction
-  Widget _buildSelectionLine(BuildContext context, Song song) {
-    final AppLocalizations l10n = AppLocalizations.of(context);
-    final ChartHit? hit = _selection;
-    final EditSession? session = _currentSession;
-    // EVERY HIT IS EDITABLE NOW. It used to need a cell, because a chord was written into a cell;
-    // a hit already carries the place a chord or a note would be written at, so the only thing a
-    // hit can lack is the hit itself.
-    final bool editable = hit != null;
-    // A bar-level selection names no cell to write a chord or a note into, but it names exactly what
-    // the form sheet acts on — a section and a bar — so the line is a control in both cases instead
-    // of being dead text whenever the touch landed on a bar's padding rather than on one of its
-    // cells.
-    final VoidCallback? onTap = hit == null
-        ? null
-        : (editable
-              ? () => _editSelection(context)
-              : (session == null
-                    ? null
-                    : () => _openSongForm(context, session)));
-    final String hint = editable
-        ? l10n.selectionHintChord
-        : l10n.selectionHintForm;
-    // THE TOOL'S OWN WORDS WHILE A TOOL IS IN FORCE, AND THE PEN'S WERE THE ONES MISSING. Its icon is
-    // a pencil and its tooltip needs a long press on a tablet, so the one place a mode can say what it
-    // does in words is this line: with nothing selected the line has nothing else to say, and a
-    // musician who has just pressed a tool is exactly the person who needs to be told what a touch
-    // will do. The eraser has had its sentence since A64; **the pen never had one, and the owner's own
-    // report is what that costs** — he wrote that the interface "only draws, with the stylus and with
-    // the finger" and could not find selection at all, while the line under the chart said "tap a bar
-    // to select it" the whole time. A sentence that describes a gesture the current tool has taken
-    // away is worse than no sentence: it is a promise the next touch breaks.
-    // AND THE LOCK'S OWN WORDS, WHILE THE SCALE IS FIXED. Its button is a padlock and its state is a
-    // colour, and A64 established that a glyph plus a colour is how a mode goes unnoticed. The order
-    // is deliberate: a selection is what the musician just touched and outranks everything; a fixed
-    // scale comes next, because it changes what the whole screen will do; the tool's hint is last,
-    // because it only changes what one touch will do.
-    final String text = hit == null
-        ? (_viewLocked
-              ? l10n.viewLockActiveHint
-              : (_inkOn
-                    ? l10n.penActiveHint
-                    : (_eraserOn
-                          ? l10n.eraserActiveHint
-                          : l10n.selectionPrompt)))
-        : _runLabel(song, hit, l10n);
-    final TextStyle? style = Theme.of(context).textTheme.bodySmall?.copyWith(
-      fontWeight: hit == null ? FontWeight.normal : FontWeight.bold,
-    );
-    final Widget label = Wrap(
-      // The two parts are separate runs on purpose: they are different facts (what is selected, and
-      // what a tap will do), the second one is the ACTION, and an action cut short is the defect
-      // this layout exists to remove.
-      spacing: 8,
-      children: <Widget>[
-        // A WRAP AND NOT A ROW OF FLEXIBLES. The line was a Row of two `Flexible` texts with
-        // `TextOverflow.ellipsis`, and at 412 logical pixels in Russian the hint received about half
-        // the pane and printed `— коснитесь, чтобы сменить а…`: the half a musician needs to read
-        // was the half removed. Neither ellipsis nor a scale-down is acceptable here — an
-        // instruction has to be complete, and text shrunk to fit is not readable on a music stand —
-        // so the line wraps instead. The cost is named: on a phone-width pane in Russian the hint
-        // takes a second row, and the chart in the `Expanded` below gives up that row's height. That
-        // is the honest price of a longer language, and it is smaller than hiding the instruction.
-        Text(
-          text,
-          key: const ValueKey<String>('viewer-selection-label'),
-          style: style,
-        ),
-        if (onTap != null)
-          Text(
-            hint,
-            key: const ValueKey<String>('viewer-selection-edit-hint'),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-      ],
-    );
-    // TWO NAMED ACTIONS RATHER THAN A SECOND GESTURE. A cell can now carry a chord AND notes, so
-    // "tap the line" no longer names one thing; a long press for the second surface would be a
-    // gesture nothing on screen mentions, and a mode switch would make a musician discover which
-    // surface is armed by making a mistake. So the line carries the two words for the two surfaces,
-    // and the third tap that writes a note is spent deliberately. The measure of what that costs is
-    // in the decision record: chord editing went from two taps to three on the pane, and both
-    // surfaces are now reachable from one named place.
-    //
-    // THE TWO ACTIONS BELONG TO THE SAME WRAP AS THE TWO TEXTS, AND THAT IS A FIX RATHER THAN A
-    // TIDY-UP. They used to sit in a `Row` under the label inside a `Column`, so a selected cell
-    // always cost a SECOND row: on the owner's tablet that was 24 logical pixels of chart height —
-    // measured on the device, the page's top edge sat 24 logical pixels lower with a cell selected
-    // than without one — spent on a row that had 1 300 logical pixels of empty width beside it. A
-    // `Wrap` holding all four runs keeps them on one line wherever one line fits and falls back to
-    // two only where the pane really cannot hold them, which is the same rule the label and the hint
-    // already follow. `WrapCrossAlignment.center` keeps the two texts on the buttons' centre line
-    // rather than at their top, which is what makes one row read as one row.
-    final bool cellSelected = editable && session != null;
-    // THE RUN, AND WHAT IT IS MADE OF. `range` is the same address the copy, paste and transpose
-    // actions act on, and `report` is what makes the two levels of quality sayable: a musician has to
-    // be able to tell a fragment that will transpose from one that will only travel (D37 point 4),
-    // and "12 bars selected" says neither. Both are computed from the document, not from a cached
-    // copy of it, so an edit that changes a bar changes the sentence.
-    final ChartSelection? range = _selectionRange;
-    final SelectionReport? report = session == null || range == null
-        ? null
-        : selectionReportOf(
-            song: session.song,
-            strokes: session.document.strokes,
-            selection: range,
-          );
-    final String? quality = report == null
-        ? null
-        : l10n.selectionQuality(
-            report.barCount,
-            report.structuredBars,
-            report.inkOnlyBars,
-            report.emptyBars,
-          );
-    final String? inkNote = report == null || report.strokeCount == 0
-        ? null
-        : l10n.selectionInkKept(report.strokeCount);
-    return Padding(
-      padding: UiKit.paneRowPadding,
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: <Widget>[
-          if (onTap == null)
-            label
-          else
-            InkWell(
-              key: const ValueKey<String>('viewer-selection-edit'),
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: label,
-              ),
-            ),
-          // THE TWO LEVELS OF QUALITY, BESIDE THE RANGE AND NOT BEHIND A TAP. A fragment that looks
-          // the same but behaves differently is the lie this project spent a day removing, so the
-          // sentence stands in the same line as the selection, every time: how many bars carry
-          // structure (and will therefore transpose), how many carry only handwriting (and will
-          // therefore only travel), and — when there is ink in the selection — that the ink cannot be
-          // transposed and will stay exactly where it was drawn.
-          if (quality != null)
-            Text(
-              quality,
-              key: const ValueKey<String>('viewer-selection-quality'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          if (inkNote != null)
-            Text(
-              inkNote,
-              key: const ValueKey<String>('viewer-selection-ink'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          if (_selectionStatus != null)
-            Text(
-              _selectionStatus!,
-              key: const ValueKey<String>('viewer-selection-status'),
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          if (cellSelected) ...<Widget>[
-            _SelectionAction(
-              widgetKey: 'viewer-selection-chord',
-              label: l10n.viewerChord,
-              onTap: () => _editSelection(context),
-            ),
-            _SelectionAction(
-              widgetKey: 'viewer-selection-note',
-              label: l10n.viewerNote,
-              onTap: () => _editNoteSelection(context),
-            ),
-          ],
-          // THE FOUR ACTIONS OF THE OWNER'S WORKFLOW, in the order he says it in: select, copy,
-          // paste, transpose (D35). They live in this line rather than in the app bar because the app
-          // bar's width is the scarce resource A49 measured, and because every one of them acts on
-          // exactly what this line names — putting them anywhere else would separate the words from
-          // the address they apply to.
-          if (range != null && session != null) ...<Widget>[
-            _SelectionAction(
-              widgetKey: 'viewer-selection-extend',
-              label: l10n.selectionActionExtend,
-              onTap: () => _armExtend(context),
-            ),
-            _SelectionAction(
-              widgetKey: 'viewer-selection-copy',
-              label: l10n.selectionActionCopy,
-              onTap: () => _copySelection(context),
-            ),
-            if (_clip != null)
-              _SelectionAction(
-                widgetKey: 'viewer-selection-paste',
-                label: l10n.selectionActionPaste,
-                onTap: () => _pasteSelection(context),
-              ),
-            _SelectionAction(
-              widgetKey: 'viewer-selection-transpose',
-              label: l10n.selectionActionTransposeUp,
-              onTap: () => _transposeSelection(context),
-            ),
-          ],
-          // WHAT THE NEXT TAP WILL DO, while "until here" is armed. It replaces the edit hint rather
-          // than standing beside it: the hint says what a tap on the LINE does, and while a run is
-          // being completed the question a musician has is what a tap on the PAGE will do.
-          if (_extendPending)
-            Text(
-              l10n.selectionExtendPrompt,
-              key: const ValueKey<String>('viewer-selection-extend-prompt'),
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // PURPOSE: Say what is selected when a RUN is selected rather than a single bar, so the words beside
-  //          the chart name the same fragment the highlight covers.
-  // INPUTS: song — the chart on screen, for the musician's bar numbering. hit — the anchor of the run.
-  //         l10n — the catalogue.
-  // OUTPUTS: The run sentence for a run, and the single-hit sentence otherwise (through
-  //          [_selectionLabel]), which keeps the one-bar case worded exactly as it was: nothing about
-  //          selecting one bar changed, so nothing about how it is described should.
-  // KEYWORDS: selection-label, run, beat-window, one-based, single-hit-unchanged
-  String _runLabel(Song song, ChartHit hit, AppLocalizations l10n) {
-    final ChartSelection? range = _selectionRange;
-    if (_selectionEnd == null || range == null) {
-      return _selectionLabel(song, hit, l10n);
-    }
-    if (range.isWindow) {
-      return l10n.selectionRunWindowAt(
-        _writtenBarOrdinal(song, range.sectionId, range.firstBar),
-        range.firstX!.round(),
-        range.lastX!.round(),
-      );
-    }
-    return l10n.selectionRunRange(
-      _writtenBarOrdinal(song, range.sectionId, range.firstBar),
-      _writtenBarOrdinal(song, range.sectionId, range.lastBar),
-    );
-  }
-
-  // PURPOSE: Render a selection the way the musician counts — bars from the top of the chart and
-  //          cells from the start of the bar, both one-based — while the model keeps zero-based
-  //          indices. The conversion lives here so the label and the log cannot disagree silently.
-  // INPUTS: song — the chart. hit — the selection, holding the model's zero-based address. l10n —
-  //         the catalogue, because the two numbers are written into a sentence and the sentence is
-  //         not the same in both languages.
-  // OUTPUTS: The label. A null cell means the touch landed on the bar and not on a cell, which is
-  //          stated rather than rounded to the nearest cell.
-  // KEYWORDS: label-format, one-based, global-bar-ordinal, model-address
-  String _selectionLabel(Song song, ChartHit hit, AppLocalizations l10n) {
-    final int bar = _writtenBarOrdinal(song, hit.sectionId, hit.barIndex);
-    // THE BAR IS THE WHOLE OF WHAT ONE TOUCH NAMES. It used to add "cell N" when the touch landed
-    // on one; a place inside a bar is a distance now, and printing a distance as the name of the
-    // selection would be a number the musician never counted.
-    return l10n.selectionBar(bar);
-  }
-
-  // PURPOSE: Number a bar the way a musician counts, across sections from the top, because the model
-  //          addresses a bar by its index inside its section and that number restarts at every
-  //          section.
-  // INPUTS: song — the chart. sectionId — the section the bar is in. barIndex — its index there.
-  // OUTPUTS: The one-based ordinal of the bar in the whole written chart. A section id the song does
-  //          not have — a layout and a model that disagree — still returns a finite number counted
-  //          from the end rather than throwing inside build.
-  // KEYWORDS: bar-ordinal, section-walk, total-function, defensive
-  int _writtenBarOrdinal(Song song, String sectionId, int barIndex) {
-    int ordinal = 0;
-    for (final Section section in song.sections) {
-      if (section.id == sectionId) {
-        return ordinal + barIndex + 1;
-      }
-      ordinal += section.bars.length;
-    }
-    return ordinal + barIndex + 1;
   }
 
   /// The background of the strip that explains a FIT fallback.
@@ -5421,48 +4159,6 @@ class _EraserGlyphPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_EraserGlyphPainter old) => old.color != color;
-}
-
-/// One named action beside the selection line, sized for a thumb and worded for the surface it
-/// opens.
-class _SelectionAction extends StatelessWidget {
-  /// Creates an action labelled [label] that runs [onTap].
-  const _SelectionAction({
-    required this.widgetKey,
-    required this.label,
-    required this.onTap,
-  });
-
-  /// The widget key a driver test looks the action up by.
-  final String widgetKey;
-
-  /// The word on the action.
-  final String label;
-
-  /// What a tap does.
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: sheetCellColor,
-    borderRadius: BorderRadius.circular(8),
-    child: InkWell(
-      key: ValueKey<String>(widgetKey),
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: sheetOnPanelColor,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 // PURPOSE: Measure what the pen path costs, so a latency claim about handwriting is a number in the

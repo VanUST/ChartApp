@@ -2,49 +2,55 @@
 //          that a change to the model is visible in one place and the package's promise — no
 //          Flutter, no database, no platform channel — stays checkable.
 // INPUTS: None.
-// OUTPUTS: The pitch, key, spelling-table, chord, transposition and song-model types.
+// OUTPUTS: The pitch, key, spelling-table and chord types, the smallest song model that can hold a
+//          bar, the iReal import path, the layout engine and the page hit test, the document event
+//          catalogue that undo, autosave and the ink layer all replay, and the two containers that
+//          serialise a document.
 // KEYWORDS: chart-core, public-api, barrel, domain-boundary, pure-dart
 //
-// What lives here: written pitch and pitch classes, keys and their signatures, the rule that
-// resolves enharmonic spelling, the chord model, transposition, the song structure that addresses
-// a bar, the iReal import path from an `irealb://` payload through de-obfuscation and notation to
-// a Song, the layout engine and the page hit test, the document event catalogue that undo,
-// autosave and a future sync all replay, the two containers that serialise a document — `.chart`
-// for a chart and `.setlist` for a programme, each its snapshot plus its operation tail, both over
-// the one envelope in `src/container/container_frame.dart` — and the identity a programme names a
-// chart by, derived from the chart's own music in `src/identity/chart_identity.dart`. Also the two
-// editing values that join
-// those: the chord palette a cell offers, and the session that applies an edit through the log.
-// The ink domain joins them at the same level: the canonical stroke form is already in the
-// catalogue above, and `src/ink/` adds the pure decisions a live capture needs — whether a
-// contact may draw (`InkPalmRule`), where a stroke's anchor landed on a page
-// (`resolveEventAnchor`), which anchor a stroke that begins anywhere on the page is stored against
-// (`resolveInkAnchor`: the cell under it, the bar, or the nearest bar when it began in a margin,
-// between two systems or on the staff) and which stroke a touch is on when the eraser asks
-// (`hitTestInkErase`) — plus the assembler that turns live samples into a canonical stroke, so all
-// of them are checkable with `dart test` and none of them needs a device.
+// WHAT THIS LIBRARY IS FOR NOW. The application does three things: it loads an iReal chart, it lets
+// a musician write on the page with a pen and erase what he wrote, and it saves the result. Every
+// type here exists to serve one of those three, and the surface is deliberately the smallest set
+// that can:
 //
-// The song model stores the WRITTEN form only. The order a tune is played in — repeats,
-// alternative endings, navigation — is a pure function over this model, so there is no second
-// copy of the music to disagree with the first. `derivePlayOrder` is that function for repeats,
-// alternative endings and repeat-previous bars; it does not interpret navigation words, which
-// stay verbatim staff text, and it reports what it decided rather than leaving a reader to guess.
+//   * LOAD AN iReal CHART. `src/ireal/` reads an `irealb://` payload through de-obfuscation, the
+//     tokenizer and the parser into a Song. The parser still produces CHORDS, and the chord model
+//     (`src/chord.dart`, `src/pitch.dart`, `src/key.dart`, `src/spelling_table.dart`) is kept whole
+//     because of it: an import that dropped what the file says would not be an import. Nothing in
+//     the application draws a chord any more, and the model is the only place one is still read.
+//   * DRAW ITS BARS. `src/layout/` turns a Song into positioned pages of bar rectangles, and
+//     `src/layout/hit_test.dart` answers which bar a touch names. A bar's WIDTH still follows the
+//     chords its file gave it, because that is the page the musician recognises; the symbols
+//     themselves are no longer placed or drawn.
+//   * HOLD HANDWRITING ON THOSE BARS. `src/ink/` holds the pure decisions a live capture needs —
+//     whether a contact may draw (`InkPalmRule`), which anchor a stroke that begins anywhere on the
+//     page is stored against (`resolveInkAnchor`: the bar under it, or the nearest bar when it began
+//     in a margin), and which stroke a touch is on when the eraser asks (`hitTestInkErase`) — plus
+//     the assembler that turns live samples into a canonical stroke (`src/editing/`). All of them
+//     are checkable with `dart test` and none of them needs a device.
+//   * SAVE. `src/container/` stores a document as a snapshot plus an operation tail, in one
+//     envelope (`src/container/container_frame.dart`); `.chart` is the chart and `.setlist` the
+//     programme. The containers take bytes and return bytes: resolving a path, opening a file and
+//     invoking a browser's file chooser are the app's job.
 //
-// What must never live here: flutter, storage_drift, ink_native or any platform channel. The
-// package's value rests on `dart test` running every one of its tests on a machine with no
-// device, no emulator and no Android SDK, and the dependency list in pubspec.yaml is empty to
-// keep that true. Every file in this library is pure: no I/O, no clock, no globals. The container
-// follows that rule by taking bytes and returning bytes: resolving a path, opening a file and
-// invoking a browser's file chooser are the app's job, through its own conditional-export seam.
+// THE OP-LOG IS THE ONLY WRITER. Every value the application stores is reached by appending an
+// event to the log in `src/oplog/`, undo is an append of the inverses, and an inverse carries the
+// WHOLE previous value rather than a delta — so replaying a document's tail reproduces it exactly.
+// The catalogue is a sealed hierarchy, which is why the files that hold it are one library split
+// into parts: the compiler then demands a case in the reducer and a case in the codec for every
+// event, rather than letting a new event family be applied by nobody.
 //
-// Still absent by design: nothing that reaches a device. The two containers store bytes and return
-// bytes; resolving a path, opening a file and invoking a browser's file chooser are the app's job,
-// through its own conditional-export seam.
+// WHAT IS DELIBERATELY ABSENT, because the owner cut the application back to its basics and asked
+// for the musical editing to be deleted rather than hidden. There is no note model, no melodic or
+// percussion staff, no play-order expansion, no selection or clipboard, no transposition, no
+// chord-symbol entry, no meter or bar insertion, no barline recognition and no chart header. Those
+// files are gone from the tree, and the tests that covered them are gone with them. The history
+// holds them, which is where the owner wants them until the rest is rewritten.
 //
-// The `.setlist` container is no longer absent. A programme is stored as a snapshot plus a
-// `setlist.*` operation tail in the SAME envelope `.chart` uses — `container_frame.dart` — and what
-// an entry names is decided by `src/identity/chart_identity.dart`: a chart's own music, not the
-// position it sat at in an import and not its title.
+// WHAT MUST NEVER LIVE HERE: flutter, storage_drift, ink_native or any platform channel. The
+// package's value rests on `dart test` running every one of its tests on a machine with no device,
+// no emulator and no Android SDK, and the dependency list in pubspec.yaml is empty to keep that
+// true. Every file in this library is pure: no I/O, no clock, no globals.
 
 /// ChartApp's pure-Dart chart domain.
 library;
@@ -53,17 +59,9 @@ export 'src/anchored_place.dart';
 export 'src/chord.dart';
 export 'src/container/chart_file.dart';
 export 'src/container/setlist_file.dart';
-export 'src/editing/bar_range.dart';
-export 'src/editing/chord_palette.dart';
-export 'src/editing/chord_symbol_parser.dart';
 export 'src/editing/ink_stroke_builder.dart';
-export 'src/editing/meter_input.dart';
-export 'src/editing/selection.dart';
 export 'src/identity/chart_identity.dart';
-export 'src/ink/barline_detector.dart';
 export 'src/ink/ink_hit.dart';
-export 'src/ink/melody_note_reader.dart';
-export 'src/ink/melody_note_writer.dart';
 export 'src/ink/page_anchor.dart';
 export 'src/ink/palm_rule.dart';
 export 'src/ireal/chord_parser.dart';
@@ -72,29 +70,16 @@ export 'src/ireal/parser.dart';
 export 'src/ireal/payload.dart';
 export 'src/ireal/tokenizer.dart';
 export 'src/key.dart';
-export 'src/key_vocabulary.dart';
-export 'src/layout/chart_header.dart';
 export 'src/layout/geometry.dart';
 export 'src/layout/hit_test.dart';
 export 'src/layout/layout_engine.dart';
 export 'src/layout/layout_style.dart';
-export 'src/layout/melody_staff.dart';
-export 'src/layout/meter_sign.dart';
 export 'src/layout/page_layout.dart';
-export 'src/layout/staff_text_display.dart';
 export 'src/layout/text_metrics.dart';
 export 'src/oplog/oplog.dart';
 export 'src/pitch.dart';
-export 'src/setlist_scene.dart';
 export 'src/song/bar.dart';
-export 'src/song/new_chart.dart';
-export 'src/song/note.dart';
-export 'src/song/note_value.dart';
-export 'src/song/play_order.dart';
 export 'src/song/section.dart';
 export 'src/song/song.dart';
-export 'src/song/staff.dart';
 export 'src/song/time_signature.dart';
 export 'src/spelling_table.dart';
-export 'src/transposer.dart';
-export 'src/transposition.dart';

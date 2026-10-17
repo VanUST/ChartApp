@@ -46,30 +46,17 @@ class ChartPainter extends CustomPainter {
   /// Creates a painter for one page.
   ///
   /// [metrics] must be the instance the layout was measured with; see the file header.
-  /// [selection] is the bar and cell the musician has touched, or null when nothing is selected;
-  /// the painter draws the highlight, and it is the only thing on the page that says "you are
-  /// here" without a word.
+  /// [selection] is the bar the musician has touched, or null when nothing is selected; the painter
+  /// draws the highlight, and it is the only thing on the page that says "you are here" without a
+  /// word.
   const ChartPainter({
     required this.song,
     required this.page,
     required this.metrics,
-    this.spellingTable = const SpellingTable(),
     this.selection,
-    this.selectionRange,
     this.lineColor = const Color(0xFF102A43),
-    this.melodyLineColor = const Color(0xFF243B53),
     this.backgroundColor = const Color(0xFFFFFFFF),
-    this.selectionFillColor = const Color(0x2E2F80ED),
-    this.selectionStrokeColor = const Color(0xFF2F80ED),
   });
-
-  /// The least weight, in SURFACE pixels, that a staff line or a stem may be drawn at.
-  ///
-  /// Slightly above one so that a line survives the antialiasing of the surface instead of fading
-  /// into the paper at 30 per cent of its ink. It is the number behind [_inkFloor], and it is a
-  /// surface measurement rather than a page one: how thick a line is in page units depends on how
-  /// much the page was scaled to fit, and how thick it must be for a musician to see it does not.
-  static const double _minimumInkWeight = 1.4;
 
   /// The model the page was laid out from, read for the signs [PageLayout] does not carry.
   final Song song;
@@ -80,9 +67,6 @@ class ChartPainter extends CustomPainter {
   /// The metrics the layout was measured with, reused so text lands in its reserved box.
   final FlutterTextMetrics metrics;
 
-  /// The rule chords are rendered to text with, matching the layout engine's.
-  final SpellingTable spellingTable;
-
   /// The bar and cell to highlight, or null when nothing is selected.
   ///
   /// The hit is matched by ADDRESS — section id, bar index and beat — and not by object identity,
@@ -91,36 +75,13 @@ class ChartPainter extends CustomPainter {
   /// a transposition or a page mode change without being re-derived.
   final ChartHit? selection;
 
-  /// The run of bars, or the window of beats, the musician has selected, or null.
-  ///
-  /// This is the owner's SELECTION (D35/D36): an address in the interface, not a value of the
-  /// document, which is why it is a parameter of the painter rather than a field of the song. It is
-  /// separate from [selection] because the two say different things: [selection] is where the last
-  /// touch landed, and this is everything the next operation would act on.
-  final ChartSelection? selectionRange;
-
   /// Colour of barlines, repeat dots and text.
   final Color lineColor;
 
-  /// Colour of the melody staff and everything engraved on it.
-  ///
-  /// Slightly lighter than [lineColor] so that the music the chart is read for stays the darkest
-  /// ink on the page. It is a property of the painter rather than of the layout because it is a
-  /// rendering decision: the same geometry serves a screen and a printed page, and neither the
-  /// noteheads nor their ledger lines carry a colour in the model.
-  final Color melodyLineColor;
-
   /// Colour the page is filled with before anything is drawn.
   final Color backgroundColor;
-
-  /// Colour the selected region is washed with, under the music so chords stay readable.
-  final Color selectionFillColor;
-
-  /// Colour of the outline drawn around the selected region.
-  final Color selectionStrokeColor;
-
-  // PURPOSE: Draw the page: the chart's opening statement, then section labels, then each bar's
-  //          barlines, signs and chords.
+  // PURPOSE: Draw the page: section labels, then each bar's rectangle and barlines, then the
+  //          highlight on the bar the musician touched.
   // INPUTS: canvas — the target. size — the extent the painter was given, which is the page's own
   //         size when the viewer sizes the widget to the layout.
   // OUTPUTS: Nothing. Everything is drawn clipped to `size`, so a system the engine deliberately
@@ -150,10 +111,8 @@ class ChartPainter extends CustomPainter {
     if (scale != 1) {
       canvas.scale(scale, scale);
     }
-    // The chart's own opening statement goes down first and outside the systems loop, because it
-    // belongs to the page rather than to a line of music: it is what the reader sees before the
-    // first chord, and it must not be moved by anything that moves a system.
-    _paintChartHeader(canvas);
+    // The chart's own opening statement is gone with the header; the page now begins with the
+    // first system's section letter.
     for (final PlacedSystem system in page.systems) {
       _paintSectionLabel(canvas, system);
       for (int index = 0; index < system.bars.length; index++) {
@@ -178,24 +137,9 @@ class ChartPainter extends CustomPainter {
   //          heading for the heading. The band's height was measured in this same role, so the line
   //          the page gave up and the line drawn are the same number.
   // KEYWORDS: chart-header, key, meter, notation, draw-order, one-band, d27
-  void _paintChartHeader(Canvas canvas) {
-    final PlacedChartHeader? header = page.header;
-    if (header == null) {
-      return;
-    }
-    _paintText(
-      canvas,
-      header.text,
-      Offset(header.bounds.left, header.bounds.top),
-      metrics.chordStyle,
-    );
-  }
-
   // PURPOSE: Report whether a new painter changes anything on screen.
   // INPUTS: oldDelegate — the painter this one replaces.
-  // OUTPUTS: True when the page, the song, the metrics or a colour differ. The spelling table is
-  //          NOT compared: it has no value equality, and a caller that changes it is expected to
-  //          change the layout with it, because the engine measured the text it produces.
+  // OUTPUTS: True when the page, the song, the metrics, the tapped bar or a colour differ.
   // KEYWORDS: should-repaint, value-comparison, cache
   @override
   bool shouldRepaint(covariant ChartPainter oldDelegate) =>
@@ -203,15 +147,8 @@ class ChartPainter extends CustomPainter {
       oldDelegate.song != song ||
       oldDelegate.metrics != metrics ||
       oldDelegate.selection != selection ||
-      // A RANGE MUST BE COMPARED HERE OR THE HIGHLIGHT WOULD NOT FOLLOW THE GESTURE. The range is
-      // not part of the song and not part of the page, so without this line a musician who extended
-      // a selection from one bar to sixteen would see the label change and the page stay as it was.
-      oldDelegate.selectionRange != selectionRange ||
       oldDelegate.lineColor != lineColor ||
-      oldDelegate.melodyLineColor != melodyLineColor ||
-      oldDelegate.backgroundColor != backgroundColor ||
-      oldDelegate.selectionFillColor != selectionFillColor ||
-      oldDelegate.selectionStrokeColor != selectionStrokeColor;
+      oldDelegate.backgroundColor != backgroundColor;
 
   // PURPOSE: Draw the section heading a system starts, in the band the engine reserved for it above
   //          the stave, so the heading is never drawn over a chord.
@@ -272,7 +209,9 @@ class ChartPainter extends CustomPainter {
       region.size.width,
       region.size.height,
     );
-    canvas.drawRect(rect, Paint()..color = selectionFillColor);
+    const Color fill = Color(0x2E2F80ED);
+    const Color stroke = Color(0xFF2F80ED);
+    canvas.drawRect(rect, Paint()..color = fill);
     // The outline is inset by half its own width so it sits inside the region. Drawn centred it
     // would straddle the cell's edge and tint the neighbouring cell, which is exactly the confusion
     // the label beside the chart exists to remove.
@@ -280,77 +219,7 @@ class ChartPainter extends CustomPainter {
     canvas.drawRect(
       rect.deflate(strokeWidth / 2),
       Paint()
-        ..color = selectionStrokeColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth,
-    );
-  }
-
-  // PURPOSE: Mark every bar (and, for a window, the cells) a musician has SELECTED, so a range of
-  //          sixteen bars is visibly sixteen bars and not one highlighted bar with a number beside
-  //          it. The owner's workflow begins with selecting a run (D35), and a highlight that marks
-  //          only the bar last touched would be a picture of the wrong thing.
-  // INPUTS: canvas — the target. placed — the bar being drawn, with its cells.
-  // OUTPUTS: Nothing. Draws when [selectionRange] names a section and bar this placed bar belongs
-  //          to: the whole bar for a bar-deep selection, and the window's cells for a selection of
-  //          beats, each cell looked up by `.beat` so a cell the bar does not have is skipped rather
-  //          than drawn at a guessed offset. The single-hit highlight ([selection]) is drawn by
-  //          [_paintSelection] as before; when both are set the range wins for the bars it covers,
-  //          because the range is the more recent gesture.
-  // KEYWORDS: selection-range, highlight, many-bars, beat-window, visual-feedback, d35
-  void _paintSelectionRange(Canvas canvas, PlacedBar placed) {
-    final ChartSelection? range = selectionRange;
-    if (range == null ||
-        range.sectionId != placed.sectionId ||
-        placed.barIndex < range.firstBar ||
-        placed.barIndex > range.lastBar) {
-      return;
-    }
-    if (!range.isWindow || range.firstBar != placed.barIndex) {
-      _paintSelectionRegion(canvas, placed.bounds);
-      return;
-    }
-    // A WINDOW IS AN X RANGE AND THE MARK IS THE STRETCH OF BAR IT COVERS, drawn from the selection's
-    // own two numbers. It is clamped to the bar's rectangle so a window dragged past the barline marks
-    // the bar rather than the next one, which is the same containment the hit test applies.
-    final double left = placed.bounds.left + range.firstX!;
-    final double right = placed.bounds.left + range.lastX!;
-    final double clampedLeft = left < placed.bounds.left
-        ? placed.bounds.left
-        : (left > placed.bounds.right ? placed.bounds.right : left);
-    final double clampedRight = right < placed.bounds.left
-        ? placed.bounds.left
-        : (right > placed.bounds.right ? placed.bounds.right : right);
-    _paintSelectionRegion(
-      canvas,
-      LayoutRect.fromLTWH(
-        clampedLeft,
-        placed.bounds.top,
-        clampedRight - clampedLeft,
-        placed.bounds.size.height,
-      ),
-    );
-  }
-
-  // PURPOSE: Fill and outline one region as selected, so every place the selection covers is marked
-  //          by the same rule and the fill and the outline cannot drift apart.
-  // INPUTS: canvas — the target. region — a rectangle in page coordinates.
-  // OUTPUTS: Nothing. Draws the fill, then the outline inset by half its own width so it sits inside
-  //          the region rather than straddling its edge and tinting the neighbour.
-  // KEYWORDS: selection-paint, fill, outline, inset, shared-rule
-  void _paintSelectionRegion(Canvas canvas, LayoutRect region) {
-    final Rect rect = Rect.fromLTWH(
-      region.left,
-      region.top,
-      region.size.width,
-      region.size.height,
-    );
-    canvas.drawRect(rect, Paint()..color = selectionFillColor);
-    const double strokeWidth = 2;
-    canvas.drawRect(
-      rect.deflate(strokeWidth / 2),
-      Paint()
-        ..color = selectionStrokeColor
+        ..color = stroke
         ..style = PaintingStyle.stroke
         ..strokeWidth = strokeWidth,
     );
@@ -370,23 +239,9 @@ class ChartPainter extends CustomPainter {
     final Bar? bar = song.barAt(placed.sectionId, placed.barIndex);
     final LayoutRect bounds = placed.bounds;
 
-    // The selection wash goes down before the barlines and the chords, so the symbol the musician
-    // selected stays fully readable — a highlight that dims the chord it marks is worse than none,
-    // because the musician is trying to check that the selection landed on the chord they meant.
-    _paintSelectionRange(canvas, placed);
+    // The wash goes down first, under the barlines, so the bar the musician touched is marked
+    // without hiding anything he is about to write in it.
     _paintSelection(canvas, placed);
-
-    // The melody staff is underneath the chord line with its own extent, so it is drawn before the
-    // chords: a chord symbol that runs a little low must stay the topmost thing on its own line.
-    //
-    // THE BEAT CAPTIONS GO DOWN FIRST AND THE NOTES OVER THEM, which is a hierarchy and not a
-    // drawing order: the caption row hangs directly under the staff, and a melody note written just
-    // below the staff — D4 or C4 under a treble staff, which is where a jazz line lives — occupies
-    // exactly that row. On the rendered page the two overlapped and the DIGIT was drawn on top of
-    // the notehead, so the music was covered by a number naming a column the musician had already
-    // found. The music wins; where a digit is behind a notehead the tick beside it and the same
-    // number on the bar that opens the system still give the grid.
-    _paintMelody(canvas, placed);
 
     // An interior barline is shared: the previous bar's closing line already draws it. So the
     // opening barline is drawn when it opens the system, or when it is a SIGN rather than a plain
@@ -408,460 +263,6 @@ class ChartPainter extends CustomPainter {
       bounds.bottom,
       bar?.closingBarline ?? Barline.single,
     );
-
-    if (bar == null) {
-      return;
-    }
-    _paintBarSigns(canvas, bar, placed);
-    // The meter is drawn AFTER the other signs for one reason: a bar that changes meter is a bar
-    // whose three beats a musician would otherwise have to count, and for 15/8 could not recover at
-    // all, so the sign that explains the bar is never the symbol that gets covered. On the rare bar
-    // that carries BOTH a volta and a change — `[1.` is drawn at the same top-left corner — the two
-    // overlap and the meter wins; that is a blemish of this reading renderer, not a lost edit, and
-    // it is stated rather than hidden.
-    _paintMeterSign(canvas, bar, placed, firstInSystem: firstInSystem);
-    for (final PlacedChord placedChord in placed.chords) {
-      _paintChord(canvas, bar, placedChord);
-    }
-  }
-
-  // PURPOSE: Report the least stroke weight, in PAGE units, that still arrives on the glass as a
-  //          visible line at the current view.
-  // INPUTS: None; reads [page]'s own `drawnScale`, which is the page mode's scale times the
-  //         musician's zoom.
-  // OUTPUTS: A weight in page pixels. A page drawn at scale 1 gets [_minimumInkWeight]; a page the
-  //          FIT mode shrank to 0.7 gets that weight divided by 0.7, so the line lands at the same
-  //          number of SCREEN pixels either way.
-  //
-  //          WHY THIS EXISTS AT ALL, AND IT IS A MEASUREMENT RATHER THAN A TASTE. The engraving's
-  //          own weights are proportional to the staff space (1.56 page pixels for a 13-pixel
-  //          space), which is right for print and wrong for a lit screen: at the owner's fitted
-  //          scale of 0.70 that is 1.09 device pixels, which the rasteriser draws as a grey
-  //          suggestion rather than as a line. The staff's five lines, its barlines, its beat ticks
-  //          and its stems were all specified that way, and the owner's report of the result is
-  //          that the staff "looks bad and unclear". A line that is thinner than a pixel on the
-  //          glass is not a thin line, it is an invisible one.
-  // KEYWORDS: stroke-weight, drawn-scale, legibility, sub-pixel, staff-lines, view-zoom
-  double get _inkFloor => page.drawnScale > 0
-      ? _minimumInkWeight / page.drawnScale
-      : _minimumInkWeight;
-
-  // PURPOSE: Draw the melody staff under a bar: its five lines, the barlines that carry them, the
-  //          clef and every glyph the layout placed on them.
-  // INPUTS: canvas — the target. placed — the bar's layout, carrying the staff the engine engraved.
-  // OUTPUTS: Nothing. A bar whose system reserved no melody band draws NOTHING AT ALL, which is
-  //          what makes a chords-only chart print identically to the way it printed before a melody
-  //          staff existed: the empty staff the engine publishes has no extent, so this returns
-  //          before touching the canvas.
-  //
-  //          THE FIVE LINES ARE DERIVED HERE FROM THE STAFF'S OWN BOX, and that is the one number
-  //          this painter has to agree with the engine about. The box's top and bottom edges are
-  //          the staff's outer lines and the engine's [LayoutStyle.melodyStaffSpace] is the
-  //          distance between two of them, so four equal divisions of the box is the whole of the
-  //          staff: there is no second geometry here to drift from the one a notehead's y was
-  //          computed against.
-  //
-  //          ITS WEIGHT IS THE VIEW'S, NOT THE PAGE'S — see [_inkFloor]. The five lines, the two
-  //          barlines and every glyph's stem are drawn at whichever is larger, the engraving's own
-  //          proportional weight or one visible pixel of the surface the page is drawn on.
-  // KEYWORDS: melody-staff, staff-lines, five-lines, notehead, stem, flag, ledger, accidental,
-  //           tie, draw-order, ink-floor
-  void _paintMelody(Canvas canvas, PlacedBar placed) {
-    final PlacedMelodyStaff staff = placed.melody;
-    if (staff.isEmpty) {
-      return;
-    }
-    final LayoutRect bounds = staff.bounds;
-    final double floor = _inkFloor;
-    final Paint stroke = Paint()
-      ..color = melodyLineColor
-      ..strokeWidth = floor;
-    // The five lines, from the top edge down; four equal divisions of the box the engine published.
-    for (int line = 0; line < 5; line++) {
-      final double y = bounds.top + bounds.size.height * line / 4;
-      canvas.drawLine(Offset(bounds.left, y), Offset(bounds.right, y), stroke);
-    }
-    // Barlines reach from the staff's top line to its bottom line at both edges of the bar. The
-    // chord line already draws its own, which stops at the stave; without these the staff would
-    // read as one unmeasured strip of five lines — and "where does the bar end" is the one question
-    // a chart must answer without being asked, so this line is the staff's most important one.
-    //
-    // IT IS HEAVIER THAN EVERYTHING ELSE ON THE STAFF, and that is a distinction rather than a
-    // preference: a stem is 3.5 staff spaces long, vertical and the same ink, so drawn at the same
-    // weight a stem in the middle of a bar reads as a barline. Measured on the rendered page: the
-    // note C4 sits a ledger line below the staff and its up-stem runs the whole staff, so the
-    // first thing a musician saw in the bar was two vertical lines and no way to tell which was
-    // which.
-    final Paint barline = Paint()
-      ..color = melodyLineColor
-      ..strokeWidth = floor * 1.6;
-    canvas.drawLine(
-      Offset(bounds.left, bounds.top),
-      Offset(bounds.left, bounds.bottom),
-      barline,
-    );
-    canvas.drawLine(
-      Offset(bounds.right, bounds.top),
-      Offset(bounds.right, bounds.bottom),
-      barline,
-    );
-
-    // THE CLEF IS NOT DRAWN, AND THAT IS THE OWNER'S VERDICT RATHER THAN AN OMISSION. This renderer
-    // ships no music font, so the treble clef was drawn as the LETTER `G` in the margin — and the
-    // owner's report of it is «зачем то буква G в начале. Если это просто убрать - уже будет лучше».
-    // He is right and the reason is not cosmetic: a letter where a musician expects a clef makes the
-    // staff LOOK signed while saying nothing he can read, and a staff with no clef is at least
-    // honest. `PlacedMelodyStaff.clef` still carries which clef the staff was engraved in, because
-    // the pitch placement needs it and because a later renderer with a music font may draw it; what
-    // stopped is the painting.
-    //
-    // The alternative — a vector treble clef — was built and LOOKED at (see `_paintMelodyGlyph`'s
-    // rejected-alternative note in the decision record): two cubic curves read as an ampersand, not
-    // as a clef. A wrong sign in the clef's place is the same lie in a different shape.
-
-    // The glyphs are drawn in the order the engine published them, and that order is the contract:
-    // a ledger line before the notehead that hides its end, a stem before the notehead that covers
-    // it, an accidental and a dot after the head they belong to, and ties last so a tie is never
-    // buried under the note it joins.
-    for (final MelodyGlyph glyph in staff.glyphs) {
-      _paintMelodyGlyph(canvas, glyph, inkFloor: floor);
-    }
-  }
-
-  // PURPOSE: Draw one glyph of a melody staff.
-  // INPUTS: canvas — the target. glyph — the element and the box the layout placed it in, with the
-  //         weight, the flag length and the tie's own curve points published alongside it. inkFloor
-  //         — the least weight, in page units, that still arrives on the glass as a drawn line; see
-  //         [_inkFloor] for why a stem is not allowed to be thinner than that.
-  // OUTPUTS: Nothing. Every position comes from the box; this method makes no musical decision, so
-  //          a notehead cannot be drawn at a height the layout did not reserve.
-  // KEYWORDS: glyph-switch, notehead, stem, flag, ledger, accidental, dot, tie, no-musical-logic,
-  //           ink-floor
-  void _paintMelodyGlyph(
-    Canvas canvas,
-    MelodyGlyph glyph, {
-    required double inkFloor,
-  }) {
-    final LayoutRect box = glyph.bounds;
-    final Paint stroke = Paint()
-      ..color = melodyLineColor
-      ..strokeWidth = glyph.strokeWidth > inkFloor
-          ? glyph.strokeWidth
-          : inkFloor;
-    switch (glyph.kind) {
-      case MelodyGlyphKind.notehead:
-        final Rect ellipse = Rect.fromLTWH(
-          box.left,
-          box.top,
-          box.size.width,
-          box.size.height,
-        );
-        if (glyph.filled) {
-          canvas.drawOval(ellipse, Paint()..color = melodyLineColor);
-        } else {
-          // A hollow notehead keeps its own weight rather than the glyph's, because a whole note's
-          // ring drawn at a stem's weight reads as a filled head on a small page — and the ring is
-          // raised to the ink floor for the same reason every other stroke is.
-          canvas.drawOval(
-            ellipse,
-            Paint()
-              ..color = melodyLineColor
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = inkFloor > 1.6 ? inkFloor : 1.6,
-          );
-        }
-      case MelodyGlyphKind.stem:
-        // The stem is drawn as a line down the centre of its box, so its published weight and what
-        // the reader sees are the same number.
-        final double x = box.left + box.size.width / 2;
-        canvas.drawLine(Offset(x, box.top), Offset(x, box.bottom), stroke);
-        if (glyph.flagLength > 0) {
-          _paintMelodyFlag(canvas, box, glyph, stroke);
-        }
-      case MelodyGlyphKind.beam:
-        // A BEAM IS ONE HEAVY, STRAIGHT STROKE BETWEEN TWO STEMS, so it is drawn from its own two
-        // published ends and at its own published weight. Nothing is derived here: the slope, the
-        // length and the thickness were all decided by the engraving, where they can be asserted
-        // without a canvas — and the slope is the one thing a musician reads as the shape of the
-        // phrase, so a painter that recomputed it would be the second author of it.
-        //
-        // It is NOT raised to the ink floor the way a hairline is (see [_paintMelodyGlyph]'s
-        // `stroke`): a beam is half a staff space thick by convention and is the heaviest thing on
-        // the staff after the barlines, so the floor exists for the strokes beside it, not for this
-        // one. `stroke` still supplies the colour, and its width is the glyph's own unless the view
-        // is shrunk so far that the floor exceeds it, which is the same legibility rule every other
-        // stroke follows.
-        canvas.drawLine(
-          Offset(glyph.from.x, glyph.from.y),
-          Offset(glyph.to.x, glyph.to.y),
-          stroke,
-        );
-      case MelodyGlyphKind.ledgerLine:
-        canvas.drawLine(
-          Offset(box.left, box.top + box.size.height / 2),
-          Offset(box.right, box.top + box.size.height / 2),
-          stroke,
-        );
-      case MelodyGlyphKind.accidental:
-        // The sign is drawn at the same proportional size as the beat caption, from the box the
-        // layout reserved for it: its height is [MelodyMetrics.accidentalHeight] staff spaces, so
-        // the space is recovered from the box rather than guessed from the style.
-        _paintText(
-          canvas,
-          glyph.text ?? '',
-          Offset(box.left, box.top),
-          metrics.staffTextStyle.copyWith(
-            color: melodyLineColor,
-            fontSize: box.size.height / 1.7 * 0.85,
-            fontWeight: FontWeight.w600,
-          ),
-        );
-      case MelodyGlyphKind.dot:
-        canvas.drawOval(
-          Rect.fromLTWH(box.left, box.top, box.size.width, box.size.height),
-          Paint()..color = melodyLineColor,
-        );
-      case MelodyGlyphKind.tie:
-        // A quadratic curve, which is what an engraved tie is: it leaves one notehead, bulges away
-        // from the slope between the two, and reaches the next. The three points come from the
-        // layout, so the curve is drawn exactly where the tie was measured to be.
-        final Path path = Path()
-          ..moveTo(glyph.from.x, glyph.from.y)
-          ..quadraticBezierTo(
-            glyph.control.x,
-            glyph.control.y,
-            glyph.to.x,
-            glyph.to.y,
-          );
-        canvas.drawPath(
-          path,
-          Paint()
-            ..color = melodyLineColor
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = stroke.strokeWidth
-            ..strokeCap = StrokeCap.round,
-        );
-      case MelodyGlyphKind.flag:
-        // A flag is generated from a stem rather than placed on its own, so no glyph of this kind
-        // is ever published; the branch exists because the enum is exhaustive.
-        break;
-    }
-  }
-
-  // PURPOSE: Draw the flag of an eighth note or shorter, as a curve from the end of the stem.
-  // INPUTS: canvas — the target. stem — the stem's box. glyph — the stem glyph, carrying the
-  //         direction and the flag's length in page pixels. stroke — the staff's own paint.
-  // OUTPUTS: Nothing. The curve starts at the free end of the stem, in the direction the stem
-  //          points, and sweeps back toward the staff.
-  //
-  //          A DRAWING RATHER THAN A GLYPH, for the reason the bar signs are glyphs and this is
-  //          not: a flag has no ASCII stand-in a font is certain to carry, and a wrong glyph is
-  //          worse than a plain curve, which every musician reads correctly at any size.
-  // KEYWORDS: flag, eighth-note, curve, glyph-free, stroke
-  void _paintMelodyFlag(
-    Canvas canvas,
-    LayoutRect stem,
-    MelodyGlyph glyph,
-    Paint stroke,
-  ) {
-    final double x = stem.left + stem.size.width / 2;
-    final double tip = glyph.stemUp ? stem.top : stem.bottom;
-    final double direction = glyph.stemUp ? 1 : -1;
-    final double reach = glyph.flagLength * direction;
-    final Path path = Path()
-      ..moveTo(x, tip)
-      ..quadraticBezierTo(
-        x + glyph.flagLength * 0.9,
-        tip + reach * 0.25,
-        x + glyph.flagLength * 1.1,
-        tip + reach,
-      );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = melodyLineColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke.strokeWidth
-        ..strokeCap = StrokeCap.round,
-    );
-  }
-
-  // PURPOSE: Draw one chord symbol in the box the layout reserved for it.
-  // INPUTS: canvas — the target. bar — the bar the chord belongs to, read for the ChordMark that
-  //         carries the engraved size. placed — the chord and its rectangle.
-  // OUTPUTS: Nothing. A placed chord with no matching ChordMark is drawn at normal size rather
-  //          than skipped, because losing a chord is worse than losing its size.
-  // KEYWORDS: chord, text, small-chord, beat-step-match, fallback
-  void _paintChord(Canvas canvas, Bar bar, PlacedChord placed) {
-    final ChordSize engravedSize =
-        _beatChordOf(bar, placed)?.size ?? ChordSize.normal;
-    final TextStyle style = engravedSize == ChordSize.small
-        ? metrics.smallChordStyle
-        : metrics.chordStyle;
-    _paintText(
-      canvas,
-      placed.chord.render(song.key, spellingTable),
-      Offset(placed.bounds.left, placed.bounds.top),
-      style,
-    );
-  }
-
-  // PURPOSE: Draw every sign the bar model carries that is not a chord: the repeat-previous
-  //          symbol, the slash repeat, N.C., the volta bracket, the marks and the staff text.
-  // INPUTS: canvas — the target. bar — the bar whose signs to draw. placed — the bar's layout,
-  //         which carries the staff-text lines already in display form and already measured.
-  // OUTPUTS: Nothing. Signs are placed in the bands above and below the chord line so they cannot
-  //          cover a chord, which is the room LayoutStyle.barHeight leaves around the centred
-  //          chord text.
-  // KEYWORDS: repeat-previous, slash-repeat, no-chord, volta, marks, staff-text, glyph
-  void _paintBarSigns(Canvas canvas, Bar bar, PlacedBar placed) {
-    final LayoutRect bounds = placed.bounds;
-    switch (bar.repeatPrevious) {
-      case RepeatPrevious.oneBar:
-        _paintCentered(canvas, '%', bounds, metrics.chordStyle);
-      case RepeatPrevious.twoBars:
-        _paintCentered(canvas, '2%', bounds, metrics.chordStyle);
-      case RepeatPrevious.none:
-        break;
-    }
-    if (bar.slashRepeat) {
-      _paintCentered(canvas, '/', bounds, metrics.chordStyle);
-    }
-    if (bar.noChord) {
-      _paintCentered(canvas, 'N.C.', bounds, metrics.chordStyle);
-    }
-
-    final Volta? volta = bar.volta;
-    if (volta != null) {
-      final String text = volta.number == 0 ? '[' : '[${volta.number}.';
-      _paintText(
-        canvas,
-        text,
-        Offset(bounds.left + 2, bounds.top + 1),
-        metrics.staffTextStyle,
-      );
-    }
-
-    if (bar.marks.isNotEmpty) {
-      // SORTED BY THE ENUM'S OWN ORDER, because rendering must be a function of the VALUE and not of
-      // the order the marks happened to be inserted in. `Bar` compares its marks as a SET
-      // (`containsAll` both ways, `hashAllUnordered`), so two bars with the same signs are the same
-      // value — but a `Set` iterates in insertion order, so drawing them as iterated would render
-      // "segno coda" and "coda segno" for two bars that are `==`. A chart that redraws differently
-      // from a value it already agreed on is the kind of difference that is invisible until it is
-      // compared, which is when it is hardest to explain.
-      final List<BarMark> ordered = bar.marks.toList()
-        ..sort((BarMark a, BarMark b) => a.index.compareTo(b.index));
-      // A mark with no glyph is DROPPED BEFORE MEASURING, not drawn as an empty string: the musician's
-      // line break is an instruction to the page (see `_markGlyph`), and joining it in would leave a
-      // stray space in the row and shift every other sign left by one character's width.
-      final String text = ordered
-          .map(_markGlyph)
-          .where((String glyph) => glyph.isNotEmpty)
-          .join(' ');
-      if (text.isEmpty) {
-        return;
-      }
-      final Size size = _measureText(text, metrics.staffTextStyle);
-      _paintText(
-        canvas,
-        text,
-        Offset(bounds.right - size.width - 3, bounds.top + 1),
-        metrics.staffTextStyle,
-      );
-    }
-
-    // Staff text is drawn in the boxes the layout published. Those boxes already hold the DISPLAY
-    // form — the `*NN` position prefix and the exporter's padding removed by `displayStaffText` —
-    // and were measured with the same metrics the page was laid out with. The painter therefore
-    // does not strip the prefix and does not measure the string a second time: a second derivation
-    // here is exactly the drift that would let a bar reserve room for `*69` while drawing `Куплет`.
-    for (final PlacedStaffText line in placed.staffText) {
-      _paintText(
-        canvas,
-        line.text,
-        Offset(line.bounds.left, line.bounds.top),
-        metrics.staffTextStyle,
-      );
-    }
-  }
-
-  // PURPOSE: Draw the meter a bar is counted in, where a musician looks for it: at the bar where the
-  //          meter CHANGES, and at the start of a system whose meter is not the one the reader
-  //          assumes. It is the sign that turns "three chord cells and no explanation" into a chart
-  //          that can be played — owner decision D22's rendering half.
-  // INPUTS: canvas — the target. bar — the bar, read for its meter. placed — the bar's layout, whose
-  //         bounds the sign is placed inside. firstInSystem — whether this bar opens its system,
-  //         which is one of the three things the rule reads.
-  // OUTPUTS: Nothing, and NOTHING AT ALL for a bar the rule does not sign, which is every bar of a
-  //          chart in 4/4 throughout — that is what makes such a chart print byte-for-byte what it
-  //          printed before a meter sign existed.
-  //
-  //          WHERE IT IS DRAWN, AND WHY THERE. In the bar's own top-left corner, in the band the
-  //          stave leaves above its centred chords — the position a printed time signature occupies
-  //          relative to the barline, and the same corner and the same style the volta's `[1.` uses.
-  //          It is drawn INSIDE the bar's published rectangle and derives no geometry of its own, so
-  //          the layout did not have to change for it: the cells the hit test reads, the chord
-  //          positions and every measured width are exactly what they were, which is the property
-  //          requirement 4 of D22's implementation demands.
-  // KEYWORDS: meter, time-signature, meter-sign, drawing, top-left, no-geometry-change, d22
-  void _paintMeterSign(
-    Canvas canvas,
-    Bar bar,
-    PlacedBar placed, {
-    required bool firstInSystem,
-  }) {
-    final TimeSignature meter = bar.timeSignature;
-    if (!showsMeterSign(
-      meter: meter,
-      preceding: precedingMeter(song, placed.sectionId, placed.barIndex),
-      opensSystem: firstInSystem,
-      // The metre is stated once where the music begins, and on this tree that statement is the
-      // page's own header line. A page without one — a page the engine engraved with no header,
-      // which every page after the first is — keeps the bar's own sign.
-      headerStatesOpeningMeter: page.header != null,
-    )) {
-      return;
-    }
-    _paintText(
-      canvas,
-      meter.toString(),
-      Offset(placed.bounds.left + 2, placed.bounds.top + 1),
-      metrics.staffTextStyle,
-    );
-  }
-
-  // PURPOSE: Name the glyph a [BarMark] is drawn as, keeping the mapping in one switch instead of
-  //          scattering it through the sign-drawing code.
-  // INPUTS: mark — the model's mark.
-  // OUTPUTS: A short ASCII stand-in a font is certain to carry. Never null.
-  // KEYWORDS: segno, coda, fermata, player-ending, glyph-table
-  String _markGlyph(BarMark mark) => switch (mark) {
-    BarMark.segno => 'S',
-    BarMark.coda => 'C',
-    BarMark.fermata => '^',
-    BarMark.playerEnding => 'End',
-    // THE MUSICIAN'S LINE BREAK HAS NO GLYPH, and its empty string is a decision rather than an
-    // omission: a break is an instruction to the PAGE, so it is seen in the system that ends because
-    // of it and not in a sign standing on the bar. \_paintBarMarks\ drops an empty glyph before
-    // measuring, so nothing is drawn and no room is reserved.
-    BarMark.lineBreak => '',
-  };
-
-  // PURPOSE: Find the ChordMark that produced a placed chord, because the engraved size lives on
-  //          the placement and PageLayout keeps only the chord itself.
-  // INPUTS: bar — the bar to search. placed — the placed chord, addressed by beat and step.
-  // OUTPUTS: The matching ChordMark, or null when the bar carries none at that address. Null is
-  //          for a caller, not for a failure: a bar and a page assembled from different states of
-  //          the song can disagree, and the caller falls back to normal size.
-  // KEYWORDS: lookup, beat, step, identity, null-safe
-  ChordMark? _beatChordOf(Bar bar, PlacedChord placed) {
-    for (final ChordMark mark in bar.chords) {
-      if (mark.place == placed.place) {
-        return mark;
-      }
-    }
-    return null;
   }
 
   // PURPOSE: Draw a bar's left boundary as the line or sign the model names.
@@ -950,29 +351,6 @@ class ChartPainter extends CustomPainter {
   // KEYWORDS: line, stroke, drawing, primitive
   void _line(Canvas canvas, double x, double top, double bottom, Paint paint) {
     canvas.drawLine(Offset(x, top), Offset(x, bottom), paint);
-  }
-
-  // PURPOSE: Draw text horizontally centred in a bar's chord band, which is where a chord or a
-  //          repeat sign that replaces one belongs.
-  // INPUTS: canvas — the target. text — the glyphs. bounds — the bar. style — the text style.
-  // OUTPUTS: Nothing. An empty string draws nothing.
-  // KEYWORDS: centred, chord-band, sign, drawing
-  void _paintCentered(
-    Canvas canvas,
-    String text,
-    LayoutRect bounds,
-    TextStyle style,
-  ) {
-    final Size size = _measureText(text, style);
-    _paintText(
-      canvas,
-      text,
-      Offset(
-        bounds.left + (bounds.size.width - size.width) / 2,
-        bounds.top + (bounds.size.height - size.height) / 2,
-      ),
-      style,
-    );
   }
 
   // PURPOSE: Report the box a string occupies in a style, so a caller can align it before it is

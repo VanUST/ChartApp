@@ -230,18 +230,15 @@ void main() {
       final IRealSong? entry = _songTitled(library, song);
       expect(entry, isNotNull, reason: 'the owner export must contain "$song"');
       final Song written = entry!.song;
-      final TranspositionTarget target = const TranspositionGrid()
-          .targets(written.key)
-          .firstWhere(
-            (TranspositionTarget candidate) => candidate.semitones == transpose,
-            orElse: () => throw StateError(
-              'IREAL_RENDER_TRANSPOSE=$transpose is outside the twelve-key '
-              'grid interval range -5..+6',
-            ),
-          );
-      final Song shown = transpose == 0
-          ? written
-          : transposeSong(written, transpose, toKey: target.key);
+      // NOTHING IS TRANSPOSED ON THE WAY TO THE PAGE ANY MORE. The twelve-key grid and the
+      // transposer were removed with the musical editing, so the chart is drawn in the key its
+      // own file states and IREAL_RENDER_TRANSPOSE is ignored.
+      if (transpose != 0) {
+        stdout.writeln(
+          'render.transpose.ignored requested=$transpose reason=no-transposition-in-this-build',
+        );
+      }
+      final Song shown = written;
       const SpellingTable renderTable = SpellingTable();
       final String keySlug = shown.key.toString().toLowerCase().replaceAll(
         RegExp(r'\s+'),

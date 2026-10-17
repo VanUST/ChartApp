@@ -11,63 +11,7 @@
 //          the view, so a pan is a new page value and a painter that compares pages repaints.
 // KEYWORDS: layout-result, placed-chord, hit-testing, value-equality, cache-key, anchor-address,
 //           view-transform, zoom, pan, single-bridge
-import '../anchored_place.dart';
-import '../chord.dart';
-import 'chart_header.dart';
 import 'geometry.dart';
-import 'melody_staff.dart';
-
-/// A chord drawn at a position, with the address that identifies it in the song.
-class PlacedChord {
-  /// Creates a placed chord for [chord] at [place] with the given [bounds].
-  const PlacedChord({
-    required this.chord,
-    required this.place,
-    required this.bounds,
-    this.clampedIntoBand = false,
-  });
-
-  /// The chord that is drawn.
-  final Chord chord;
-
-  /// Where the chord is written: its bar, and its own distance along the chord line.
-  ///
-  /// THE PLACE IS THE ADDRESS AND THE DRAWING BOTH. A mark's identity in the song is its place, so a
-  /// caller that holds a `ChordMark` matches it against a placed chord by comparing this value — no
-  /// beat index, no step, and nothing to convert. [bounds] is derived from it: its left edge is
-  /// `place.offsetX` along the bar and its centre follows `place.offsetY`.
-  final AnchoredPlace place;
-
-  /// Where the chord is drawn, in page coordinates.
-  final LayoutRect bounds;
-
-  /// Whether the stored place put this symbol outside the bar's own chord line, so it was pulled
-  /// back in.
-  ///
-  /// THE ONE THING THE LAYOUT REFUSES TO DO IS ENGRAVE A CHORD OUTSIDE THE CHORD BAND. The owner's
-  /// rule is that a chord is written above the staff and that below the bar there is neither a chord
-  /// nor a note («Аккорды надо запретить ниже такта»), and an application that drew a symbol under
-  /// the bar would be showing a place the rule says cannot hold one — a reader of the ink would then
-  /// find notes there. A chart written by a broken build is still opened rather than rejected, so the
-  /// symbol is clamped to the band's edge and this flag says so; a probe prints it, and the editor is
-  /// the organ that refuses such a place in the first place.
-  final bool clampedIntoBand;
-
-  @override
-  bool operator ==(Object other) =>
-      other is PlacedChord &&
-      other.chord == chord &&
-      other.place == place &&
-      other.bounds == bounds &&
-      other.clampedIntoBand == clampedIntoBand;
-
-  @override
-  int get hashCode => Object.hash(chord, place, bounds, clampedIntoBand);
-
-  @override
-  String toString() =>
-      'placed($chord) at $bounds${clampedIntoBand ? ' (clamped into the chord band)' : ''}';
-}
 
 // A bar's cells are GONE, and their absence is the point of this stage. A cell was the grid in the
 // layout: it divided a bar into as many columns as the meter said and named one of them for a touch.
@@ -75,42 +19,9 @@ class PlacedChord {
 // so there is no column to publish and no column to hit: a tap on a bar names the bar and its own x,
 // and what is under it is decided by that number (see `hitTestPage` and `ChartHit.local`).
 
-/// One line of the words a bar carries, placed where it is drawn.
-///
-/// The bar model stores staff text as the chart wrote it — with the `*NN` layout prefix and the
-/// exporter's padding — because that is what makes the stored form round-trip. What is drawn is the
-/// DISPLAY form, which the engine derives once through `displayStaffText`. Carrying the derived
-/// words and their box here, rather than leaving the painter to strip and measure the stored string
-/// again, is what makes the room the engine reserved and the text the painter puts on the page the
-/// same value by construction instead of two code paths that happen to agree.
-class PlacedStaffText {
-  /// Creates a placed line for [text] with the given [bounds].
-  const PlacedStaffText({required this.text, required this.bounds});
-
-  /// The words to draw, with the position prefix and padding already removed.
-  ///
-  /// Never empty: the engine does not place a stored entry that has nothing to say, so a consumer
-  /// need not test this before drawing.
-  final String text;
-
-  /// Where the line is drawn, in page coordinates. Its width is the width the line was measured at.
-  final LayoutRect bounds;
-
-  @override
-  bool operator ==(Object other) =>
-      other is PlacedStaffText && other.text == text && other.bounds == bounds;
-
-  @override
-  int get hashCode => Object.hash(text, bounds);
-
-  @override
-  String toString() => 'PlacedStaffText("$text") at $bounds';
-}
-
 /// One text cue placed above its bar, in the row the layout reserved for it.
 ///
-/// A cue is NOT a [PlacedStaffText]. Staff text belongs to the song and hangs at the bottom of the
-/// bar it is stored on; a cue belongs to the document and hangs above the bar it is anchored to,
+/// A cue belongs to the document and hangs above the bar it is anchored to,
 /// in a row the page gives up out of its own height. What the two share is the reason this value
 /// exists at all: the layout measured the words and decided the box, so the painter draws the box
 /// it was handed instead of measuring a string a second time and hoping the two agree. Without a
@@ -172,17 +83,14 @@ class PlacedTextCue {
 // could not be built on them. Beam grouping no longer reads the metre either, so the last thing in
 // the engraving that depended on the metre's division into columns has gone with it.
 
-/// A bar drawn at a position, together with the chords and notes inside it.
+/// A bar drawn at a position, together with the cues that remark on it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
   const PlacedBar({
     required this.sectionId,
     required this.barIndex,
     required this.bounds,
-    required this.chords,
-    this.staffText = const <PlacedStaffText>[],
     this.textCues = const <PlacedTextCue>[],
-    this.melody = PlacedMelodyStaff.empty,
   });
 
   /// The section the bar belongs to.
@@ -204,16 +112,6 @@ class PlacedBar {
   /// and a tap on the staff two different questions with one answer each.
   final LayoutRect bounds;
 
-  /// The chords inside the bar, ordered by their place along it.
-  final List<PlacedChord> chords;
-
-  /// The staff-text lines the bar draws, stacked upward from its bottom edge in model order.
-  ///
-  /// The words are the display form, so a reader never meets the `*NN` prefix; an entry whose
-  /// display form is empty is absent rather than placed empty. Empty for a bar whose model carries
-  /// no staff text, which is the common case.
-  final List<PlacedStaffText> staffText;
-
   /// The text cues anchored to this bar, in document order.
   ///
   /// They sit in the rows the layout reserved ABOVE this bar's stave — so above [bounds], not
@@ -224,43 +122,14 @@ class PlacedBar {
   /// say gets no row.
   final List<PlacedTextCue> textCues;
 
-  /// The melody staff drawn under this bar, from `Bar.melody`.
-  ///
-  /// ONE STAFF PER BAR rather than one per system, so that the five lines and everything on them
-  /// are addressed exactly as a chord is: by the bar's own rectangle. The bounds of two
-  /// neighbouring bars on a system tile, so the lines read as one continuous staff.
-  ///
-  /// [PlacedMelodyStaff.empty] for a song whose bars carry no melody at all — every imported chart
-  /// — and in that state nothing is reserved, nothing is drawn, and this bar's [bounds] and
-  /// [chords] are exactly what they were before a melody staff existed.
-  ///
-  /// THE STAFF LIES BELOW [bounds], NOT INSIDE IT. A bar's rectangle is its chord-line stave, and
-  /// that is what the hit test measures a tap against, so extending it over the staff would change
-  /// what a tap on the chord line means. The melody has its own rectangle instead; a point in the
-  /// staff is over no bar's chord line, and is answered by `hitTestMelodyStaff`.
-  final PlacedMelodyStaff melody;
-
   @override
   bool operator ==(Object other) {
     if (other is! PlacedBar ||
         other.sectionId != sectionId ||
         other.barIndex != barIndex ||
         other.bounds != bounds ||
-        other.chords.length != chords.length ||
-        other.staffText.length != staffText.length ||
-        other.textCues.length != textCues.length ||
-        other.melody != melody) {
+        other.textCues.length != textCues.length) {
       return false;
-    }
-    for (int index = 0; index < chords.length; index++) {
-      if (other.chords[index] != chords[index]) {
-        return false;
-      }
-    }
-    for (int index = 0; index < staffText.length; index++) {
-      if (other.staffText[index] != staffText[index]) {
-        return false;
-      }
     }
     for (int index = 0; index < textCues.length; index++) {
       if (other.textCues[index] != textCues[index]) {
@@ -271,15 +140,8 @@ class PlacedBar {
   }
 
   @override
-  int get hashCode => Object.hash(
-    sectionId,
-    barIndex,
-    bounds,
-    Object.hashAll(chords),
-    Object.hashAll(staffText),
-    Object.hashAll(textCues),
-    melody,
-  );
+  int get hashCode =>
+      Object.hash(sectionId, barIndex, bounds, Object.hashAll(textCues));
 
   @override
   String toString() => 'PlacedBar($sectionId[$barIndex]) at $bounds';
@@ -374,7 +236,6 @@ class PageLayout {
     required this.index,
     required this.size,
     required this.systems,
-    this.header,
     this.scale = 1,
     this.zoom = 1,
     this.pan = LayoutOffset.zero,
@@ -389,16 +250,6 @@ class PageLayout {
 
   /// The systems on this page, top to bottom.
   final List<PlacedSystem> systems;
-
-  /// The key and meter the chart states about itself, on the ONE page where its music begins.
-  ///
-  /// Null on every page but the first, and null for a song with no bars at all — the header states
-  /// what the music is written in, and a chart with no music has nothing to state. It lives on the
-  /// PAGE rather than on the first system because it is the chart's own statement and not a line of
-  /// music: the systems keep meaning "one line of bars", the vertical room it needs is taken from
-  /// the page's content height before the systems are packed, and a touch on it names no bar because
-  /// it sits above the first system's own band.
-  final PlacedChartHeader? header;
 
   /// The factor that maps this page's coordinates onto the surface it is drawn on.
   ///
@@ -544,7 +395,6 @@ class PageLayout {
       index: index,
       size: size,
       systems: systems,
-      header: header,
       scale: scale,
       zoom: zoom,
       pan: clamped,
@@ -556,7 +406,6 @@ class PageLayout {
     if (other is! PageLayout ||
         other.index != index ||
         other.size != size ||
-        other.header != header ||
         other.scale != scale ||
         other.zoom != zoom ||
         other.pan != pan ||
@@ -572,20 +421,12 @@ class PageLayout {
   }
 
   @override
-  int get hashCode => Object.hash(
-    index,
-    size,
-    header,
-    scale,
-    zoom,
-    pan,
-    Object.hashAll(systems),
-  );
+  int get hashCode =>
+      Object.hash(index, size, scale, zoom, pan, Object.hashAll(systems));
 
   @override
   String toString() =>
       'PageLayout($index, ${systems.length} system(s), ${bars.length} bar(s)'
-      '${header == null ? '' : ', header "$header"'}'
       '${scale == 1 ? '' : ', scale $scale'}'
       '${zoom == 1 ? '' : ', zoom $zoom'}'
       '${pan == LayoutOffset.zero ? '' : ', pan $pan'})';

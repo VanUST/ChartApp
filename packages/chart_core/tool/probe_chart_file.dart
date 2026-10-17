@@ -17,8 +17,6 @@ import 'dart:typed_data';
 
 import 'package:chart_core/chart_core.dart';
 
-import '../support/place_fixture.dart';
-
 int _failures = 0;
 int _checks = 0;
 
@@ -57,12 +55,20 @@ void _roundTripEmpty() {
 void _roundTripOneOperation() {
   _section('one operation');
   final DocumentState before = DocumentState(song: _baseSong());
-  final ChordInsertEvent event = ChordInsertEvent(
+  const InkStrokeAddEvent event = InkStrokeAddEvent(
     docId: 'doc-one',
     seq: 1,
-    chord: ChordMark(
-      place: placeIn('s1', 0, 0),
-      chord: Chord(root: ChordRoot(0)),
+    index: 0,
+    stroke: InkStroke(
+      id: 'ink-1',
+      tool: StrokeTool.pen,
+      color: '#112233',
+      size: 2.5,
+      anchor: EventAnchor(sectionId: 's1', bar: 0),
+      points: <InkPoint>[
+        InkPoint(x: 0, y: 0, w: 0.5, t: 0),
+        InkPoint(x: 3.5, y: 1.25, w: 0.75, t: 16),
+      ],
     ),
   );
   final DocumentState after = DocumentReducer.apply(before, event);
@@ -92,58 +98,9 @@ void _roundTripManyOperations() {
   _section('many mixed operations');
   final DocumentState before = DocumentState(song: _baseSong());
   final List<ChartEvent> events = <ChartEvent>[
-    MeasureInsertEvent(
-      docId: 'doc-many',
-      seq: 1,
-      sectionId: 's1',
-      index: 1,
-      bar: Bar(
-        chords: <ChordMark>[
-          ChordMark(
-            place: placeAt(0),
-            chord: Chord(root: ChordRoot(7)),
-          ),
-        ],
-      ),
-    ),
-    const SectionInsertEvent(
-      docId: 'doc-many',
-      seq: 2,
-      index: 1,
-      section: Section(
-        id: 's2',
-        label: SectionLabel.letter('B'),
-        bars: <Bar>[Bar()],
-      ),
-    ),
-    ChordInsertEvent(
-      docId: 'doc-many',
-      seq: 3,
-      chord: ChordMark(
-        place: placeIn('s1', 0, 0),
-        chord: Chord(root: ChordRoot(0)),
-      ),
-    ),
-    ChordInsertEvent(
-      docId: 'doc-many',
-      seq: 4,
-      chord: ChordMark(
-        place: placeIn('s1', 0, 2),
-        chord: Chord(root: ChordRoot(7), quality: ChordQuality.dominantSeventh),
-      ),
-    ),
-    NoteInsertEvent(
-      docId: 'doc-many',
-      seq: 5,
-      note: NoteMark(
-        place: placeIn('s1', 0, 0),
-        pitch: PitchedNote(note: WrittenNote(NoteLetter.d, 0), octave: 4),
-        value: NoteValue.plain(NoteBase.quarter),
-      ),
-    ),
     const InkStrokeAddEvent(
       docId: 'doc-many',
-      seq: 6,
+      seq: 1,
       index: 0,
       stroke: InkStroke(
         id: 'ink-1',
@@ -157,26 +114,46 @@ void _roundTripManyOperations() {
         ],
       ),
     ),
-    const AnnotationInsertEvent(
-      docId: 'doc-many',
-      seq: 7,
-      index: 0,
-      annotation: Annotation(
-        id: 'mark-1',
-        kind: AnnotationKind.stamp,
-        place: AnchoredPlace(anchor: EventAnchor(sectionId: 's1', bar: 0)),
-        payload: 'cue',
-      ),
-    ),
     const TextCueInsertEvent(
       docId: 'doc-many',
-      seq: 8,
+      seq: 2,
       index: 0,
       cue: TextCue(
         id: 'cue-1',
-        place: AnchoredPlace(anchor: EventAnchor(sectionId: 's2', bar: 0)),
+        place: AnchoredPlace(anchor: EventAnchor(sectionId: 's1', bar: 0)),
         text: 'to the top',
       ),
+    ),
+    const BarSizeSetEvent(
+      docId: 'doc-many',
+      seq: 3,
+      sectionId: 's1',
+      barIndex: 0,
+      from: BarSize.natural,
+      to: BarSize(1.25),
+    ),
+    SongUpdateEvent(
+      docId: 'doc-many',
+      seq: 4,
+      from: SongMetadata(
+        title: before.song.title,
+        composer: before.song.composer,
+        style: before.song.style,
+        tempo: before.song.tempo,
+      ),
+      to: SongMetadata(
+        title: 'Renamed By The Log',
+        composer: before.song.composer,
+        style: before.song.style,
+        tempo: before.song.tempo,
+      ),
+    ),
+    const TextCueEditEvent(
+      docId: 'doc-many',
+      seq: 5,
+      id: 'cue-1',
+      from: 'to the top',
+      to: 'to the top, twice',
     ),
   ];
   // The expected result is built by folding the SAME events the file carries, which is what makes
@@ -207,7 +184,6 @@ void _roundTripManyOperations() {
   stdout.writeln(
     'bars=${decoded.file.reducedDocument.song.writtenBarCount} '
     'strokes=${decoded.file.reducedDocument.strokes.length} '
-    'annotations=${decoded.file.reducedDocument.annotations.length} '
     'cues=${decoded.file.reducedDocument.textCues.length}',
   );
 }
@@ -293,12 +269,20 @@ void _corruptionFailures() {
     metadata: const ChartMetadata(docId: 'doc-many'),
     snapshot: DocumentState(song: _baseSong()),
     events: <ChartEvent>[
-      ChordInsertEvent(
+      InkStrokeAddEvent(
         docId: 'doc-many',
         seq: 1,
-        chord: ChordMark(
-          place: placeIn('s1', 0, 0),
-          chord: Chord(root: ChordRoot(0)),
+        index: 0,
+        stroke: InkStroke(
+          id: 'ink-1',
+          tool: StrokeTool.pen,
+          color: '#112233',
+          size: 2.5,
+          anchor: EventAnchor(sectionId: 's1', bar: 0),
+          points: <InkPoint>[
+            InkPoint(x: 0, y: 0, w: 0.5, t: 0),
+            InkPoint(x: 3.5, y: 1.25, w: 0.75, t: 16),
+          ],
         ),
       ),
     ],
@@ -368,12 +352,20 @@ void _newerWriter() {
     metadata: const ChartMetadata(docId: 'doc-many'),
     snapshot: DocumentState(song: _baseSong()),
     events: <ChartEvent>[
-      ChordInsertEvent(
+      InkStrokeAddEvent(
         docId: 'doc-many',
         seq: 1,
-        chord: ChordMark(
-          place: placeIn('s1', 0, 0),
-          chord: Chord(root: ChordRoot(0)),
+        index: 0,
+        stroke: InkStroke(
+          id: 'ink-1',
+          tool: StrokeTool.pen,
+          color: '#112233',
+          size: 2.5,
+          anchor: EventAnchor(sectionId: 's1', bar: 0),
+          points: <InkPoint>[
+            InkPoint(x: 0, y: 0, w: 0.5, t: 0),
+            InkPoint(x: 3.5, y: 1.25, w: 0.75, t: 16),
+          ],
         ),
       ),
     ],

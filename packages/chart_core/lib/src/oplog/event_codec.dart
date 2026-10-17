@@ -93,184 +93,6 @@ abstract final class EventCodec {
     Map<String, Object?> payload,
   ) {
     switch (type) {
-      case 'chord.insert':
-        return ChordInsertEvent(
-          docId: docId,
-          seq: seq,
-          chord: ModelJson.decodeChordMark(EventJson.object(payload, 'chord')),
-        );
-      case 'chord.update':
-        return ChordUpdateEvent(
-          docId: docId,
-          seq: seq,
-          from: ModelJson.decodeChordMark(EventJson.object(payload, 'from')),
-          to: ModelJson.decodeChordMark(EventJson.object(payload, 'to')),
-        );
-      case 'chord.delete':
-        return ChordDeleteEvent(
-          docId: docId,
-          seq: seq,
-          removed: ModelJson.decodeChordMark(
-            EventJson.object(payload, 'chord'),
-          ),
-        );
-      case 'note.insert':
-        return NoteInsertEvent(
-          docId: docId,
-          seq: seq,
-          note: ModelJson.decodeNoteMark(EventJson.object(payload, 'note')),
-        );
-      case 'note.update':
-        return NoteUpdateEvent(
-          docId: docId,
-          seq: seq,
-          from: ModelJson.decodeNoteMark(EventJson.object(payload, 'from')),
-          to: ModelJson.decodeNoteMark(EventJson.object(payload, 'to')),
-        );
-      case 'note.delete':
-        return NoteDeleteEvent(
-          docId: docId,
-          seq: seq,
-          removed: ModelJson.decodeNoteMark(EventJson.object(payload, 'note')),
-        );
-      case 'measure.insert':
-        return MeasureInsertEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          index: EventJson.integer(payload, 'index'),
-          bar: ModelJson.decodeBar(EventJson.object(payload, 'bar')),
-        );
-      case 'measure.delete':
-        return MeasureDeleteEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          index: EventJson.integer(payload, 'index'),
-          removed: ModelJson.decodeBar(EventJson.object(payload, 'bar')),
-        );
-      case 'measure.duplicate':
-        return MeasureDuplicateEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          index: EventJson.integer(payload, 'index'),
-          duplicate: ModelJson.decodeBar(EventJson.object(payload, 'bar')),
-        );
-      case 'bars.insert':
-        return BarsInsertEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          index: EventJson.integer(payload, 'index'),
-          bars: _bars(payload, 'bars'),
-          strokes: _strokes(payload, 'strokes'),
-          moves: _moves(payload, 'moves'),
-        );
-      case 'bars.remove':
-        return BarsRemoveEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          index: EventJson.integer(payload, 'index'),
-          bars: _bars(payload, 'bars'),
-          strokes: _strokes(payload, 'strokes'),
-          moves: _moves(payload, 'moves'),
-        );
-      case 'bars.replace':
-        return BarsReplaceEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          index: EventJson.integer(payload, 'index'),
-          from: _bars(payload, 'from'),
-          to: _bars(payload, 'to'),
-          addedStrokes: _strokes(payload, 'addedStrokes'),
-          removedStrokes: _strokes(payload, 'removedStrokes'),
-        );
-      case 'section.insert':
-        return SectionInsertEvent(
-          docId: docId,
-          seq: seq,
-          index: EventJson.integer(payload, 'index'),
-          section: ModelJson.decodeSection(
-            EventJson.object(payload, 'section'),
-          ),
-        );
-      case 'section.delete':
-        return SectionDeleteEvent(
-          docId: docId,
-          seq: seq,
-          index: EventJson.integer(payload, 'index'),
-          removed: ModelJson.decodeSection(
-            EventJson.object(payload, 'section'),
-          ),
-        );
-      case 'section.update':
-        return SectionUpdateEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          from: ModelJson.decodeSectionLabel(EventJson.object(payload, 'from')),
-          to: ModelJson.decodeSectionLabel(EventJson.object(payload, 'to')),
-        );
-      case 'section.duplicate':
-        return SectionDuplicateEvent(
-          docId: docId,
-          seq: seq,
-          sourceId: EventJson.string(payload, 'sectionId'),
-          index: EventJson.integer(payload, 'index'),
-          duplicate: ModelJson.decodeSection(
-            EventJson.object(payload, 'section'),
-          ),
-        );
-      case 'section.reorder':
-        return SectionReorderEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          fromIndex: EventJson.integer(payload, 'fromIndex'),
-          toIndex: EventJson.integer(payload, 'toIndex'),
-        );
-      case 'repeat.set':
-        return RepeatSetEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          from: RepeatSigns.fromJson(EventJson.object(payload, 'from')),
-          to: RepeatSigns.fromJson(EventJson.object(payload, 'to')),
-        );
-      case 'volta.set':
-        return VoltaSetEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          from: _volta(EventJson.optionalInteger(payload, 'from')),
-          to: _volta(EventJson.optionalInteger(payload, 'to')),
-        );
-      case 'mark.set':
-        return BarMarkSetEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          from: ModelJson.decodeBarMarks(
-            EventJson.array(payload, 'from'),
-            'from',
-          ),
-          to: ModelJson.decodeBarMarks(EventJson.array(payload, 'to'), 'to'),
-        );
-      case 'meter.set':
-        return MeterSetEvent(
-          docId: docId,
-          seq: seq,
-          sectionId: EventJson.string(payload, 'sectionId'),
-          barIndex: EventJson.integer(payload, 'bar'),
-          from: _meter(EventJson.object(payload, 'from'), 'from'),
-          to: _meter(EventJson.object(payload, 'to'), 'to'),
-        );
       case 'size.set':
         return BarSizeSetEvent(
           docId: docId,
@@ -283,27 +105,12 @@ abstract final class EventCodec {
           ),
           to: ModelJson.decodeBarSize(EventJson.number(payload, 'to'), 'to'),
         );
-      case 'key.transpose':
-        return KeyTransposeEvent(
-          docId: docId,
-          seq: seq,
-          semitones: EventJson.integer(payload, 'semitones'),
-          fromKey: ModelJson.decodeKey(EventJson.object(payload, 'fromKey')),
-          toKey: ModelJson.decodeKey(EventJson.object(payload, 'toKey')),
-        );
       case 'song.update':
         return SongUpdateEvent(
           docId: docId,
           seq: seq,
           from: ModelJson.decodeSongMetadata(EventJson.object(payload, 'from')),
           to: ModelJson.decodeSongMetadata(EventJson.object(payload, 'to')),
-        );
-      case 'staff.set':
-        return StaffSetEvent(
-          docId: docId,
-          seq: seq,
-          from: ModelJson.decodeStaffSet(EventJson.object(payload, 'from')),
-          to: ModelJson.decodeStaffSet(EventJson.object(payload, 'to')),
         );
       case 'ink.stroke.add':
         return InkStrokeAddEvent(
@@ -318,49 +125,6 @@ abstract final class EventCodec {
           seq: seq,
           index: EventJson.integer(payload, 'index'),
           stroke: InkStroke.fromJson(EventJson.object(payload, 'stroke')),
-        );
-      case 'division.set':
-        // Both sides name the divisions WHOLE, so the event needs no reference to the document to
-        // be read back and its inverse is the same object with the two lists swapped.
-        return DivisionSetEvent(
-          docId: docId,
-          seq: seq,
-          from: _divisionsIn(payload, 'from'),
-          to: _divisionsIn(payload, 'to'),
-        );
-      case 'annotation.insert':
-        return AnnotationInsertEvent(
-          docId: docId,
-          seq: seq,
-          index: EventJson.integer(payload, 'index'),
-          annotation: Annotation.fromJson(
-            EventJson.object(payload, 'annotation'),
-          ),
-        );
-      case 'annotation.delete':
-        return AnnotationDeleteEvent(
-          docId: docId,
-          seq: seq,
-          index: EventJson.integer(payload, 'index'),
-          removed: Annotation.fromJson(EventJson.object(payload, 'annotation')),
-        );
-      case 'annotation.move':
-        return AnnotationMoveEvent(
-          docId: docId,
-          seq: seq,
-          id: EventJson.string(payload, 'id'),
-          from: EventJson.anchoredPlace(payload, 'from'),
-          to: EventJson.anchoredPlace(payload, 'to'),
-        );
-      case 'annotation.duplicate':
-        return AnnotationDuplicateEvent(
-          docId: docId,
-          seq: seq,
-          sourceId: EventJson.string(payload, 'sourceId'),
-          index: EventJson.integer(payload, 'index'),
-          duplicate: Annotation.fromJson(
-            EventJson.object(payload, 'annotation'),
-          ),
         );
       case 'textcue.insert':
         return TextCueInsertEvent(
@@ -436,10 +200,6 @@ abstract final class EventCodec {
         );
     }
   }
-
-  /// Wraps a decoded bracket number back into a [Volta], or null when the bar has none.
-  static Volta? _volta(int? number) => number == null ? null : Volta(number);
-
   // PURPOSE: Read one side of a `bars.*` event as a list of whole bars, so the three events that
   //          carry a run of bars cannot decode it differently.
   // INPUTS: json — the event payload. key — which list it is (`bars`, `from` or `to`), so a failure
@@ -448,63 +208,18 @@ abstract final class EventCodec {
   //          the position, because a run whose third bar could not be read is not a run this build
   //          can apply, and skipping it would paste fewer bars than were copied.
   // KEYWORDS: bars-decode, array-of-objects, named-field, strict, no-partial-run
-  static List<Bar> _bars(Map<String, Object?> json, String key) {
-    final List<Bar> bars = <Bar>[];
-    final List<Object?> entries = EventJson.array(json, key);
-    for (int index = 0; index < entries.length; index++) {
-      final Object? entry = entries[index];
-      if (entry is! Map<String, Object?>) {
-        throw EventFormatException(
-          'entry $index of "$key" is not a bar object',
-        );
-      }
-      bars.add(ModelJson.decodeBar(entry));
-    }
-    return bars;
-  }
-
   // PURPOSE: Read the strokes a `bars.*` event carries, as whole canonical strokes.
   // INPUTS: json — the event payload. key — which list it is, so a failure names the field.
   // OUTPUTS: The decoded strokes, in order. [InkStroke.fromJson] is the one reader of a stroke's
   //          shape, so a stroke that arrived through a `bars.insert` is read by exactly the code that
   //          reads one that arrived through `ink.stroke.add`.
   // KEYWORDS: stroke-decode, whole-value, one-reader, named-field, strict
-  static List<InkStroke> _strokes(Map<String, Object?> json, String key) {
-    final List<InkStroke> strokes = <InkStroke>[];
-    final List<Object?> entries = EventJson.array(json, key);
-    for (int index = 0; index < entries.length; index++) {
-      final Object? entry = entries[index];
-      if (entry is! Map<String, Object?>) {
-        throw EventFormatException(
-          'entry $index of "$key" is not a stroke object',
-        );
-      }
-      strokes.add(InkStroke.fromJson(entry));
-    }
-    return strokes;
-  }
-
   // PURPOSE: Read the re-addressing a `bars.insert` causes, so a log replayed on another device
   //          produces the same document as the device that made it.
   // INPUTS: json — the event payload. key — the field name.
   // OUTPUTS: The decoded moves, in order. An entry that is not an object is refused with the key and
   //          the position: a move that could not be read is a mark that would stay on the wrong bar.
   // KEYWORDS: anchor-move-decode, deterministic-replay, named-field, strict
-  static List<AnchorMove> _moves(Map<String, Object?> json, String key) {
-    final List<AnchorMove> moves = <AnchorMove>[];
-    final List<Object?> entries = EventJson.array(json, key);
-    for (int index = 0; index < entries.length; index++) {
-      final Object? entry = entries[index];
-      if (entry is! Map<String, Object?>) {
-        throw EventFormatException(
-          'entry $index of "$key" is not an anchor move',
-        );
-      }
-      moves.add(AnchorMove.fromJson(entry));
-    }
-    return moves;
-  }
-
   // PURPOSE: Read one side of a `division.set`, so that a division survives the file exactly as the
   //          document held it.
   // INPUTS: json — the event payload. key — the field name, `from` or `to`.
@@ -514,21 +229,6 @@ abstract final class EventCodec {
   //          key and the position rather than skipped, because a skipped division is a line the
   //          musician sees missing from a chart that saved without complaint.
   // KEYWORDS: division-decode, whole-value, one-reader, named-field, strict
-  static List<BarDivision> _divisionsIn(Map<String, Object?> json, String key) {
-    final List<BarDivision> divisions = <BarDivision>[];
-    final List<Object?> entries = EventJson.array(json, key);
-    for (int index = 0; index < entries.length; index++) {
-      final Object? entry = entries[index];
-      if (entry is! Map<String, Object?>) {
-        throw EventFormatException(
-          'entry $index of "$key" is not a division object',
-        );
-      }
-      divisions.add(BarDivision.fromJson(entry));
-    }
-    return divisions;
-  }
-
   // PURPOSE: Read one side of a `meter.set`, refusing a meter the model cannot hold.
   // INPUTS: json — the `from` or `to` object. side — which side it is, so a failure names it.
   // OUTPUTS: The decoded [TimeSignature]. The two figures are read with the same strict integer
@@ -546,14 +246,4 @@ abstract final class EventCodec {
   //          TYPE; refusing a figure already written into a saved file would make the file
   //          unopenable rather than merely odd, which is a worse failure than loading it.
   // KEYWORDS: meter-decode, strict, positivity, typed-failure, no-silent-default
-  static TimeSignature _meter(Map<String, Object?> json, String side) {
-    final TimeSignature meter = ModelJson.decodeTimeSignature(json);
-    if (meter.numerator < 1 || meter.denominator < 1) {
-      throw EventFormatException(
-        'field "$side" names the meter $meter, whose figures must both be '
-        'positive',
-      );
-    }
-    return meter;
-  }
 }
