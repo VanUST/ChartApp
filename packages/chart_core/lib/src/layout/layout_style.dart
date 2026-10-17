@@ -59,6 +59,8 @@ class LayoutStyle {
     this.beatMarkMinCellWidth = 18,
     this.showBeatCaptions = false,
     this.chartHeaderGap = 6,
+    this.voltaBandHeight = 16,
+    this.signSizeLimit = 26,
   });
 
   /// How text is measured.
@@ -73,8 +75,30 @@ class LayoutStyle {
   /// Horizontal padding inside a bar, on each side of its first and last cell.
   final double barPadding;
 
-  /// Gap between two chords that share a cell, and the room reserved after the last chord in a
-  /// cell so that neighbouring cells do not touch.
+  /// The clear room the engraver keeps between two adjacent chord symbols, in logical pixels.
+  ///
+  /// IT IS A MINIMUM, AND IT IS THE ONE RULE THAT STOPS TWO SYMBOLS READING AS ONE. A chord is drawn
+  /// at the x the model stores, which for an imported chart is the source's own cell grid — 18
+  /// points per cell, whatever the symbol is wide. `Db` next to `Bb/D` on two adjacent cells is 18
+  /// points apart and the two symbols are 27 wide together, so without this gap the page draws
+  /// `DbBb/D`: one word where the chart wrote two chords, and a musician reads a chord that does not
+  /// exist. With it, the second symbol is drawn after the first one ends instead of on top of it, and
+  /// the bar widens to hold the row (see `LayoutEngine._chordRow`).
+  ///
+  /// WHY THE GAP IS ADDED TO THE DRAWING AND NOT TO THE STORED COORDINATE. A mark's x is its TIME —
+  /// the written position that the importer read out of the source — and it is data, saved and
+  /// reopened with the document. A gap is a property of the FONT the page is drawn with: it changes
+  /// with the text style, and the document must not. Moving the drawn symbol and leaving the stored
+  /// one alone is the only version of this rule that leaves the document alone, which is why the
+  /// owner's book keeps its 1 103 stored positions byte for byte.
+  ///
+  /// WHY 10. It is a little under one em at the chord size (15 points), which is the smallest
+  /// separation at which two words still read as two words on a page held at arm's length; a
+  /// printed chart separates chord symbols by about a space. It is also the value this style already
+  /// carried for the room between two symbols, so the page did not gain a second number for one
+  /// relationship. The price is named: a bar whose symbols are closer than this grows, and a page of
+  /// such bars needs more width, so FIT shrinks it slightly — measured on the owner's book, the whole
+  /// 79-bar tune still lands on one page.
   final double chordSpacing;
 
   /// The air between the top of a bar's band and the top of its chord row.
@@ -331,4 +355,28 @@ class LayoutStyle {
   /// which a reader needs once, so every later page gives up nothing for it and paginates exactly as
   /// it did before the header existed.
   final double chartHeaderGap;
+
+  /// The vertical room a system gives up for the alternative-ending brackets of its bars.
+  ///
+  /// RESERVED PER SYSTEM AND NOT PER BAR, because a bracket is drawn ABOVE the bars it covers: it
+  /// belongs to the band over the stave, and a bar's own rectangle cannot hold it without taking room
+  /// from the chord row. A system with no ending reserves nothing, so a chart without voltas engraves
+  /// exactly the page it engraved before brackets existed.
+  ///
+  /// WHY 16. A bracket is a line and a figure: the line sits at the top of the band and the figure is
+  /// drawn under it in the staff-text size, whose measured line box is about 13 points at the 10-point
+  /// style. Four points of air split above and below the figure is the smallest number at which the
+  /// bracket does not touch the chord row underneath it, and the band is never taller than one line of
+  /// text because a bracket is never more than one figure. See `ChartPainter._paintVolta`.
+  final double voltaBandHeight;
+
+  /// The largest square a drawn bar sign may occupy, in logical pixels.
+  ///
+  /// A sign — the repeat-previous simile, a slash, a segno, a coda, a fermata — is DRAWN from geometry
+  /// rather than set as a character (there is no music font), so its size is a decision here instead
+  /// of a property of a font. It is capped so that a bar of an unusual height does not get a sign
+  /// large enough to be mistaken for the music, and the cap is the chord's own line height rounded up
+  /// — a sign the size of a chord symbol reads as one of the bar's symbols rather than as a mark
+  /// about the bar.
+  final double signSizeLimit;
 }

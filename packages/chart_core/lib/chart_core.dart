@@ -45,11 +45,17 @@
 // WHAT IS DELIBERATELY ABSENT, because the owner cut the application back to its basics and asked
 // for the musical editing to be deleted rather than hidden. There is no note model, no melodic or
 // percussion staff, no play-order expansion, no selection or clipboard, no transposition, no
-// chord-symbol ENTRY, no meter or bar insertion, no barline recognition and no chart header. Those
-// files are gone from the tree, and the tests that covered them are gone with them. The history
-// holds them, which is where the owner wants them until the rest is rewritten. A chord is still
-// DRAWN, because a reader that cannot show the chords it loaded is not a reader; what is absent is
-// every way to enter, change or delete one.
+// chord-symbol ENTRY, no meter or bar insertion, and no barline recognition. Those files are gone
+// from the tree, and the tests that covered them are gone with them. The history holds them, which is
+// where the owner wants them until the rest is rewritten. A chord is still DRAWN, because a reader
+// that cannot show the chords it loaded is not a reader; what is absent is every way to enter,
+// change or delete one.
+//
+// AND WHAT CAME BACK, NAMED SO THAT IT IS NOT MISTAKEN FOR THE OLD TREE. The chart HEADER is back
+// (`src/layout/chart_header.dart`): the owner asked for the key and the meter to be on the page
+// again, because a chart that does not state what key it is in is a chart he has to look away from.
+// It is a LINE OF TEXT drawn above the first system, and it decides nothing — the meter it prints is
+// a label, not a divider, and no width, position or pagination in the engine is computed from it.
 //
 // WHAT MUST NEVER LIVE HERE: flutter, storage_drift, ink_native or any platform channel. The
 // package's value rests on `dart test` running every one of its tests on a machine with no device,
@@ -74,11 +80,13 @@ export 'src/ireal/parser.dart';
 export 'src/ireal/payload.dart';
 export 'src/ireal/tokenizer.dart';
 export 'src/key.dart';
+export 'src/layout/chart_header.dart';
 export 'src/layout/geometry.dart';
 export 'src/layout/hit_test.dart';
 export 'src/layout/layout_engine.dart';
 export 'src/layout/layout_style.dart';
 export 'src/layout/page_layout.dart';
+export 'src/layout/staff_text_display.dart';
 export 'src/layout/text_metrics.dart';
 export 'src/oplog/oplog.dart';
 export 'src/pitch.dart';

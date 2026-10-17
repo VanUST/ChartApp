@@ -10,7 +10,8 @@
 //          cached layout can be recognised as unchanged without re-engraving it. Equality includes
 //          the view, so a pan is a new page value and a painter that compares pages repaints.
 // KEYWORDS: layout-result, placed-chord, placed-bar, hit-testing, value-equality, cache-key,
-//           anchor-address, view-transform, zoom, pan, single-bridge
+//           anchor-address, view-transform, zoom, pan, single-bridge, placed-sign, volta
+import 'chart_header.dart';
 import 'geometry.dart';
 
 // A bar's cells are GONE, and their absence is the point of this stage. A cell was the grid in the
@@ -166,7 +167,174 @@ class PlacedChord {
       '${clampedIntoBand ? ' (clamped into the chord band)' : ''}';
 }
 
-/// A bar drawn at a position, together with the chords written in it and the cues that remark on it.
+/// The signs a bar can carry that are not chords.
+///
+/// One value per SIGN and not per model field, because the page draws signs and the model stores
+/// them in four different places: `Bar.repeatPrevious`, `Bar.slashRepeat`, `Bar.noChord`, and the
+/// two facts this renderer derives — the bar's [BarMark]s and the meter it changes to. Collapsing
+/// them here is what lets the painter draw one list in one pass instead of reaching into the song
+/// for each kind and deciding for itself where each one goes.
+enum BarSignKind {
+  /// The simile sign: "play the previous bar again" (`%`), written [Bar.repeatPrevious] one bar.
+  repeatPreviousOneBar,
+
+  /// The two-bar simile sign, written [Bar.repeatPrevious] two bars. iReal writes it as the same
+  /// sign with a second stroke through it, which is what distinguishes the two on the page.
+  repeatPreviousTwoBars,
+
+  /// The slash repeat: "keep comping", written [Bar.slashRepeat].
+  slashRepeat,
+
+  /// `N.C.` — no chord sounds for this bar, written [Bar.noChord].
+  noChord,
+
+  /// A segno sign, from [BarMark.segno].
+  segno,
+
+  /// A coda sign, from [BarMark.coda].
+  coda,
+
+  /// A fermata, from [BarMark.fermata].
+  fermata,
+
+  /// The meter this bar changes to, stated at the bar where it changes.
+  ///
+  /// NOT A DIVISION. The owner ruled the meter is «Просто надпись» — a label that divides nothing —
+  /// so this sign is drawn and nothing is measured from it: the bar's width, its chord positions and
+  /// the page's pagination are decided without ever reading the meter.
+  meterChange,
+}
+
+// PURPOSE: Say where one of a bar's signs goes and which signs carries words, so the painter draws
+//          the box the LAYOUT decided instead of deciding a second time where a sign belongs.
+// INPUTS: Produced by the layout engine; not constructed by callers. [kind] is what to draw,
+//         [bounds] is the box it is drawn in, and [text] carries the words for the two kinds that
+//         are written rather than drawn.
+// OUTPUTS: An immutable value with value equality, carried on [PlacedBar.signs] in the order the
+//          layout placed them (left to right inside the bar).
+// KEYWORDS: layout-result, bar-sign, repeat-previous, slash-repeat, no-chord, segno, coda, fermata,
+//           meter-sign, display-only
+//
+// DISPLAY ONLY, LIKE A CHORD. A sign is something to DRAW: it carries no hit target and no handle,
+// because no sign on this page can be added, changed or deleted through the interface. Every one of
+// them arrived with the file.
+//
+// THE TWO GLYPH KINDS THAT HAVE NO FONT ARE DRAWN AS SHAPES, and that is a decision rather than a
+// shortfall: this renderer has no music font (see `ChartPainter`), and a substituted character — an
+// `S` for a segno, a `C` for a coda — is a glyph a musician has to guess at, which A68 ruled worse
+// than nothing. The simile sign, the slash, the segno, the coda and the fermata are therefore drawn
+// from [bounds] as geometry: the same shapes an engraver cuts, with no font in the path.
+
+/// One sign drawn in a bar, with the box it is drawn in.
+class PlacedBarSign {
+  /// Creates a placement of a [kind] sign in [bounds], carrying [text] when the kind needs words.
+  const PlacedBarSign({
+    required this.kind,
+    required this.bounds,
+    this.text = '',
+  });
+
+  /// What the painter draws.
+  final BarSignKind kind;
+
+  /// The words the sign reads as, for [BarSignKind.noChord] (`N.C.`) and
+  /// [BarSignKind.meterChange] (`3/4`), and the empty string for every kind drawn as a shape.
+  ///
+  /// The string is composed and measured here rather than by the painter, so the box the engine
+  /// reserved and the words drawn in it are one value — the rule every placed value in this file
+  /// follows.
+  final String text;
+
+  /// Where the sign is drawn, in the page's engraved coordinates.
+  ///
+  /// Its exact meaning depends on the kind: for a shape it is the SQUARE the shape is inscribed in,
+  /// so the painter needs no size rule of its own; for a kind that is read as words it is the box
+  /// those words measured to.
+  final LayoutRect bounds;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedBarSign &&
+      other.kind == kind &&
+      other.text == text &&
+      other.bounds == bounds;
+
+  @override
+  int get hashCode => Object.hash(kind, text, bounds);
+
+  @override
+  String toString() =>
+      'placed sign ${kind.name}${text.isEmpty ? '' : ' "$text"'} at $bounds';
+}
+
+// PURPOSE: Say where one line of a bar's own staff text goes, so the words a chart carries about a
+//          bar — `Solo`, `х4`, `проигрыш` — are drawn from the box the layout reserved and measured
+//          them in.
+// INPUTS: Produced by the layout engine; not constructed by callers. [text] is the DISPLAY form,
+//         with the written position prefix and the exporter's padding already gone (see
+//         `displayStaffText`), so it is the string that was measured.
+// OUTPUTS: An immutable value with value equality, carried on [PlacedBar.staffText] stacked from the
+//          bar's bottom edge upward.
+// KEYWORDS: layout-result, staff-text, display-form, stacked-rows, display-only
+//
+// WHY THIS IS NOT A [PlacedTextCue]. A cue is a remark the MUSICIAN wrote in the document, and it
+// therefore lives in a row the page gives up above the bar. Staff text is what the FILE says about
+// the bar, it is part of the music, and it is drawn inside the bar's own band at the head of the
+// lane the chords leave — which is where a chart prints `Solo`. Two things that are written by
+// different people about different subjects do not share one placement rule.
+
+/// One line of a bar's own staff text, in display form, with the box the layout measured for it.
+class PlacedStaffText {
+  /// Creates a placed staff-text line reading [text] inside [bounds].
+  const PlacedStaffText({required this.text, required this.bounds});
+
+  /// The words to draw, exactly as `displayStaffText` returns them.
+  final String text;
+
+  /// The box the words occupy, in the page's engraved coordinates.
+  final LayoutRect bounds;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedStaffText && other.text == text && other.bounds == bounds;
+
+  @override
+  int get hashCode => Object.hash(text, bounds);
+
+  @override
+  String toString() => 'placed staff text "$text" at $bounds';
+}
+
+/// One alternative-ending bracket drawn over the bars it covers.
+///
+/// A bracket belongs to a RUN of bars — `[1.` covers the first ending, `[2.` the second — so it is
+/// published by the system rather than by each of its bars: a painter given one bar could draw a
+/// segment, but the tick that starts a bracket is a fact about where the run BEGINS, and a bar does
+/// not know that. Number 0 is an unnumbered bracket, which iReal writes as `N0` and which is a
+/// different thing from no bracket at all.
+class PlacedVolta {
+  /// Creates a bracket numbered [number] spanning [bounds].
+  const PlacedVolta({required this.number, required this.bounds});
+
+  /// The figure written in the bracket, or 0 when it carries none.
+  final int number;
+
+  /// The band and horizontal span the bracket occupies, in the page's engraved coordinates.
+  final LayoutRect bounds;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlacedVolta && other.number == number && other.bounds == bounds;
+
+  @override
+  int get hashCode => Object.hash(number, bounds);
+
+  @override
+  String toString() =>
+      'placed ${number == 0 ? 'unnumbered' : number} volta over $bounds';
+}
+
+/// A bar drawn at a position, together with the chords written in it, its signs and the words on it.
 class PlacedBar {
   /// Creates a placed bar for the bar at ([sectionId], [barIndex]).
   const PlacedBar({
@@ -174,6 +342,8 @@ class PlacedBar {
     required this.barIndex,
     required this.bounds,
     this.chords = const <PlacedChord>[],
+    this.signs = const <PlacedBarSign>[],
+    this.staffText = const <PlacedStaffText>[],
     this.textCues = const <PlacedTextCue>[],
   });
 
@@ -207,6 +377,19 @@ class PlacedBar {
   /// and not a description.
   final List<PlacedChord> chords;
 
+  /// The signs this bar carries that are not chords, in the order they are drawn.
+  ///
+  /// A bar with none has none, which is the state of most bars: a chart does not sign every measure.
+  /// The order is left to right inside the bar, so a caller reading the list is reading the page.
+  final List<PlacedBarSign> signs;
+
+  /// The bar's own staff text, in display form, stacked from the bar's bottom edge upward.
+  ///
+  /// The first entry is the one closest to the bar's bottom, because the rows are stacked upward and
+  /// a chart reads the phrase nearest the stave first. Empty for a bar whose file carries no text and
+  /// for a text that is only a written position (`*69` with no words), which has nothing to say.
+  final List<PlacedStaffText> staffText;
+
   /// The text cues anchored to this bar, in document order.
   ///
   /// They sit in the rows the layout reserved ABOVE this bar's stave — so above [bounds], not
@@ -224,11 +407,23 @@ class PlacedBar {
         other.barIndex != barIndex ||
         other.bounds != bounds ||
         other.chords.length != chords.length ||
+        other.signs.length != signs.length ||
+        other.staffText.length != staffText.length ||
         other.textCues.length != textCues.length) {
       return false;
     }
     for (int index = 0; index < chords.length; index++) {
       if (other.chords[index] != chords[index]) {
+        return false;
+      }
+    }
+    for (int index = 0; index < signs.length; index++) {
+      if (other.signs[index] != signs[index]) {
+        return false;
+      }
+    }
+    for (int index = 0; index < staffText.length; index++) {
+      if (other.staffText[index] != staffText[index]) {
         return false;
       }
     }
@@ -246,13 +441,17 @@ class PlacedBar {
     barIndex,
     bounds,
     Object.hashAll(chords),
+    Object.hashAll(signs),
+    Object.hashAll(staffText),
     Object.hashAll(textCues),
   );
 
   @override
   String toString() =>
       'PlacedBar($sectionId[$barIndex]) at $bounds'
-      '${chords.isEmpty ? '' : ', ${chords.length} chord(s)'}';
+      '${chords.isEmpty ? '' : ', ${chords.length} chord(s)'}'
+      '${signs.isEmpty ? '' : ', ${signs.length} sign(s)'}'
+      '${staffText.isEmpty ? '' : ', ${staffText.length} staff text line(s)'}';
 }
 
 /// One line of a page: the bars engraved side by side.
@@ -264,6 +463,7 @@ class PlacedSystem {
     this.sectionId,
     this.sectionLabel,
     this.labelBand,
+    this.voltas = const <PlacedVolta>[],
   });
 
   /// Where the system is drawn, including any section label above the stave.
@@ -284,12 +484,23 @@ class PlacedSystem {
   /// The band the section label is placed in, or null when there is no label.
   ///
   /// It is published rather than left to the painter to infer from the geometry because a system's
-  /// band above the stave now holds TWO things: the heading, which owns the top
-  /// `LayoutStyle.sectionLabelHeight` of it, and the cue rows, which own the rest. A painter that
-  /// centred the label in the whole band would put it among the cue rows and let a plate drawn over
-  /// them cover the letter that names the section. Publishing the band keeps the heading where it
-  /// was on every page that carries no cue, and above the words on every page that does.
+  /// band above the stave now holds THREE things: the heading, which owns the top
+  /// `LayoutStyle.sectionLabelHeight` of it; the cue rows, which own the rest; and — on a system
+  /// that carries endings — the volta brackets, which own their own `LayoutStyle.voltaBandHeight`
+  /// slab immediately above the stave. A painter that centred the label in the whole band would put
+  /// it among the cue rows and let a plate drawn over them cover the letter that names the section.
+  /// Publishing the band keeps the heading where it was on every page that carries no cue, and above
+  /// the words on every page that does.
   final LayoutRect? labelBand;
+
+  /// The alternative-ending brackets drawn over the bars of this system, in reading order.
+  ///
+  /// One entry per RUN of adjacent bars carrying the same `Volta` number, so a bracket that covers
+  /// two bars is one value spanning both rather than two segments a painter would have to join. A
+  /// run never crosses a system break: a bracket is a mark above a line of music, and a printed
+  /// chart draws one bracket per line for an ending that spans the break, which is what this does.
+  /// Empty for a system in which no bar sits under an ending.
+  final List<PlacedVolta> voltas;
 
   @override
   bool operator ==(Object other) {
@@ -298,8 +509,14 @@ class PlacedSystem {
         other.sectionId != sectionId ||
         other.sectionLabel != sectionLabel ||
         other.labelBand != labelBand ||
+        other.voltas.length != voltas.length ||
         other.bars.length != bars.length) {
       return false;
+    }
+    for (int index = 0; index < voltas.length; index++) {
+      if (other.voltas[index] != voltas[index]) {
+        return false;
+      }
     }
     for (int index = 0; index < bars.length; index++) {
       if (other.bars[index] != bars[index]) {
@@ -315,12 +532,15 @@ class PlacedSystem {
     sectionId,
     sectionLabel,
     labelBand,
+    Object.hashAll(voltas),
     Object.hashAll(bars),
   );
 
   @override
   String toString() =>
-      'PlacedSystem(${bars.length} bar(s)${sectionLabel == null ? '' : ', "$sectionLabel"'})';
+      'PlacedSystem(${bars.length} bar(s)'
+      '${sectionLabel == null ? '' : ', "$sectionLabel"'}'
+      '${voltas.isEmpty ? '' : ', ${voltas.length} volta(s)'})';
 }
 
 /// One page of engraved music.
@@ -344,6 +564,7 @@ class PageLayout {
     required this.index,
     required this.size,
     required this.systems,
+    this.header,
     this.scale = 1,
     this.zoom = 1,
     this.pan = LayoutOffset.zero,
@@ -358,6 +579,15 @@ class PageLayout {
 
   /// The systems on this page, top to bottom.
   final List<PlacedSystem> systems;
+
+  /// The line stating this chart's key and opening meter, on the page where its music begins.
+  ///
+  /// ONE PAGE'S VALUE AND NOT ONE CHART'S: a chart states what it is written in where its music
+  /// starts, and that is a fact a reader needs once. Every later page therefore carries null and
+  /// gives up no room for it. Null on the first page too when the caller asked for a page a chart
+  /// has no music for — the engine returns no page at all in that case, so null here always means
+  /// "a page after the first".
+  final PlacedChartHeader? header;
 
   /// The factor that maps this page's coordinates onto the surface it is drawn on.
   ///
@@ -503,6 +733,7 @@ class PageLayout {
       index: index,
       size: size,
       systems: systems,
+      header: header,
       scale: scale,
       zoom: zoom,
       pan: clamped,
@@ -514,6 +745,7 @@ class PageLayout {
     if (other is! PageLayout ||
         other.index != index ||
         other.size != size ||
+        other.header != header ||
         other.scale != scale ||
         other.zoom != zoom ||
         other.pan != pan ||
@@ -529,12 +761,20 @@ class PageLayout {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(index, size, scale, zoom, pan, Object.hashAll(systems));
+  int get hashCode => Object.hash(
+    index,
+    size,
+    header,
+    scale,
+    zoom,
+    pan,
+    Object.hashAll(systems),
+  );
 
   @override
   String toString() =>
       'PageLayout($index, ${systems.length} system(s), ${bars.length} bar(s)'
+      '${header == null ? '' : ', ${header!.text}'}'
       '${scale == 1 ? '' : ', scale $scale'}'
       '${zoom == 1 ? '' : ', zoom $zoom'}'
       '${pan == LayoutOffset.zero ? '' : ', pan $pan'})';

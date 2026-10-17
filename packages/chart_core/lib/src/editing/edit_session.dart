@@ -65,29 +65,6 @@ const double chordHitTolerance = 22;
 /// disagree about where the band ends.
 const double chordBandHalfHeight = 22;
 
-// PURPOSE: Name why a chord could not be written, so the surface can say which rule refused it
-//          instead of reporting a bare failure — and so "the bar does not exist" and "a chord may not
-//          be written there" are two different answers rather than one boolean.
-// INPUTS: None; produced by [EditSession.applyChordAt].
-// OUTPUTS: One of two tokens. Both mean NOTHING WAS WRITTEN.
-// KEYWORDS: chord-entry, refusal, named-outcome, chord-band, no-such-bar
-/// Why a chord was not written.
-enum ChordEntryRefusal {
-  /// The address names no bar of the song.
-  noSuchBar,
-
-  /// The place is not on the bar's chord line: below the bar, or above the staff's chord row.
-  outsideChordBand,
-}
-
-// PURPOSE: Report what an attempt to write a chord did, carrying the mark that is now in the document
-//          so the caller does not have to search for it again.
-// INPUTS: Built by [EditSession.applyChordAt] from the edit it made, or from the rule that refused it.
-// OUTPUTS: An immutable value with exactly one of [mark] and [refusal] set. [applied] is true on the
-//          success side, and its [mark] is the WHOLE value the document now holds — which for an
-//          update is the old chord with the new symbol, not the caller's argument.
-// KEYWORDS: chord-entry, outcome, applied, refused, whole-value, one-of-two
-
 /// One undoable edit: the event to apply on redo, and the event to apply on undo.
 class UndoOp {
   /// Creates an undoable edit whose redo event is [forward] and whose undo event is [undoEvent].
@@ -103,20 +80,6 @@ class UndoOp {
   /// The event that reverses this edit.
   final ChartEvent undoEvent;
 }
-
-// PURPOSE: Give a mark's place the anchor the CALLER's address names, keeping its offsets. It
-//          restates a coordinate's bar and never its position.
-// INPUTS: place — the place as the document holds it. sectionId and barIndex — the address the
-//         caller named and the session found the mark at.
-// OUTPUTS: The same place with an anchor for that bar. The offsets are untouched, because they are
-//         what the musician wrote and the address is only where it was written.
-//
-//         WHY THE CALLER'S ADDRESS WINS. A place's anchor restates which bar holds the mark, and the
-//         document's structure is the authority on that: the session has just found the mark in the
-//         bar it was asked about. An event built from the mark's own anchor instead would name a bar
-//         the caller never mentioned — the failure a fixture anchored by a placeholder produces —
-//         and the reducer rewrites the same field on every mutation for exactly this reason.
-// KEYWORDS: anchor, rebase, caller-address-wins, event-payload, single-address
 
 /// A chart document being edited, and the log that explains it.
 ///
@@ -321,32 +284,21 @@ class EditSession {
     return true;
   }
 
-  // PURPOSE: Put a chosen chord into a bar AT A PLACE, which is the edit the palette exists to make.
-  //          It decides between the catalogue's two chord events from what the document holds, so the
-  //          caller never has to know whether there was already a chord where the musician pointed.
-  // INPUTS: sectionId and barIndex — the bar, in the model's own address. offsetX and offsetY — the
-  //         place inside that bar, in bar-local logical pixels, exactly as a tap reported them
-  //         (`ChartHit.local`). offsetY is the chord's own height on the chord line, and 0 means the
-  //         middle of it, which is where every chart written before this stage sits. chord — the
-  //         chosen chord. size — the engraved size, normally the size of the placement being
-  //         replaced. tolerance — how near an existing chord the place must be to REPLACE it rather
-  //         than add another; the default is half a chord line's height, which is the reach a finger
-  //         has on the symbols it is aiming at.
-  // OUTPUTS: A [ChordEntry]. [ChordEntry.applied] carries the mark now in the document — the new
-  //          one, or the updated one — and nothing else happens. [ChordEntryRefusal.noSuchBar] when
-  //          the address names no bar. [ChordEntryRefusal.outsideChordBand] when the place is not on
-  //          the bar's own chord line.
+  // PURPOSE: Change how much room one bar is drawn in, which is the musician's decision about the
+  //          chart and therefore belongs in the document rather than in a screen's state.
+  // INPUTS: sectionId and barIndex — the bar, in the model's own address. size — the new multiple of
+  //         the bar's natural width, from [BarSize.ladder].
+  // OUTPUTS: True when a `bars.*` size event was appended, false when the address names no bar and
+  //          false when the bar already has that size — the no-op rule every other edit here follows,
+  //          because an event whose two sides are equal is a log row that changed nothing and an offer
+  //          to undo an edit that did not happen.
   //
-  //          THE CHORD BAND IS A LAW HERE AND NOT A THRESHOLD, and this is the organ that enforces
-  //          it. The owner ruled that a chord is written above the staff — on the bar's chord line —
-  //          and that below the bar there is neither a chord nor a note («Аккорды надо запретить ниже
-  //          такта»). So a place whose `offsetY` is further from the chord line than the line itself
-  //          is tall is REFUSED, by name, and NOTHING IS WRITTEN: a refusal that left half a chord
-  //          behind would be the same defect as a chord drawn where the rule says none may be. The
-  //          band's height is the engraver's own `barHeight`, read from [LayoutStyle] so that the
-  //          editor and the engraving cannot disagree about where the chord line ends.
-  // KEYWORDS: chord-edit, coordinate, update-or-insert, chord-band, refusal-writes-nothing,
-  //           named-outcome, undoable
+  //          THE BAND A CHORD MAY OCCUPY IS NOT ENFORCED HERE ANY MORE, and the reason is that there is
+  //          no longer a way to write a chord. The rule the owner gave — «Аккорды надо запретить ниже
+  //          такта» — still holds on the page: the layout clamps a mark's stored vertical offset into
+  //          the bar's band, and every mark this build can hold came from a file rather than from a
+  //          finger.
+  // KEYWORDS: bar-size, width-multiplier, no-op-refusal, undoable, document-not-view
   /// Sets the size of the bar at ([sectionId], [barIndex]), reporting whether it changed.
   bool setBarSize({
     required String sectionId,
@@ -608,76 +560,25 @@ class EditSession {
     return candidate;
   }
 
-  // --- The notes of the melodic staff ------------------------------------------------------------
+  // --- The handwriting on the page ---------------------------------------------------------------
   //
-  // NOTE TO A CONCURRENT WRITER: this region is self-contained and is deliberately placed AFTER the
-  // cue operations and BEFORE the ink ones, so that it touches neither `setBarMark`'s neighbour
-  // (where the meter of a bar was added) nor anything above it. Every method and helper it needs
-  // is inside it; nothing outside it was changed to make room.
-  //
-  // `note.insert`, `note.update` and `note.delete` have been in the catalogue since the melodic
-  // staff was modelled, with a codec, a reducer and identity coverage (A51), and until these
-  // methods existed NOTHING appended one: `Bar.melody` was a list no surface could write, while the
-  // painter had a staff to draw it on (A57). They are here, next to the one writer, for the same
-  // reason the form, repeat, mark and cue operations are (A35, A38, A41, A48): an operation a
-  // musician needs must have an event to carry it, and an event must be written through [apply] so
-  // that the log, the inverse and the undo stack stay one mechanism.
-  //
-  // WHY A MELODY NOTE IS ADDRESSED EXACTLY LIKE A CHORD. A note is placed at `(beat, step)` — the
-  // same cell, and the same order-within-the-cell, that a chord uses — because that is what lets one
-  // tap name the same place on the chord line and on the staff, and it is why `EventAnchor` carries
-  // both numbers for both. Nothing here derives a note's position from a page coordinate: the caller
-  // names the cell, the reducer places the note in it, and the engraver is the only thing that turns
-  // either into a y position.
-  //
-  // WHY THE WHOLE NOTE IS CARRIED ON EVERY SIDE. As in [setBarMark] and the cue methods, each event
-  // in this family carries the complete value it replaces and the complete value it writes — a
-  // `NoteMark` with its pitch, its written value, its tie AND its address — so its inverse is a swap
-  // and not a reconstruction. A delta would have to be replayed against whatever the bar holds when
-  // the undo arrives, and the bar may have been changed by another edit, by the undo of a different
-  // event, or by another device in between.
-  //
-  // WHY `step` EXISTS AND WHAT IT IS FOR. Several notes may share one beat — a chord in the melody,
-  // or two voices — and the reducer keeps them a DENSE sequence: an insertion at a step pushes the
-  // notes already AT OR AFTER that step one place up, the cell is then sorted by `(beat, step)`, and
-  // a deletion closes the gap (see `_withNoteInserted` and `_withNoteRemoved` in
-  // `document_reducer.dart`).
-  //
-  // `step` IS THE ORDER OF THE CELL IN TIME, AND IT IS NOT A PITCH. It is an ordinal — 0 for the
-  // first note of the beat, 1 for the second — and the engraver draws it as one: `_notesOf` places
-  // the note at `cellX + step * stride`, so step 0 is the LEFTMOST note of the cell and a higher
-  // step is a later one. The staff has a second number that is also called `step` and is a different
-  // thing entirely — the DIATONIC STAFF STEP of a pitch, from `melodyStepOf`, 0 meaning E4 on a
-  // treble staff. That one decides how HIGH a notehead is drawn and this one decides how far RIGHT
-  // it is drawn, so confusing them makes the writer look wrong when the engraver is and the other way
-  // round: both are stated here because their names alone do not tell them apart.
-  //
-  // WHY THE DEFAULT IS NOW "AFTER THE LAST NOTE OF THE CELL" AND WAS "AT THE FRONT OF IT". The
-  // reducer pushes a cell's later notes up when something is inserted before them, which is right
-  // for an insertion at an address a caller names. It was also the DEFAULT, and that made the
-  // ordinary gesture wrong: a musician writing four sixteenths into one beat inserts four times, and
-  // an insert at step 0 makes each new note the FIRST of the cell — so C then D then E then F came
-  // out F, E, D, C, and since the engraver draws step order left to right, the page showed the run
-  // right to left while the musician had written it left to right. The measurement is A75's
-  // `probe.writer.model bar=0 0.0:F4 0.1:E4 0.2:D4 0.3:C4` against the typed C D E F. The default is
-  // therefore the APPEND, and a caller that wants a note in front of the cell's others says
-  // `step: 0` — which is the same distinction the note palette already draws between its "New note"
-  // row and the row of a note already written.
+  // `ink.stroke.add` and `ink.stroke.delete` are the catalogue's two ink events, and these are the
+  // methods that append them. They are here, next to the one writer, for the same reason the cue
+  // operations are: an operation a musician needs must have an event to carry it, and an event must
+  // be written through [apply] so that the log, the inverse and the undo stack stay one mechanism.
 
-  // PURPOSE: Report every note a bar carries, in the order it is drawn, so a surface can list what is
-  //          there and name which of them an edit acts on.
-  // INPUTS: sectionId and barIndex — the bar, in the model's own address.
-  // OUTPUTS: The bar's notes ordered by x, as a fresh list a caller may keep. Empty when the bar
-  //          holds none or the address names no bar.
-  //
-  //          THE WHOLE BAR AND NOT A WINDOW OF IT, which is the difference a coordinate model makes.
-  //          A palette used to list "the notes of this beat" because a beat was the unit of address;
-  //          now that a note's address IS its place, the honest list is the bar's melody in reading
-  //          order, with the note the musician pointed at marked among them. Two notes at one x are
-  //          both returned — a chord in the melody is several marks at one place — and nothing is
-  //          filtered by a tolerance, so an edit that moves a note a pixel cannot make it vanish from
-  //          the list it was chosen from.
-  // KEYWORDS: melody, note-list, reading-order, coordinate, order-by-x, whole-bar
+  // WHY A STROKE IS APPENDED AS A WHOLE VALUE. `ink.stroke.add` carries the complete stroke — its
+  // anchor, its points, its width and its colour — so its inverse is a deletion of that value and an
+  // undo restores the ink exactly, without reconstructing anything from what the document happens to
+  // hold when the undo arrives.
+
+  // PURPOSE: Remove one stroke from the page, which is the edit the eraser makes.
+  // INPUTS: id — the stroke to remove, as the eraser named it from the page on screen.
+  // OUTPUTS: True when a deletion was appended, false when the document holds no stroke with that id
+  //          — which is the ordinary answer for a second erase of the same stroke, and the reason the
+  //          return value is not an error: an eraser that crosses a stroke already taken must not
+  //          report a failure.
+  // KEYWORDS: ink, stroke, erase, delete, whole-value, undoable, no-op-refusal
   /// Removes the stroke with [id], reporting whether the document held one.
   bool eraseStroke(String id) {
     final int index = _document.strokes.indexWhere(
@@ -739,24 +640,4 @@ class EditSession {
     apply(SongUpdateEvent(docId: _docId, seq: _seq, from: from, to: to));
     return true;
   }
-
-  // PURPOSE: Turn the melodic staff on or off — the musician's own switch over the one thing owner
-  //          decision D29 says must be his to choose, and the whole of what D25 asks for here.
-  // INPUTS: on — whether the chart declares a pitched staff. clef — the clef the staff is engraved
-  //         in when it is turned on, defaulting to treble; it is ignored when [on] is false.
-  // OUTPUTS: True when a `staff.set` event was appended, false when the chart already declares what
-  //          was asked for, which is the no-op rule every other edit here follows ([updateSong],
-  //          [setBarMark], [setVolta]): an event whose two sides are equal is a log row that changed
-  //          nothing and an offer to undo an edit that did not happen.
-  //
-  //          THE PERCUSSION SLOT IS LEFT ALONE, deliberately: this switch is the melodic staff's, and
-  //          turning the melody off must not take a drum part with it. It is restored exactly as it
-  //          was, so undoing a toggle cannot invent or lose a staff.
-  //
-  //          WHY SWITCHING IT OFF IS NOT A DESTRUCTIVE OPERATION ON THE MUSIC. `Bar.melody` is
-  //          untouched: the notes stay in the document, the engraver stops reserving their band, and
-  //          turning the staff back on draws every one of them again. That is what makes this a
-  //          view of the chart rather than a deletion from it, and it is why there is no
-  //          confirmation step.
-  // KEYWORDS: staff, staves, melody-staff, toggle, declared-staff, no-op-refusal, undoable, d25, d29
 }

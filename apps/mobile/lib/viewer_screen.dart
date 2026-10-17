@@ -3605,20 +3605,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          page's own coordinates first, so a fitted page is hit where it is DRAWN rather than
   //          where it was engraved.
   //
-  //          THE STAFF IS TESTED FIRST, AND THAT IS THE WHOLE OF "TOUCH A BEAT OF THE STAFF TO WRITE
-  //          ITS NOTE". A bar's staff lies BELOW its chord-line rectangle, so the two surfaces never
-  //          overlap and the order between them cannot change what a chord-line tap means: a point
-  //          on the chord line is answered by [hitTestPage] exactly as it was, and a point on the
-  //          five lines is answered by [hitTestMelodyStaff]. A touch that lands on a staff column
-  //          opens the note palette for that beat immediately, which is the shortest path owner
-  //          decision D28 asks for: the beat is named by the column the musician touched — and the
-  //          beat captions under the staff say which number it is — rather than by a tap on the bar
-  //          and then a tap on a word in the selection line.
-  //
-  //          WHY IT DOES NOT WAIT FOR A SECOND TAP. The staff has no other meaning: nothing on it is
-  //          selectable for its own sake, so a single tap cannot be ambiguous, and a double tap
-  //          would add a gesture nothing on screen mentions. The chord line keeps its own single tap
-  //          for selection and its own two named actions.
+  //          THE BAR IS THE ONLY SURFACE, AND THAT IS THE WHOLE OF WHAT A TAP MEANS HERE. A tap on the
+  //          page names the bar whose rectangle it landed in, by [hitTestPage], and nothing else on
+  //          the page is a target: there is no staff below the chords in this build and no note to
+  //          write on one, so a point below a bar names nothing at all. The point inside the bar is
+  //          carried in the answer, which is what a later editing stage would need; no stage of this
+  //          build acts on it.
   // INPUTS: page — the page the tap landed on. localPosition — the point in the page widget's own
   //         coordinate space, which is the surface the painter scaled into.
   // OUTPUTS: Nothing. Sets [_selection] to the hit, or to null when the tap missed every bar; a miss

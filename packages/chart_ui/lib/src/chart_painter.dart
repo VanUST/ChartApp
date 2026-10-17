@@ -1,44 +1,50 @@
-// PURPOSE: Draw one laid-out page of a chart so that a reader can be compared against the
-//          application a file came from. That comparison is the whole job of this renderer: it is
-//          a READING renderer, not a finished engraver, and it favours showing every symbol the
-//          model carries over matching iReal Pro's spacing or glyph shapes.
+// PURPOSE: Draw one laid-out page of a chart so that a musician reading a part at a stand can find
+//          the bars, the sections, the repeats and the chords without looking away from the music.
+//          That comparison against the application a file came from is the whole job of this
+//          renderer: it is a READING renderer, not a finished engraver, and it favours showing every
+//          symbol the model carries over matching iReal Pro's spacing or glyph shapes.
 // INPUTS: song — the model the page was laid out from. It is needed because [PageLayout] carries
 //         addresses (`sectionId`, `barIndex`) rather than the bars themselves, and the barlines,
-//         repeat marks and voltas live on the [Bar]. Staff text is the exception: the layout
-//         publishes its display form and measured box on [PlacedBar], so the painter draws those
-//         and never reads `Bar.staffText`. A bar's CHORD SYMBOLS are an exception of the same kind
-//         and for the same reason: the layout renders and measures each one and publishes the
-//         words and the box on [PlacedBar.chords], so this painter draws the string it was handed
-//         and never spells a chord itself. page — the [PageLayout] to draw.
+//         repeats and voltas live on the [Bar]. Everything with WORDS or a BOX is the layout's
+//         exception and not this painter's work: the chords, the signs, the staff text and the
+//         alternative-ending brackets all arrive on [PageLayout] already rendered and measured, so
+//         the painter draws the string or fills the box it was handed and never spells a chord,
+//         decides a position or measures a phrase itself. page — the [PageLayout] to draw, whose
+//         `header` is the chart's opening key-and-meter line on the first page and null after it.
 //         metrics — the same [FlutterTextMetrics] the layout was measured with, so drawn text
-//         lands in the box the engine reserved. selection — the bar and cell a musician touched, or
+//         lands in the box the engine reserved. selection — the bar a musician touched, or
 //         null; it is what makes an interaction visible rather than only logged.
 // OUTPUTS: [paint] writes into the canvas and returns nothing. A page whose bars cannot be
 //          resolved against the song still draws its barlines, so a missing bar is visible as an
 //          empty measure rather than as a gap.
-// KEYWORDS: chart-renderer, custom-painter, barline, repeat, volta, chord-symbol, reader
+// KEYWORDS: chart-renderer, custom-painter, barline, repeat, volta, chord-symbol, simile, segno,
+//           coda, fermata, staff-text, chart-header, meter-sign, reader
 //
-// WHAT THIS RENDERER DRAWS, AND WHAT IT NO LONGER DRAWS. The page is a chord chart: the section
-// heading a system begins, the bars' barlines with the repeat signs their models name, and the
-// chord symbols written in each bar. That is the whole of it.
+// WHAT THIS RENDERER DRAWS, AND WHY EACH THING IS HERE. The page is a chord chart read at a stand, so
+// it draws what a musician has to find while playing: the chart's key and opening meter where its
+// music begins; the section heading a system begins; the bars' barlines with the repeat signs their
+// models name; the alternative-ending brackets, with their figures; the chord symbols written in each
+// bar, at the beat the bar puts them on; and the marks a musician reads as instructions — the
+// repeat-previous simile sign, the slash repeat, `N.C.`, the segno, the coda, the fermata, and the
+// words the file wrote on the bar (`Solo`, `х4`, `проигрыш`).
 //
-// THE SIGNS THAT ARE NOT HERE WENT WITH THE OWNER'S CUT BACK TO BASICS, and this list is written
-// down so that a reader of an old screenshot does not conclude that the renderer is broken: the
-// repeat-previous `%`, the slash repeat, `N.C.`, the volta bracket, the segno, the coda, the
-// fermata, the player's ending, the meter sign and the chart's opening key-and-meter line are all
-// absent, because every one of them belonged to a feature whose ENTRY was removed and whose
-// remaining data would be a feature that cannot be edited or explained on the page. They live in
-// the history (`docs/sdd.md` A83) and are not hidden behind a flag.
+// THE SIGNS THAT NEED A MUSIC GLYPH ARE DRAWN AS SHAPES, AND THAT IS THE ONE RULE THIS RENDERER KEEPS
+// FROM THE MUSIC FONT IT NEVER HAD. There is no music font here and none is planned, so a segno could
+// be approximated by an `S` and a coda by a `C` — and a letter a musician has to guess at is worse
+// than nothing (A68), because `C` on a chart means a section, not a coda. So the simile sign, the
+// slash, the segno, the coda and the fermata are DRAWN: a diagonal stroke with two dots, a slash, an
+// S-curve cut by a stroke with a dot either side, a circled cross, an arc over a dot. They are the
+// shapes an engraver cuts, they scale with the page, and none of them can be confused with a letter
+// the chart wrote.
 //
-// NOTHING IS DRAWN AS A STAND-IN GLYPH, and that is the one rule this renderer keeps from the music
-// font it never had. There is no music font here and none is planned, so a shaped symbol — a segno,
-// a coda, a repeat-percent sign — would have to be approximated by an ASCII stand-in, and a
-// fallback glyph that a musician has to guess at is worse than nothing. A chord symbol is not such
-// a case: it is TEXT, written by the chart in the Latin letters and accidentals a chart uses
-// (`F#h`, `A/C#`, `Cb`), so it is drawn exactly as it was written and nothing is substituted.
+// A CHORD SYMBOL IS NOT SUCH A CASE: it is TEXT, written by the chart in the Latin letters and
+// accidentals a chart uses (`F#h`, `A/C#`, `Cb`), so it is drawn exactly as it was written and
+// nothing is substituted. Barlines ARE drawn as lines, because the model names them exactly (single,
+// double, repeat start, repeat end, final) and lines carry that distinction without a font.
 //
-// Barlines ARE drawn as lines, because the model names them exactly (single, double, repeat start,
-// repeat end, final) and lines carry that distinction without a font.
+// NOTHING HERE IS A CONTROL. The page is a reading surface with no hit target on a symbol: the only
+// thing drawn in response to the musician is the highlight on the bar a tap named, and it is drawn
+// under the music so it does not hide anything.
 
 import 'package:chart_core/chart_core.dart';
 import 'package:flutter/rendering.dart';
@@ -115,10 +121,15 @@ class ChartPainter extends CustomPainter {
     if (scale != 1) {
       canvas.scale(scale, scale);
     }
-    // The chart's own opening statement is gone with the header; the page now begins with the
-    // first system's section letter.
+    // The chart's own opening statement: what key it is in and what meter its first bar counts.
+    // Drawn before anything else, in the band the layout reserved in the page's top margin, so the
+    // first thing a reader meets is what the music is written in.
+    _paintChartHeader(canvas);
     for (final PlacedSystem system in page.systems) {
       _paintSectionLabel(canvas, system);
+      for (final PlacedVolta volta in system.voltas) {
+        _paintVolta(canvas, volta);
+      }
       for (int index = 0; index < system.bars.length; index++) {
         _paintBar(canvas, system.bars[index], firstInSystem: index == 0);
       }
@@ -126,21 +137,66 @@ class ChartPainter extends CustomPainter {
     canvas.restore();
   }
 
-  // PURPOSE: State on the page, before any music, what key and meter the chart is written in — the
-  //          one thing a musician holding the chart at a stand could not see, because the key lived
-  //          in the scene bar and the meter appeared only on a bar that changed it.
+  // PURPOSE: State on the page, before any music, what key the chart is in and what meter its music
+  //          opens in — the two facts a musician holding the chart at a stand has to know before the
+  //          first chord means anything, and the two the page could not tell him at all.
   // INPUTS: canvas — the target.
-  // OUTPUTS: Nothing. Draws the published words in the band the layout reserved for them, or nothing
-  //          at all on a page that carries no header, which is every page after the first.
+  // OUTPUTS: Nothing. Draws the published words at the top-left of the band the layout reserved for
+  //          them, and draws nothing at all on a page with no header, which is every page after the
+  //          first.
   //
-  //          IT IS DRAWN IN THE CHORD'S OWN STYLE AND INK, not in the section letter's. The key and
-  //          the meter are NOTATION — they mean exactly what a chord symbol means, in the same
-  //          language — while a section letter is a heading this application puts on a page. Two
-  //          left-aligned lines one above the other must not read as one heading in two rows, and
-  //          the ink does the distinguishing: the darkest ink for the notation, the blue of a
-  //          heading for the heading. The band's height was measured in this same role, so the line
-  //          the page gave up and the line drawn are the same number.
-  // KEYWORDS: chart-header, key, meter, notation, draw-order, one-band, d27
+  //          IT IS DRAWN IN THE CHORD'S OWN STYLE AND INK, not in the section letter's. The key and the
+  //          meter are NOTATION — they mean exactly what a chord symbol means, in the same language —
+  //          while a section letter is a heading this application puts on a page. Two left-aligned
+  //          lines, one above the other, must not read as one heading in two rows, and the ink does
+  //          the distinguishing: the darkest ink for the notation, the blue of a heading for the
+  //          heading. The band's height was measured in this same role, so the line the page gave up
+  //          and the line drawn are the same number.
+  // KEYWORDS: chart-header, key, meter, notation, draw-order, one-band
+  void _paintChartHeader(Canvas canvas) {
+    final PlacedChartHeader? header = page.header;
+    if (header == null) {
+      return;
+    }
+    _paintText(
+      canvas,
+      header.text,
+      Offset(header.bounds.left, header.bounds.top),
+      metrics.chordStyle,
+    );
+  }
+
+  // PURPOSE: Draw one alternative-ending bracket over the bars it covers, with its figure, so a
+  //          musician can see which ending he is in and where it ends.
+  // INPUTS: canvas — the target. volta — the run's horizontal span and the band reserved for it.
+  // OUTPUTS: Nothing. Draws a horizontal line along the top of the span, a short descender at each
+  //          end — the left one is what says where the bracket BEGINS — and the figure under the line
+  //          at the left, in the staff-text style.
+  //
+  //          WHY IT IS DRAWN AND NOT SET. A first-ending bracket is a line with a figure in it, and the
+  //          figure is a digit the font has; the line is not a character in any font, so it is drawn.
+  //          An unnumbered bracket (`Volta.number == 0`, which iReal writes as `N0`) draws the line and
+  //          no figure, which is exactly what it means.
+  // KEYWORDS: volta, ending, bracket, first-ending, second-ending, drawn-sign, unnumbered
+  void _paintVolta(Canvas canvas, PlacedVolta volta) {
+    final LayoutRect band = volta.bounds;
+    final double top = band.top + 1;
+    final double left = band.left;
+    final double right = band.right;
+    const double descender = 4;
+    canvas.drawLine(Offset(left, top), Offset(right, top), _thin);
+    canvas.drawLine(Offset(left, top), Offset(left, top + descender), _thin);
+    canvas.drawLine(Offset(right, top), Offset(right, top + descender), _thin);
+    if (volta.number > 0) {
+      _paintText(
+        canvas,
+        '${volta.number}.',
+        Offset(left + 3, top + 1),
+        metrics.staffTextStyle,
+      );
+    }
+  }
+
   // PURPOSE: Report whether a new painter changes anything on screen.
   // INPUTS: oldDelegate — the painter this one replaces.
   // OUTPUTS: True when the page, the song, the metrics, the tapped bar or a colour differ.
@@ -229,20 +285,25 @@ class ChartPainter extends CustomPainter {
     );
   }
 
-  // PURPOSE: Draw one bar: its bounding barlines and the chord symbols written in it.
-  // INPUTS: canvas — the target. placed — the bar and its rectangle. firstInSystem — whether this
-  //         bar opens its system, which decides whether its opening barline needs drawing.
+  // PURPOSE: Draw one bar: its bounding barlines, the signs it carries, the words written on it and
+  //          the chord symbols written in it.
+  // INPUTS: canvas — the target. placed — the bar and its rectangle, with its chords, its signs and
+  //         its staff text already measured and placed. firstInSystem — whether this bar opens its
+  //         system, which decides whether its opening barline needs drawing.
   // OUTPUTS: Nothing. A bar whose address does not resolve in the song still draws its bounding
   //          barlines, so the measure is visible as empty rather than as missing; and a bar that
   //          resolves but holds no chord draws NOTHING in its chord row, which is the honest
   //          picture of a bar whose chord sustains from the one before it.
   //
-  //          THE CHORDS GO ON TOP OF THE LINES, in the order the layout published them. A symbol
-  //          whose stored x is close to the bar's left edge therefore overlaps the opening barline
-  //          and stays readable, where drawing it underneath would cut the first character of the
-  //          first chord of a bar — which is the one character that names the harmony.
-  // KEYWORDS: bar, barline, chord-symbol, opening, closing, draw-order, no-chord-drawn-nothing,
-  //           null-safe
+  //          THE DRAW ORDER IS: lines, then signs and words, then chords. The chords go last and on
+  //          top of everything, because a symbol whose stored x is close to the bar's left edge
+  //          overlaps the opening barline and has to stay readable: drawing it underneath would cut
+  //          the first character of the first chord of a bar, which is the one character that names
+  //          the harmony. A sign is never drawn over the chords — the layout gives it the lane the
+  //          chord row leaves — so the order between those two is not a conflict, it is a
+  //          consequence of the placement.
+  // KEYWORDS: bar, barline, chord-symbol, sign, staff-text, opening, closing, draw-order,
+  //           no-chord-drawn-nothing, null-safe
   void _paintBar(
     Canvas canvas,
     PlacedBar placed, {
@@ -276,9 +337,265 @@ class ChartPainter extends CustomPainter {
       bar?.closingBarline ?? Barline.single,
     );
 
+    for (final PlacedBarSign sign in placed.signs) {
+      _paintSign(canvas, sign);
+    }
+    for (final PlacedStaffText line in placed.staffText) {
+      _paintText(
+        canvas,
+        line.text,
+        Offset(line.bounds.left, line.bounds.top),
+        metrics.staffTextStyle,
+      );
+    }
     for (final PlacedChord chord in placed.chords) {
       _paintChord(canvas, chord);
     }
+  }
+
+  // PURPOSE: Draw one of a bar's signs — the one kind that is written as words, and the five that are
+  //          drawn as shapes — in the box the layout placed it in.
+  // INPUTS: canvas — the target. sign — its kind, its words for the written kinds and the square or
+  //         measured box it occupies.
+  // OUTPUTS: Nothing. `N.C.` and a meter such as `3/4` are drawn as text in the style the layout
+  //          measured them with; the simile mark, the slash repeat, the segno, the coda and the
+  //          fermata are drawn as geometry inside the square.
+  //
+  //          WHY EACH SHAPE IS THE SHAPE IT IS, since a drawn sign has no font to answer for it:
+  //            * THE SIMILE MARK is a diagonal stroke with a dot on either side — the two-measure form
+  //              puts a second stroke through it, which is the whole difference between "play that bar
+  //              again" and "play those two bars again";
+  //            * THE SLASH REPEAT is a single heavy slash, the mark a chart uses for "keep comping";
+  //            * THE SEGNO is an S-curve cut by a diagonal stroke with a dot on each side of it;
+  //            * THE CODA is a circle with a cross through it, the arms reaching past the ring;
+  //            * THE FERMATA is an arc over a dot.
+  //          All five are the shapes an engraver cuts. None of them is a letter, which is the point:
+  //          `S` and `C` are what a chart writes for a SECTION, and a section letter that means a coda
+  //          is worse than a blank because it reads.
+  // KEYWORDS: bar-sign, simile, repeat-previous-two-bars, slash-repeat, no-chord, segno, coda,
+  //           fermata, meter-sign, drawn-geometry
+  void _paintSign(Canvas canvas, PlacedBarSign sign) {
+    final LayoutRect box = sign.bounds;
+    switch (sign.kind) {
+      case BarSignKind.noChord:
+        _paintText(
+          canvas,
+          sign.text,
+          Offset(box.left, box.top),
+          metrics.chordStyle,
+        );
+      case BarSignKind.meterChange:
+        _paintText(
+          canvas,
+          sign.text,
+          Offset(box.left, box.top),
+          metrics.staffTextStyle,
+        );
+      case BarSignKind.repeatPreviousOneBar:
+        _paintSimile(canvas, box, strokes: 1);
+      case BarSignKind.repeatPreviousTwoBars:
+        _paintSimile(canvas, box, strokes: 2);
+      case BarSignKind.slashRepeat:
+        _paintSimile(canvas, box, strokes: 1, withDots: false);
+      case BarSignKind.segno:
+        _paintSegno(canvas, box);
+      case BarSignKind.coda:
+        _paintCoda(canvas, box);
+      case BarSignKind.fermata:
+        _paintFermata(canvas, box);
+    }
+  }
+
+  // PURPOSE: Draw the repeat-previous simile mark — one or two diagonal strokes through a box with a
+  //          dot at either side — which is how a chart says "play the bar again" or "play the last two
+  //          bars again" without writing the music out.
+  // INPUTS: canvas — the target. box — the square the sign occupies. strokes — 1 for the one-bar form
+  //         and 2 for the two-bar form. withDots — whether the two dots are drawn; the slash repeat
+  //         uses the same strokes with none, because a slash is not a simile mark.
+  // OUTPUTS: Nothing. The strokes run from the bottom-left to the top-right of the box, which is the
+  //          direction of a written `%` and the reason the mark reads at a glance; the dots sit in the
+  //          upper-left and lower-right corners the stroke leaves free. A box too small to hold two
+  //          dots still draws its strokes, so a bar of an unusual height shows the mark rather than
+  //          nothing.
+  // KEYWORDS: simile, repeat-previous, percent-sign, two-bars, dots, slash, drawn-mark
+  void _paintSimile(
+    Canvas canvas,
+    LayoutRect box, {
+    required int strokes,
+    bool withDots = true,
+  }) {
+    final double inset = box.size.width * 0.18;
+    final double left = box.left + inset;
+    final double right = box.right - inset;
+    final double top = box.top + inset * 0.6;
+    final double bottom = box.bottom - inset * 0.6;
+    if (strokes == 1) {
+      canvas.drawLine(Offset(left, bottom), Offset(right, top), _thin);
+    } else {
+      // TWO PARALLEL STROKES, which is the two-measure form and not a second symbol: a musician reads
+      // the doubling as "twice as much music", the same way he reads a double barline as a boundary.
+      canvas.drawLine(Offset(left, bottom), Offset(right, top), _thin);
+      canvas.drawLine(
+        Offset(left, top + (bottom - top) * 0.15),
+        Offset(left + (right - left) * 0.55, bottom),
+        _thin,
+      );
+      canvas.drawLine(
+        Offset(left + (right - left) * 0.45, top),
+        Offset(right, top + (bottom - top) * 0.85),
+        _thin,
+      );
+    }
+    if (!withDots) {
+      return;
+    }
+    final double radius = (box.size.width * 0.09).clamp(1.0, 2.2);
+    canvas.drawCircle(
+      Offset(left + (right - left) * 0.18, top + (bottom - top) * 0.18),
+      radius,
+      _thin,
+    );
+    canvas.drawCircle(
+      Offset(left + (right - left) * 0.82, top + (bottom - top) * 0.82),
+      radius,
+      _thin,
+    );
+  }
+
+  // PURPOSE: Draw a segno sign — the mark that says where a `D.S.` returns to — as an S-shaped curve
+  //          cut by a diagonal stroke, with a dot on either side of the stroke.
+  // INPUTS: canvas — the target. box — the square the sign occupies.
+  // OUTPUTS: Nothing. Two counter-curving arcs form the S, one stroke crosses it from lower-left to
+  //          upper-right, and two dots sit clear of the curve at the stroke's ends. A degenerate box
+  //          draws a single dot rather than a curve with no extent, so a sign given no room is still
+  //          visibly present rather than silently missing.
+  // KEYWORDS: segno, dal-segno, drawn-glyph, s-curve, dots, no-font
+  void _paintSegno(Canvas canvas, LayoutRect box) {
+    final double size = box.size.width < box.size.height
+        ? box.size.width
+        : box.size.height;
+    if (size <= 0) {
+      return;
+    }
+    final Offset centre = Offset(
+      box.left + box.size.width / 2,
+      box.top + box.size.height / 2,
+    );
+    final double half = size / 2;
+    final Paint stroke = _thin
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    // The S: an upper arc opening left and a lower arc opening right.
+    final Path s = Path()
+      ..moveTo(centre.dx + half * 0.45, centre.dy - half * 0.85)
+      ..cubicTo(
+        centre.dx - half * 0.75,
+        centre.dy - half * 0.85,
+        centre.dx - half * 0.75,
+        centre.dy - half * 0.1,
+        centre.dx - half * 0.05,
+        centre.dy - half * 0.05,
+      )
+      ..cubicTo(
+        centre.dx + half * 0.7,
+        centre.dy,
+        centre.dx + half * 0.7,
+        centre.dy + half * 0.85,
+        centre.dx - half * 0.45,
+        centre.dy + half * 0.85,
+      );
+    canvas.drawPath(s, stroke);
+    // The stroke through it, and the two dots at its ends.
+    canvas.drawLine(
+      Offset(centre.dx - half * 0.9, centre.dy + half * 0.55),
+      Offset(centre.dx + half * 0.9, centre.dy - half * 0.55),
+      stroke,
+    );
+    final Paint dot = _thin;
+    final double radius = (size * 0.08).clamp(0.8, 1.8);
+    canvas.drawCircle(
+      Offset(centre.dx - half * 0.72, centre.dy - half * 0.72),
+      radius,
+      dot,
+    );
+    canvas.drawCircle(
+      Offset(centre.dx + half * 0.72, centre.dy + half * 0.72),
+      radius,
+      dot,
+    );
+  }
+
+  // PURPOSE: Draw a coda sign — the mark that says where a `To Coda` jump lands — as a ring with a
+  //          cross through it.
+  // INPUTS: canvas — the target. box — the square the sign occupies.
+  // OUTPUTS: Nothing. The ring is inscribed in the box and the cross's arms reach past it, which is
+  //          what distinguishes a coda from a target or a circled letter.
+  // KEYWORDS: coda, to-coda, drawn-glyph, ring, cross, no-font
+  void _paintCoda(Canvas canvas, LayoutRect box) {
+    final double size = box.size.width < box.size.height
+        ? box.size.width
+        : box.size.height;
+    if (size <= 0) {
+      return;
+    }
+    final Offset centre = Offset(
+      box.left + box.size.width / 2,
+      box.top + box.size.height / 2,
+    );
+    final double radius = size * 0.32;
+    final Paint stroke = _thin
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    canvas.drawCircle(centre, radius, stroke);
+    final double arm = size / 2;
+    canvas.drawLine(
+      Offset(centre.dx - arm, centre.dy),
+      Offset(centre.dx + arm, centre.dy),
+      stroke,
+    );
+    canvas.drawLine(
+      Offset(centre.dx, centre.dy - arm),
+      Offset(centre.dx, centre.dy + arm),
+      stroke,
+    );
+  }
+
+  // PURPOSE: Draw a fermata — the sign that says "hold this" — as a semicircular arc over a dot.
+  // INPUTS: canvas — the target. box — the square the sign occupies.
+  // OUTPUTS: Nothing. The arc opens downward and the dot sits under its crown, which is the shape
+  //          every musician recognises; a box too short for both still draws the arc, because a
+  //          fermata without its dot is still a fermata and a fermata not drawn is a lost hold.
+  // KEYWORDS: fermata, hold, drawn-glyph, arc, dot, no-font
+  void _paintFermata(Canvas canvas, LayoutRect box) {
+    final double size = box.size.width < box.size.height
+        ? box.size.width
+        : box.size.height;
+    if (size <= 0) {
+      return;
+    }
+    final Offset centre = Offset(
+      box.left + box.size.width / 2,
+      box.top + box.size.height / 2,
+    );
+    final double radius = size * 0.38;
+    final Paint stroke = _thin
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    canvas.drawArc(
+      Rect.fromCircle(
+        center: Offset(centre.dx, centre.dy + radius * 0.25),
+        radius: radius,
+      ),
+      3.14159,
+      3.14159,
+      false,
+      stroke,
+    );
+    canvas.drawCircle(
+      Offset(centre.dx, centre.dy + radius * 0.55),
+      (size * 0.09).clamp(0.8, 1.8),
+      _thin,
+    );
   }
 
   // PURPOSE: Draw one chord symbol in the box the layout reserved for it and in the spelling the

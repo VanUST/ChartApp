@@ -14,16 +14,17 @@
 //          the check that would have caught both: an answer derived from a rectangle can be checked
 //          against that rectangle, and an answer derived from anything else cannot.
 //
-//          IT COVERS BOTH SURFACES OVER THE SAME BARS, and the two are the owner's rule made
-//          geometry: `hitTestPage` answers for the chord band, which is the bar's own rectangle;
-//          `hitTestMelodyStaff` answers for the staff below it; and a point below the staff is over
-//          neither. There are no columns in either answer — a hit carries the point in the bar's own
+//          ONE SURFACE, ONE ANSWER. The owner's rule named three bands — above the staff a chord, on
+//          the staff a note, below the bar neither — and this build carries only the first: the bars
+//          and their chord rows, with the staff and the notes removed. So `hitTestPage` answers for
+//          the bar's own rectangle and for nothing else, and a point below a bar names nothing.
+//          There are no columns in the answer either — a hit carries the point in the bar's own
 //          coordinates, which is the frame a mark's place is written in.
 // INPUTS: None.
 // OUTPUTS: Pass/fail per behaviour, plus `hit ...` and `hit.staff ...` lines on stdout naming the
 //          point tested and the address it returned.
 // KEYWORDS: test, hit-testing, round-trip, page-scale, fit, edge-case, hand-derived, evidence,
-//           melody-staff, chord-band, no-grid, tap-names-the-bar
+//           chord-band, no-grid, tap-names-the-bar
 import 'dart:io';
 
 import 'package:chart_core/chart_core.dart';
