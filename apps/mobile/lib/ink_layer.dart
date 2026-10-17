@@ -333,6 +333,40 @@ class InkCaptureLayer {
   bool get lastEraseRejectedRecognition => _lastEraseRejectedRecognition;
   bool _lastEraseRejectedRecognition = false;
 
+  /// The strokes whose notehead a recognition pass ACCEPTED, so that the screen hides exactly the
+  /// handwriting the recognised notes replaced.
+  ///
+  /// IT IS A SET OF IDS AND NOT A GEOMETRIC FILTER, and that is the whole point: the reader already
+  /// decided which ink became a head (the head carries its `strokeIds`), so hiding by distance from
+  /// the head's centre would be a second answer to "which ink is this note" that could drift from
+  /// the gates. The ink stays in the document either way (D37 rule 5); this set only decides what is
+  /// DRAWN while recognition is on, and it is cleared for a stroke the moment the musician rejects
+  /// the note it became.
+  ///
+  /// IT IS SESSION STATE AND NOT THE FILE, AND THAT IS A NAMED LIMIT rather than an oversight: a
+  /// recognised note stores no stroke id (`BeatNote` is the model's own note and has nowhere to put
+  /// one), so after a reload the application knows the notes and the ink but not that they are the
+  /// same mark. The hiding is therefore rebuilt by the whole-page pass when recognition is switched
+  /// on, and a chart reopened with recognition on shows both layers until that pass runs. Storing the
+  /// provenance in the file is a FORMAT change and is the owner's decision, exactly like the single
+  /// "replace this bar's melody" event the writer's own note leaves to him.
+  Set<String> get recognisedNoteStrokeIds => _recognisedNoteStrokes;
+  final Set<String> _recognisedNoteStrokes = <String>{};
+
+  /// The last reading of each bar, so that a tap can name the note a stroke became without reading
+  /// the ink a second time — and so that a rejection can find the head the musician pointed at.
+  final Map<String, MelodyNoteReading> _noteReadings =
+      <String, MelodyNoteReading>{};
+
+  /// The note addresses the musician has REJECTED, as `section \u0000 bar \u0000 beat \u0000 step`.
+  ///
+  /// A rejected note is deleted from the model, which frees its address — so without this set the
+  /// very next pass would read the same ink and write the same wrong note back, and the one-action
+  /// repair would be a joke. It is session state for the same reason the switch is (A73 §7): the
+  /// document has no place for "the musician said no to this". A rejection is forgotten when the ink
+  /// that provoked it is erased, because ink he removed is not a mark he still means.
+  final Set<String> _rejectedNoteAddresses = <String>{};
+
   /// Milliseconds of the last event of any kind that proved a stylus is near the glass.
   ///
   /// Set by a stylus contact AND by a stylus hover, because the second is the whole reason the
@@ -1188,6 +1222,15 @@ class InkCaptureLayer {
     // just wrote has to be one of the neighbours; after the append, because the append is the fact
     // that has to exist whatever recognition decides, and a detector that throws must not be able to
     // lose the ink. With the switch off this is one boolean read and nothing else.
+    //
+    // AND THE NOTE READER'S CALL IS DELIBERATELY ABSENT FROM HERE, WHICH IS A DECISION AND NOT AN
+    // OMISSION. [recogniseMelodyNotes] exists, is measured and works — but it writes `(beat, step,
+    // pitch)` through `note.insert`, and the owner removed that shape as a class: «Запись сама по
+    // себе структурированная единица. Относительное ее положение — нет. Сетка НЕ квантизована».
+    // Wiring it here would put the representation he rejected INTO THE FILE while the replacement is
+    // still being decided, so the call comes back in this one place when the model is settled — and
+    // not before. The reader, its provenance and its gates are untouched by that decision, because
+    // they measure ink and not addresses.
     if (recognitionEnabled) {
       recogniseBarDivisions(page);
     }
@@ -1311,6 +1354,271 @@ class InkCaptureLayer {
     );
     return next;
   }
+
+  // PURPOSE: Read the NOTES out of the ink on [page] and record them as STRUCTURE — the same one
+  //          organ the musician turned on, now reading a second kind of mark.
+  //
+  //          WHY THIS IS THE SAME PASS AS [recogniseBarDivisions] AND NOT A FEATURE BESIDE IT. The
+  //          owner keeps ONE switch for recognition as a whole (RU «Распознавание: ВКЛ/ВЫКЛ»): his
+  //          rule is that a musician whose recognition works badly turns it off and keeps working,
+  //          and two controls would mean two things to turn off and a page that is half-recognised
+  //          with nothing on screen saying which half. So both readers hang off [recognitionEnabled]
+  //          and neither has a switch of its own.
+  //
+  //          WHAT IT WRITES, AND THE HONEST BOUND. One `note.insert` per accepted head, carrying the
+  //          beat the head stands in and its order inside that beat — never a duration, never an
+  //          accidental (see `melody_note_writer.dart`, whose `recognisedNoteValue` carries the whole
+  //          of that reasoning). A note whose address the bar already holds is SKIPPED, so
+  //          recognising the same ink twice writes nothing, and a correction the musician made by
+  //          hand survives the next pass.
+  //
+  //          WHY ONLY ONE BAR WHEN A STROKE IS NAMED. The reader's input is a BAR — its ink, its
+  //          staff frame, its beat columns — so the unit of work is a bar and not a stroke. Reading
+  //          only the bar the new stroke landed in is what makes a pass cost one bar rather than a
+  //          page, and it is also what keeps a rejection durable in every OTHER bar: a pass that
+  //          re-read the whole page on every stroke would re-write every note the musician had
+  //          rejected elsewhere. A stroke whose anchor resolves to no bar costs no read at all.
+  // INPUTS: page — the layout on screen. onlyStrokeId — the stroke whose commit triggered the pass;
+  //         null means every bar of the page, which is what switching recognition on wants.
+  // OUTPUTS: What the pass wrote, as one [MelodyNoteWrite] per bar that had ink: the notes added,
+  //          the addresses already spoken for, and the value each added note carries. The document
+  //          is changed only by the `note.insert` events, and [recognisedNoteStrokeIds] gains the
+  //          ink of every head that now has a note, so the screen hides that ink in the same frame.
+  //          A bar that yields no head is left alone entirely, and nothing is ever deleted.
+  // KEYWORDS: recognition, note-reader, structure-from-ink, op-log-write, one-bar-pass,
+  //           idempotent, off-by-default, d37, d28, a78
+  /// Reads the notes of the page's staff ink and records them through the log.
+  MelodyNoteWrite recogniseMelodyNotes(
+    PageLayout page, {
+    String? onlyStrokeId,
+  }) {
+    // WHICH BAR THE TRIGGERING STROKE BELONGS TO, if the caller named one. The anchor is the address
+    // the ink was stored against, which is the document's own answer to "where is this stroke" and
+    // the same answer the renderer uses, so the bar read here is the bar drawn there.
+    EventAnchor? onlyAnchor;
+    if (onlyStrokeId != null) {
+      for (final InkStroke stroke in _session.document.strokes) {
+        if (stroke.id == onlyStrokeId) {
+          onlyAnchor = stroke.anchor;
+          break;
+        }
+      }
+    }
+    MelodyNoteWrite total = const MelodyNoteWrite.none(recognisedNoteValue);
+    for (final PlacedBar placed in page.bars) {
+      if (onlyAnchor != null &&
+          (onlyAnchor.sectionId != placed.sectionId ||
+              onlyAnchor.bar != placed.barIndex)) {
+        continue;
+      }
+      final String key = _barKey(placed.sectionId, placed.barIndex);
+      final MelodyNoteReading reading = readMelodyNotesOfBar(
+        page: page,
+        strokes: _session.document.strokes,
+        sectionId: placed.sectionId,
+        barIndex: placed.barIndex,
+      );
+      if (reading.heads.isEmpty) {
+        _noteReadings.remove(key);
+        continue;
+      }
+      // THE MUSICIAN'S REJECTIONS ARE APPLIED HERE, in the layer that holds them, rather than inside
+      // the writer: `chart_core` writes what a reading says, and "the musician said no to this
+      // address" is a session decision that the document has nowhere to keep.
+      final List<MelodyNoteHead> accepted = <MelodyNoteHead>[
+        for (final MelodyNoteHead head in reading.heads)
+          if (!_rejectedNoteAddresses.contains(
+            _noteAddressKey(
+              placed.sectionId,
+              placed.barIndex,
+              head.beat,
+              head.orderInBeat,
+            ),
+          ))
+            head,
+      ];
+      final MelodyNoteReading wanted = MelodyNoteReading(
+        sectionId: reading.sectionId,
+        barIndex: reading.barIndex,
+        heads: accepted,
+        refusals: reading.refusals,
+      );
+      final MelodyNoteWrite write = writeRecognisedNotes(
+        session: _session,
+        reading: wanted,
+      );
+      _noteReadings[key] = wanted;
+      // EVERY accepted head whose address the bar now HOLDS is drawn as structure, so its ink is
+      // hidden while recognition is on — whether this pass wrote the note or found it already
+      // written, because either way the note on the page is the structure and not the hand.
+      for (final MelodyNoteHead head in accepted) {
+        if (_session.existingNoteAt(
+              sectionId: placed.sectionId,
+              barIndex: placed.barIndex,
+              beat: head.beat,
+              step: head.orderInBeat,
+            ) ==
+            null) {
+          continue;
+        }
+        _recognisedNoteStrokes.addAll(head.strokeIds);
+      }
+      debugPrint(
+        'note.read section=${placed.sectionId} bar=${placed.barIndex} '
+        'heads=${reading.heads.length} accepted=${accepted.length} '
+        'written=${write.written.length} '
+        'present=${write.alreadyPresent.length} '
+        'refused=${reading.refusals.length} '
+        'ink=${accepted.fold<int>(0, (int sum, MelodyNoteHead head) => sum + head.strokeIds.length)}',
+      );
+      for (final BeatNote note in write.written) {
+        debugPrint(
+          'note.found section=${placed.sectionId} bar=${placed.barIndex} '
+          'beat=${note.beat} step=${note.step} pitch=${note.pitch} '
+          'value=${note.value} accidental=none duration=not-read',
+        );
+      }
+      for (final MelodyNoteRefusal refusal in reading.refusals) {
+        debugPrint(
+          'note.refused section=${placed.sectionId} bar=${placed.barIndex} '
+          'gate=${refusal.reason.token} x=${refusal.x.toStringAsFixed(1)} '
+          'y=${refusal.y.toStringAsFixed(1)}',
+        );
+      }
+      total = MelodyNoteWrite(
+        written: <BeatNote>[...total.written, ...write.written],
+        alreadyPresent: <BeatNote>[
+          ...total.alreadyPresent,
+          ...write.alreadyPresent,
+        ],
+        value: write.value,
+      );
+    }
+    return total;
+  }
+
+  // PURPOSE: Give a recognised note its handwriting back with ONE tap, which is the repair the
+  //          owner's rule puts on a wrong recognition (D37 rule 2) and the exact counterpart of
+  //          [toggleDivisionAt].
+  //
+  //          THE TAP LANDS ON THE HANDWRITING, WHICH IS NOT ON SCREEN, and that is deliberate. With
+  //          recognition on the ink is hidden, so a musician cannot point at it — but he CAN point at
+  //          the wrong note he sees, and the ink that produced it lies under that very spot because
+  //          the structure was drawn where the head was read. The hit test therefore runs against the
+  //          DOCUMENT's strokes, exactly as the eraser's does, and the answer is the same one the
+  //          reader gave: this stroke is part of that head.
+  // INPUTS: page — the layout on screen. surfacePoint — where the musician tapped, in the surface
+  //         logical pixels the hit test speaks.
+  // OUTPUTS: `rejected` when a recognised note was deleted and its ink given back, `rejected-none`
+  //          when the head was found but its address held no note (already undone), or null when the
+  //          tap hit no recognised head at all — in which case the tap goes on to mean a selection.
+  //          The deleted note is one `note.delete` event, so undo puts it back; the INK is never
+  //          touched (D37 rule 5) and the address is remembered so no later pass rewrites it.
+  // KEYWORDS: repair, one-action, reject, note, ink-hit-test, d37, undoable
+  /// Rejects the recognised note on the ink at [surfacePoint], and reports what it did.
+  String? rejectRecognisedNoteAt({
+    required PageLayout page,
+    required LayoutOffset surfacePoint,
+  }) {
+    final List<InkStroke> strokes = _session.document.strokes;
+    if (strokes.isEmpty || _noteReadings.isEmpty) {
+      return null;
+    }
+    final InkEraseHit? hit = hitTestInkErase(
+      strokes: strokes,
+      page: page,
+      surfacePoint: surfacePoint,
+    );
+    if (hit == null) {
+      return null;
+    }
+    for (final MelodyNoteReading reading in _noteReadings.values) {
+      for (final MelodyNoteHead head in reading.heads) {
+        if (!head.strokeIds.contains(hit.stroke.id)) {
+          continue;
+        }
+        final bool deleted = _session.deleteNoteAt(
+          sectionId: reading.sectionId,
+          barIndex: reading.barIndex,
+          beat: head.beat,
+          step: head.orderInBeat,
+        );
+        _rejectedNoteAddresses.add(
+          _noteAddressKey(
+            reading.sectionId,
+            reading.barIndex,
+            head.beat,
+            head.orderInBeat,
+          ),
+        );
+        _recognisedNoteStrokes.removeAll(head.strokeIds);
+        if (deleted) {
+          _documentEdits++;
+        }
+        debugPrint(
+          'note.rejected id=${hit.stroke.id} section=${reading.sectionId} '
+          'bar=${reading.barIndex} beat=${head.beat} step=${head.orderInBeat} '
+          'pitch=${head.pitch} deleted=$deleted '
+          'ink=${head.strokeIds.join('+')} seq=${_session.seq}',
+        );
+        return deleted ? 'rejected' : 'rejected-none';
+      }
+    }
+    return null;
+  }
+
+  /// The address a rejection is filed under: the bar, the beat and the position inside the beat.
+  static String _noteAddressKey(
+    String sectionId,
+    int barIndex,
+    int beat,
+    int step,
+  ) => '$sectionId\u0000$barIndex\u0000$beat\u0000$step';
+
+  // PURPOSE: Let a rejection die with the ink that provoked it, so that a musician who rubs out a
+  //          misread note and draws another at the same place is listened to the second time.
+  // INPUTS: strokeId — the stroke the eraser has just removed from the document.
+  // OUTPUTS: Nothing; the layer's own sets are edited. The stroke leaves
+  //          [recognisedNoteStrokeIds] because there is nothing left to hide, and any address whose
+  //          head was made of that stroke leaves [_rejectedNoteAddresses], which is what makes the
+  //          next pass able to read a fresh mark at that spot. A stroke that was part of no head
+  //          changes nothing, so the eraser stays the tool it was.
+  // KEYWORDS: rejection-lifetime, erase, ink-removed, second-chance, one-action-repair
+  void _forgetErasedNoteInk(String strokeId) {
+    _recognisedNoteStrokes.remove(strokeId);
+    final List<String> forgotten = <String>[];
+    for (final MapEntry<String, MelodyNoteReading> entry
+        in _noteReadings.entries) {
+      for (final MelodyNoteHead head in entry.value.heads) {
+        if (!head.strokeIds.contains(strokeId)) {
+          continue;
+        }
+        _rejectedNoteAddresses.remove(
+          _noteAddressKey(
+            entry.value.sectionId,
+            entry.value.barIndex,
+            head.beat,
+            head.orderInBeat,
+          ),
+        );
+        forgotten.add(
+          '${entry.value.sectionId}#${entry.value.barIndex}'
+          '.${head.beat}.${head.orderInBeat}',
+        );
+      }
+    }
+    if (forgotten.isNotEmpty) {
+      debugPrint(
+        'note.rejection.forgotten ink=$strokeId '
+        'addresses=${forgotten.join(',')} '
+        'rejected=${_rejectedNoteAddresses.length}',
+      );
+    }
+  }
+
+  /// The key a bar's reading is filed under, matching the one the reader builds.
+  static String _barKey(String sectionId, int barIndex) =>
+      '$sectionId\u0000$barIndex';
 
   // PURPOSE: Promote or reject a bar division with ONE tap, which is the repair path the owner's
   //          rule requires for both of the ways recognition can be wrong.
@@ -1634,6 +1942,12 @@ class InkCaptureLayer {
       final bool erased = _session.eraseStroke(hit.stroke.id);
       if (erased) {
         removed.add(hit);
+        // ONLY WHILE NOTES ARE BEING RECOGNISED, so that with the switch off the eraser is exactly
+        // the tool it was: one boolean read and no bookkeeping on the gesture path. The bookkeeping
+        // itself is a set removal and cannot touch the document.
+        if (recognitionEnabled) {
+          _forgetErasedNoteInk(hit.stroke.id);
+        }
       }
       debugPrint(
         'ink.erase.stroke pointer=$pointer order=${index + 1} '

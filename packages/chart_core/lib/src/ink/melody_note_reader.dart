@@ -97,6 +97,7 @@ class MelodyNoteThresholds {
     this.minHeadWidthFraction = 0.5,
     this.maxHeadWidthFraction = 1.7,
     this.minBandHeightFraction = 0.55,
+    this.maxBandHeightFraction = 1.6,
     this.minTaper = 0.15,
     this.bandBridgeSpaces = 0.25,
     this.minInkAreaFraction = 0.12,
@@ -137,6 +138,26 @@ class MelodyNoteThresholds {
   /// a drawn notehead's counted band came to about 0.9 of a head's height, and its hollow form a
   /// little less, because the ring's own stroke is what carries the widest rows.
   final double minBandHeightFraction;
+
+  /// The greatest height of a band of counted rows, as a fraction of a notehead's height.
+  ///
+  /// THE GATE THAT SEPARATES A NOTEHEAD FROM A SLANTED BEAM, and it was added because a measurement
+  /// found the beam being reported as a note. A notehead's counted band is about one head tall — 0.8
+  /// measured on this repository's own engraving, and 0.8 on the same engraving degraded by a heavier
+  /// pen. A beam drawn between two heads at DIFFERENT heights is a slanted parallelogram, and a
+  /// slanted band's rows are each short while the band runs the whole length of the slope: measured
+  /// at 4.1 head heights, with a width of 1.7 heads, which passes every gate above. The reader
+  /// therefore reported a head at the beam's own height — a pitch nobody wrote, which is the one
+  /// failure this feature must not have.
+  ///
+  /// 1.6 IS CHOSEN BETWEEN TWO MEASUREMENTS AND IS NOT ONE OF THE FOUR MEASURED GATES: it is twice the
+  /// tallest real band measured (0.8) and a little over a third of the beam's (4.1). It is stated here
+  /// as invented rather than measured, because a handwritten head has not been measured at all
+  /// (A78 §7) and a hand that draws a head and its stem in one movement could produce a band taller
+  /// than an engraving does. The direction of the error is deliberate: a band past this height is
+  /// REFUSED rather than guessed at, and a refusal costs one note the musician can draw again, while
+  /// a wrong pitch costs him a note he did not write.
+  final double maxBandHeightFraction;
 
   /// The least relative change of width across a band that counts as a TAPER.
   ///
@@ -233,6 +254,10 @@ enum MelodyNoteRejection {
 
   /// The band of counted rows is shorter than a notehead.
   tooThin('too-thin'),
+
+  /// The band of counted rows is taller than a notehead, so it is a slanting beam or a stem with its
+  /// head, not a head on its own. See [MelodyNoteThresholds.maxBandHeightFraction].
+  tooTall('too-tall'),
 
   /// The band does not taper, so it is a rectangle: a beam or a beamlet.
   notTapered('not-tapered'),
@@ -434,10 +459,27 @@ class MelodyNoteHead {
     required this.pitch,
     required this.widthFraction,
     required this.bandFraction,
+    this.strokeIds = const <String>[],
   });
 
   /// The head's horizontal centre, in the frame's coordinates.
   final double x;
+
+  /// The ids of the bar's strokes whose ink became this head, in the order the ink was stamped.
+  ///
+  /// THIS IS THE PROVENANCE THAT MAKES A RECOGNISED NOTE HIDEABLE, and it is the analogue of
+  /// `BarDivision.sourceStrokeId`: a caller that draws the recognised note instead of the handwriting
+  /// has to know WHICH handwriting, and geometry is the wrong place to answer that a second time —
+  /// the strokes are what the reader actually weighed, so their ids are the answer by construction
+  /// rather than by a tolerance that could drift from the gates.
+  ///
+  /// More than one id is ordinary: a notehead and its stem are separate strokes when the musician
+  /// lifted the pen between them, and the component that passed the gates is the union of both.
+  /// A stroke that merely crossed the head's rows without being counted toward its band is NOT in
+  /// this list — only the strokes whose ink the accepted blob is made of. The list is empty for a
+  /// head built by a caller that did not supply provenance (the hand-built frame in a test), and a
+  /// caller must read an empty list as "no ink to hide" rather than as "the whole bar".
+  final List<String> strokeIds;
 
   /// The head's vertical centre, in the frame's coordinates — the number the pitch comes from.
   final double y;
@@ -475,7 +517,8 @@ class MelodyNoteHead {
   String toString() =>
       'MelodyNoteHead($pitch at step $step, beat $beat.$orderInBeat, '
       'x=${x.toStringAsFixed(1)} y=${y.toStringAsFixed(1)}, '
-      'w=${widthFraction.toStringAsFixed(2)})';
+      'w=${widthFraction.toStringAsFixed(2)}, '
+      'ink=${strokeIds.isEmpty ? 'none' : strokeIds.join('+')})';
 }
 
 /// One blob of ink the reader refused, with the gate that refused it.
@@ -648,6 +691,7 @@ class MelodyNoteReader {
           pitch: melodyPitchOfStep(step, clef: frame.clef),
           widthFraction: verdict.widthFraction,
           bandFraction: verdict.bandFraction,
+          strokeIds: blob.strokeIds,
         ),
       );
     }
@@ -696,6 +740,7 @@ class MelodyNoteReader {
           pitch: head.pitch,
           widthFraction: head.widthFraction,
           bandFraction: head.bandFraction,
+          strokeIds: head.strokeIds,
         ),
       );
       order++;
@@ -867,6 +912,7 @@ class _InkBlob {
     required this.width,
     required this.areaPixels,
     required this.widestNib,
+    required this.strokeIds,
   });
 
   /// One entry per occupied row of the component's own box, ascending: the row's y in the frame's
@@ -894,6 +940,14 @@ class _InkBlob {
 
   /// The widest nib among the strokes that made this component.
   final double widestNib;
+
+  /// The ids of the strokes whose ink this component is made of, in stamping order.
+  ///
+  /// It is recorded AS THE INK IS STAMPED rather than looked up afterwards by geometry, because the
+  /// only honest answer to "which handwriting is this note" is "the handwriting that was weighed to
+  /// accept it". A caller can therefore hide exactly that ink and nothing else — see
+  /// [MelodyNoteHead.strokeIds].
+  final List<String> strokeIds;
 
   // PURPOSE: Weigh this blob against the shape gates and, when it passes, report the notehead's
   //          centre — which is the single number the pitch is read from.
@@ -970,6 +1024,16 @@ class _InkBlob {
         bandFraction: bandFraction,
       );
     }
+    // A BAND TALLER THAN A HEAD IS A BEAM OR A STEM, NOT A HEAD. The upper bound is the gate that
+    // turns a slanted beam's parallelogram into a REFUSAL instead of a pitch at the beam's height —
+    // the one class of error this feature cannot afford, found by engraving a beamed pair.
+    if (bandFraction > thresholds.maxBandHeightFraction) {
+      return _BlobVerdict(
+        rejection: MelodyNoteRejection.tooTall,
+        widthFraction: widthFraction,
+        bandFraction: bandFraction,
+      );
+    }
     if (taper < thresholds.minTaper) {
       return _BlobVerdict(
         rejection: MelodyNoteRejection.notTapered,
@@ -1030,8 +1094,11 @@ class _InkGrid {
     required this.top,
     required this.columns,
     required this.rows,
-  }) : _cells = List<int>.filled(columns * rows, 0),
-       _nibs = List<double>.filled(columns * rows, 0);
+    required List<String> strokeIds,
+  }) : _strokeIds = strokeIds,
+       _cells = List<int>.filled(columns * rows, 0),
+       _nibs = List<double>.filled(columns * rows, 0),
+       _owners = List<int>.filled(columns * rows, 0);
 
   // PURPOSE: Stamp every stroke of [ink] onto a grid that covers the ink with a cell of its own, so
   //          that one pass over cells answers the row questions the gates ask.
@@ -1083,9 +1150,10 @@ class _InkGrid {
       top: minY - cell,
       columns: columns,
       rows: rows,
+      strokeIds: <String>[for (final PageInkStroke stroke in ink) stroke.id],
     );
-    for (final PageInkStroke stroke in ink) {
-      grid._stampStroke(stroke);
+    for (int index = 0; index < ink.length; index++) {
+      grid._stampStroke(ink[index], index);
     }
     grid._clearLongThinRuns(frame, thresholds);
     return grid;
@@ -1171,6 +1239,16 @@ class _InkGrid {
   /// refused: a hairline and a heavy stroke fail the same gate for different reasons.
   final List<double> _nibs;
 
+  /// Which stroke last stamped each cell, as an index into [_strokeIds] plus one; zero means no ink.
+  ///
+  /// Plus one so that the zero value of a filled list means "no owner" without a second list, and a
+  /// cell a stroke never touched costs the same as one it did. See [_stamp] for why the LATER
+  /// stroke's ownership is the one kept.
+  final List<int> _owners;
+
+  /// The ids of the strokes the grid was stamped from, indexed the way [_owners] records them.
+  final List<String> _strokeIds;
+
   /// The x of a column's centre, in the frame's coordinates.
   double xOf(int column) => left + (column + 0.5) * cell;
 
@@ -1189,13 +1267,19 @@ class _InkGrid {
     return row < 0 ? 0 : (row >= rows ? rows - 1 : row);
   }
 
-  /// Marks every cell within [radius] of ([x], [y]) as ink drawn with [nib].
+  /// Marks every cell within [radius] of ([x], [y]) as ink drawn with [nib], owned by [owner].
   ///
   /// A disc rather than a square, because a nib is round and a square stamp would make a diagonal
   /// stroke thicker than a vertical one by the ratio of a diagonal to a side. A radius below half a
   /// cell is raised to half a cell, so that a stroke thinner than the grid still marks the cell it
   /// passes through instead of falling between two of them.
-  void _stamp(double x, double y, double radius, double nib) {
+  ///
+  /// A cell that two strokes both cover records the LATER stroke as its owner. Ownership is therefore
+  /// not a partition of the grid but a witness: a blob's owner set is read from all of its cells, so
+  /// a stroke that crosses another still appears in the set through the cells it was the last to
+  /// touch. That is enough to name the handwriting a note came from, and it costs one int per cell
+  /// instead of a set per cell.
+  void _stamp(double x, double y, double radius, double nib, int owner) {
     final double r = radius < cell / 2 ? cell / 2 : radius;
     final int firstColumn = columnOf(x - r);
     final int lastColumn = columnOf(x + r);
@@ -1208,6 +1292,7 @@ class _InkGrid {
         if (dx * dx + dy * dy <= r * r) {
           final int index = row * columns + column;
           _cells[index] = 1;
+          _owners[index] = owner + 1;
           if (nib > _nibs[index]) {
             _nibs[index] = nib;
           }
@@ -1217,11 +1302,11 @@ class _InkGrid {
   }
 
   /// Stamps one stroke: a disc of its nib at every sample along every segment.
-  void _stampStroke(PageInkStroke stroke) {
+  void _stampStroke(PageInkStroke stroke, int owner) {
     final double radius = stroke.nib / 2;
     final List<LayoutOffset> points = stroke.points;
     if (points.length == 1) {
-      _stamp(points.first.x, points.first.y, radius, stroke.nib);
+      _stamp(points.first.x, points.first.y, radius, stroke.nib, owner);
       return;
     }
     for (int index = 1; index < points.length; index++) {
@@ -1233,7 +1318,7 @@ class _InkGrid {
       final int steps = math.max(1, (length / (cell / 2)).ceil());
       for (int step = 0; step <= steps; step++) {
         final double t = step / steps;
-        _stamp(from.x + dx * t, from.y + dy * t, radius, stroke.nib);
+        _stamp(from.x + dx * t, from.y + dy * t, radius, stroke.nib, owner);
       }
     }
   }
@@ -1311,6 +1396,7 @@ class _InkGrid {
       }
       final List<_InkRow> rowList = <_InkRow>[];
       double widestNib = 0;
+      final Set<int> owners = <int>{};
       for (int row = minRow; row <= maxRow; row++) {
         int first = columns;
         int last = -1;
@@ -1326,9 +1412,19 @@ class _InkGrid {
           continue;
         }
         for (int column = first; column <= last; column++) {
-          final double nib = _nibs[row * columns + column];
+          final int cell = row * columns + column;
+          final double nib = _nibs[cell];
           if (nib > widestNib) {
             widestNib = nib;
+          }
+          // THE OWNER IS READ ONLY WHERE THE CELL IS THIS COMPONENT'S OWN INK, so a stroke that was
+          // emptied out of the grid as a ledger line cannot claim a note through the cells it no
+          // longer occupies.
+          if (labels[cell] == label) {
+            final int owner = _owners[cell];
+            if (owner > 0) {
+              owners.add(owner - 1);
+            }
           }
         }
         rowList.add(
@@ -1339,6 +1435,7 @@ class _InkGrid {
           ),
         );
       }
+      final List<int> ownerOrder = owners.toList()..sort();
       blobs.add(
         _InkBlob(
           rows: rowList,
@@ -1348,6 +1445,10 @@ class _InkGrid {
           width: (maxColumn - minColumn + 1) * cell,
           areaPixels: area * cell * cell,
           widestNib: widestNib,
+          strokeIds: <String>[
+            for (final int owner in ownerOrder)
+              if (owner >= 0 && owner < _strokeIds.length) _strokeIds[owner],
+          ],
         ),
       );
     }

@@ -2826,6 +2826,12 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          draws the handwriting again and leaves every division in the document untouched — so
   //          nothing the switch does can lose a mark, and the switch itself is the undo for a
   //          recognition the musician does not want.
+  //
+  //          THE SWITCH IS NAMED FOR RECOGNITION AS A WHOLE AND READS ONE READER FOR NOW. The glyph
+  //          is a scanner and the row says «Распознавание: ВКЛ/ВЫКЛ», not "bar lines", because the
+  //          control governs recognition as a whole and the note reader hangs off it the moment the
+  //          shape of a recognised note is decided (see `_recogniseWholePage`). A control renamed to
+  //          mean less than it will mean is how a musician turns on the wrong thing.
   // INPUTS: None; reads the library, the selected song and its layer.
   // OUTPUTS: Nothing. The layer's own flag and a screen rebuild; the document changes only by the
   //          `division.set` events the pass appends, each of which undo reverses like any other.
@@ -2860,7 +2866,13 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   // OUTPUTS: How many divisions the document held after the pass. The pass is the layer's own
   //          whole-page recognition, run against the page the screen is currently showing; with no
   //          page drawn yet there is nothing to read and the number is what the document already had.
-  // KEYWORDS: whole-page-pass, on-enable, idempotent, no-crash-without-a-page
+  //
+  //          THE NOTE PASS IS NOT PART OF THIS PASS YET, AND THAT IS A DECISION. `recogniseMelodyNotes`
+  //          exists and is measured, but it writes `(beat, step, pitch)` — the representation the
+  //          owner removed as a class — so running it here would write the shape he rejected into
+  //          his file while its replacement is being decided. See `ink_layer.dart`'s `endStroke`,
+  //          where the same decision is recorded at the call site that will be the one to come back.
+  // KEYWORDS: whole-page-pass, on-enable, idempotent, no-crash-without-a-page, note-pass-deferred
   int _recogniseWholePage(InkCaptureLayer layer, IRealSong entry) {
     final List<PageLayout> pages = _engraved?.pages ?? const <PageLayout>[];
     if (pages.isEmpty) {
@@ -3781,10 +3793,16 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //           live-source, no-cached-document, erase-preview, recognised-ink-hidden, d37
   List<ResolvedInkStroke> _inkStrokes(PageLayout page, InkCaptureLayer layer) {
     final Set<String> erasedPreview = layer.pendingEraseIds;
+    // THE INK OF EVERYTHING RECOGNITION HAS TAKEN OVER, from ONE source: the divisions the document
+    // holds, and the note-reader's own record of which strokes became heads. Both are read only while
+    // the switch is on, and both are decisions made once per frame rather than changes to the
+    // document — so turning the switch off puts every stroke back with nothing to undo, which is the
+    // property D37 rule 1 rests on.
     final Set<String> recognised = _recognitionOn
         ? <String>{
             for (final BarDivision division in layer.documentDivisions)
               if (division.sourceStrokeId.isNotEmpty) division.sourceStrokeId,
+            ...layer.recognisedNoteStrokeIds,
           }
         : const <String>{};
     return <ResolvedInkStroke>[
@@ -4015,6 +4033,24 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
         debugPrint(
           'viewer.select.repaired page=${page.index} what=$repaired '
           'divisions=${layer?.documentDivisions.length}',
+        );
+        return;
+      }
+      // AND THE SAME GESTURE FOR A NOTE, because the reader is the second thing this switch turns
+      // on and a wrong recognition has to cost one or two actions whichever reader made it. A tap
+      // that lands on the ink of a recognised head deletes that note and gives the handwriting back;
+      // a tap that lands on nothing recognised falls through to the selection below, so the tap that
+      // names a bar or a beat is the tap it always was.
+      final String? note = layer?.rejectRecognisedNoteAt(
+        page: page,
+        surfacePoint: surface,
+      );
+      if (note != null) {
+        setState(() {});
+        publishInkStateWhenIdle();
+        debugPrint(
+          'viewer.select.repaired page=${page.index} what=$note '
+          'notes_ink=${layer?.recognisedNoteStrokeIds.length}',
         );
         return;
       }
@@ -5283,7 +5319,15 @@ class _IRealViewerScreenState extends State<IRealViewerScreen> {
   //          without counting the list.
   // INPUTS: context — the build context.
   // OUTPUTS: A one-line status bar.
-  // KEYWORDS: status-bar, summary, playlist-name
+  //
+  //          THE HONEST BOUND OF NOTE RECOGNITION USED TO BE A SECOND LINE HERE — «Распознавание
+  //          читает только высоту: длительность и знак не читаются.» — and it is gone for a reason
+  //          rather than for space: the note reader is not wired to the switch yet (see
+  //          `_recogniseWholePage`), so while only divisions are recognised that sentence would be
+  //          describing a reader that is not running. It comes back WITH the call site, in the same
+  //          change, because a recognised note is drawn as a quarter and nothing on the page can say
+  //          that its rhythm was not read.
+  // KEYWORDS: status-bar, summary, playlist-name, honest-bound-deferred
   Widget _buildStatusBar(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final IRealLibrary? library = _library;
