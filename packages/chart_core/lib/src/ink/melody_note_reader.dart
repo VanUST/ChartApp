@@ -364,11 +364,15 @@ class MelodyStaffFrame {
 
   /// The column a head centred at [x] stands in, or null when it stands in none of them.
   ///
-  /// The column CONTAINING x is taken first; a head drawn half in one column and half in the next
-  /// belongs to the one its centre is in. Only when the centre lies outside every column — in the
-  /// bar's padding, or on the barline — does the nearest column win, and the reader reports that
-  /// as a placement rather than as a note at a beat, because a head in the padding was not written
-  /// at a beat.
+  /// The column CONTAINING x is taken, boundary inclusive on the left and exclusive on the right so
+  /// that two adjacent columns cannot both claim a head exactly on their shared edge. A head drawn
+  /// half in one column and half in the next belongs to the one its centre is in.
+  ///
+  /// NULL IS A REAL ANSWER AND NOT A NEAREST GUESS. A head in the bar's padding, on the barline or
+  /// outside the bar was not written at a beat, and claiming the nearest one would put a note on the
+  /// page that the musician did not write — the same reasoning that makes a stroke the page cannot
+  /// place a refusal rather than a fabricated rectangle. The caller reports it as
+  /// [MelodyNoteRejection.beyondTheBar].
   MelodyBeatColumn? columnAt(double x) {
     for (final MelodyBeatColumn column in beatColumns) {
       if (x >= column.left && x < column.right) {

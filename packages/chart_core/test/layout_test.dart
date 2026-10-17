@@ -1,4 +1,4 @@
-﻿// PURPOSE: Pin the layout pipeline's behaviour with exact geometry. Because the engine takes its
+// PURPOSE: Pin the layout pipeline's behaviour with exact geometry. Because the engine takes its
 //          text metrics as an input, every number below is arithmetic rather than a font
 //          measurement, so an expectation can be derived by hand and a failure names a real
 //          regression instead of a font-version difference.

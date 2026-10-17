@@ -103,7 +103,9 @@ class LayoutStyle {
   /// [`beatMarkMinCellWidth`] is 18 for the same reason and says so: a four-beat bar must have room
   /// to name its beats, and the two values were documented as "the same" while one of them was not.
   ///
-  /// THE MARGIN IS PROTECTED BY A CHECK, NOT BY THIS COMMENT: `melody_cell_width_test.dart` asserts
+  /// THE MARGIN IS PROTECTED BY A CHECK, NOT BY THIS COMMENT: the case `the default leaves the
+  /// noteheads apart, and the margin is checked` in
+  /// `chart_core/test/melody_note_reader_test.dart` asserts
   /// that this value stays at least 2.4 pixels above `MelodyMetrics.noteheadWidth ×
   /// melodyStaffSpace`, so a narrower default or a larger notehead fails the suite instead of
   /// silently merging two notes on the page.
